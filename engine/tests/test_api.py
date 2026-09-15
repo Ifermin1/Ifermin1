@@ -114,3 +114,15 @@ def test_parse_accounts_old_and_new_format():
     assert [(a.account_id, a.balance, a.connected) for a in old] == [("Sim101", 50000.0, None), ("Sim102", 25000.0, None)]
     new = NinjaZmqBridge.parse_accounts("Sim101|50000.00|Connected|MFF;APEX-1|0.00|Disconnected|APEX TRADOVATE;basura;x|nan|")
     assert [(a.account_id, a.connected, a.connection) for a in new][:2] == [("Sim101", True, "MFF"), ("APEX-1", False, "APEX TRADOVATE")]
+
+
+async def test_addon_upgrade_detected_from_heartbeat(container):
+    """Si el engine arrancó con el addon antiguo y luego se actualiza, vuelve a pedir GET_ACCOUNTS_ALL."""
+    from tradepilot.core.events import EventBus
+    from tradepilot.infrastructure.brokers.ninja_zmq import NinjaZmqBridge
+    b = NinjaZmqBridge(EventBus())
+    b._supports_all = False
+    b._retry_all_at = 10**12
+    container.replication.bridge = b
+    await container.replication.process_master_event({"msg_type": "HEARTBEAT", "account": "Sim101", "version": "1.1"})
+    assert b._supports_all is True and b.health.addon_version == "1.1"

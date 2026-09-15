@@ -99,6 +99,8 @@ class ReplicationService:
             self.bridge.health.last_heartbeat = datetime.now()
             if data.get("account"):
                 self.bridge.health.master_account = str(data["account"])
+            if data.get("version"):
+                self.bridge.note_addon_version(str(data["version"]))
             return []
         if msg_type == MSG_PRICE:
             await self.bus.publish(TOPIC_PRICE, data)

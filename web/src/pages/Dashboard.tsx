@@ -28,7 +28,7 @@ export function Dashboard() {
       <Card title="Puente con el bróker">
         {b ? (
           <div className="kv">
-            <div><span>Modo</span><b>{b.mode === "mock" ? "Simulador" : "NinjaTrader (ZMQ)"}</b></div>
+            <div><span>Modo</span><b>{b.mode === "mock" ? "Simulador" : `NinjaTrader (ZMQ)${b.addon_version ? ` · addon v${b.addon_version}` : " · addon antiguo"}`}</b></div>
             <div><span>Feed maestro (5555)</span><b className={b.master_feed_up ? "ok" : "bad"}>{b.master_feed_up ? "arriba" : "caído"}</b></div>
             <div><span>Ejecutor (5556)</span><b className={b.follower_feed_up ? "ok" : "bad"}>{b.follower_feed_up ? "arriba" : "caído"}</b></div>
             <div><span>Sync cuentas (5557)</span><b className={b.sync_up ? "ok" : "bad"}>{b.sync_up ? "arriba" : "caído"}</b></div>

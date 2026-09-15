@@ -22,6 +22,10 @@ class BrokerBridge(ABC):
     @abstractmethod
     async def stop(self) -> None: ...
 
+    def note_addon_version(self, version: str) -> None:
+        """El addon anuncia su versión en el HEARTBEAT; las implementaciones pueden reaccionar."""
+        self.health.addon_version = version
+
     @abstractmethod
     async def get_accounts(self) -> list[BrokerAccount]:
         """Cuentas que el bróker conoce (conectadas o no, si el addon lo soporta)."""

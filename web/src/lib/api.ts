@@ -4,7 +4,7 @@
 export type Health = {
   app: string; mode: "mock" | "ninja";
   bridge: { mode: string; connected: boolean; last_msg_in: string | null; last_msg_out: string | null;
-            last_sync: string | null; last_heartbeat: string | null; master_account: string | null; error_count: number; master_feed_up: boolean; follower_feed_up: boolean; sync_up: boolean };
+            last_sync: string | null; last_heartbeat: string | null; master_account: string | null; addon_version: string | null; error_count: number; master_feed_up: boolean; follower_feed_up: boolean; sync_up: boolean };
   risk: RiskState; stats: { events_in: number; orders_out: number; blocked: number; errors: number; rejected: number; fills: number; duplicates: number }; ws_clients: number;
 };
 export type Position = { account_id: string; symbol: string; quantity: number; avg_price: number; unrealized_pnl: number };

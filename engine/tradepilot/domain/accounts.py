@@ -12,6 +12,7 @@ class BridgeHealth(DomainModel):
     last_sync: Optional[datetime] = None
     last_heartbeat: Optional[datetime] = None
     master_account: Optional[str] = None   # la publica el addon en cada HEARTBEAT
+    addon_version: Optional[str] = None    # >= 1.1 anuncia versión en el HEARTBEAT
     error_count: int = 0
     master_feed_up: bool = False     # SUB 5555
     follower_feed_up: bool = False   # PUB 5556

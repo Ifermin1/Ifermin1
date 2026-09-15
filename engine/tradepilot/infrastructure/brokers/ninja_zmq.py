@@ -9,6 +9,7 @@ Protocolo (sin cambios respecto a la versión anterior):
 import asyncio
 import json
 import sys
+import time
 from datetime import datetime
 
 import zmq
@@ -33,6 +34,7 @@ class NinjaZmqBridge(BrokerBridge):
         self._listen_task: asyncio.Task | None = None
         self._req_lock = asyncio.Lock()
         self._supports_all = True   # se desactiva si el addon no conoce GET_ACCOUNTS_ALL
+        self._retry_all_at = 0.0    # cuándo volver a probar GET_ACCOUNTS_ALL (el addon puede actualizarse en caliente)
 
     async def start(self) -> None:
         host = settings.ZMQ_HOST
@@ -92,6 +94,8 @@ class NinjaZmqBridge(BrokerBridge):
     async def get_accounts(self) -> list[BrokerAccount]:
         if not self._running:
             return []
+        if not self._supports_all and time.monotonic() >= self._retry_all_at:
+            self._supports_all = True   # reintento periódico por si el addon se actualizó
         request = "GET_ACCOUNTS_ALL" if self._supports_all else "GET_ACCOUNTS"
         async with self._req_lock:
             try:
@@ -116,8 +120,9 @@ class NinjaZmqBridge(BrokerBridge):
         if response.startswith("ERROR|"):
             if self._supports_all:
                 self._supports_all = False
-                logger.warning("El addon no soporta GET_ACCOUNTS_ALL (versión antigua): solo se verán las cuentas "
-                               "conectadas. Actualiza ninjatrader/TradePilotXBridge.cs para ver todas.")
+                self._retry_all_at = time.monotonic() + 60
+                self._warn_once("El addon no soporta GET_ACCOUNTS_ALL (versión antigua): solo se verán las cuentas "
+                                "conectadas. Actualiza ninjatrader/TradePilotXBridge.cs para ver todas.")
                 return await self.get_accounts()
             self._warn_once(f"Respuesta de error del addon: {response}")
             return []
@@ -150,6 +155,14 @@ class NinjaZmqBridge(BrokerBridge):
         return accounts
 
     _last_warning: str | None = None
+
+    def note_addon_version(self, version: str) -> None:
+        if self.health.addon_version != version:
+            logger.info(f"Addon de NinjaTrader v{version} detectado")
+        super().note_addon_version(version)
+        if not self._supports_all:
+            self._supports_all = True   # v1.1+ soporta GET_ACCOUNTS_ALL: reintentar ya
+            self._last_warning = None
 
     def _warn_once(self, msg: str) -> None:
         if msg != self._last_warning:
