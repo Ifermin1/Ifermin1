@@ -46,6 +46,12 @@ class SQLiteStore:
                 );
                 """
             )
+            # migraciones ligeras
+            cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(accounts)").fetchall()}
+            if "enabled_source" not in cols:
+                self._conn.execute("ALTER TABLE accounts ADD COLUMN enabled_source TEXT DEFAULT 'auto'")
+            if "last_connected" not in cols:
+                self._conn.execute("ALTER TABLE accounts ADD COLUMN last_connected TEXT")
 
     # ---- reglas ----
     def get_all_rules(self) -> list[ReplicationRule]:
@@ -110,18 +116,25 @@ class SQLiteStore:
             rows = self._conn.execute("SELECT * FROM accounts ORDER BY account_id").fetchall()
         return [dict(r) for r in rows]
 
-    def upsert_account_seen(self, account_id: str, balance: float, when: str) -> None:
+    def upsert_account_seen(self, account_id: str, balance: float, when: str, enabled: bool,
+                            connected: bool | None) -> None:
         with self._lock, self._conn:
             self._conn.execute(
-                "INSERT INTO accounts (account_id, enabled, alias, first_seen, last_seen, last_balance) VALUES (?, 1, '', ?, ?, ?) "
-                "ON CONFLICT(account_id) DO UPDATE SET last_seen = excluded.last_seen, last_balance = excluded.last_balance",
-                (account_id, when, when, balance))
+                "INSERT INTO accounts (account_id, enabled, enabled_source, alias, first_seen, last_seen, last_balance, last_connected) "
+                "VALUES (?, ?, 'auto', '', ?, ?, ?, ?) "
+                "ON CONFLICT(account_id) DO UPDATE SET last_seen = excluded.last_seen, last_balance = excluded.last_balance, "
+                "last_connected = COALESCE(excluded.last_connected, accounts.last_connected), "
+                "enabled = CASE WHEN accounts.enabled_source = 'user' THEN accounts.enabled ELSE excluded.enabled END",
+                (account_id, enabled, when, when, balance, when if connected else None))
 
-    def set_account_settings(self, account_id: str, enabled: bool | None = None, alias: str | None = None) -> None:
+    def set_account_settings(self, account_id: str, enabled: bool | None = None, alias: str | None = None,
+                             source: str | None = None) -> None:
         with self._lock, self._conn:
             self._conn.execute("INSERT OR IGNORE INTO accounts (account_id, enabled, alias) VALUES (?, 1, '')", (account_id,))
             if enabled is not None:
                 self._conn.execute("UPDATE accounts SET enabled = ? WHERE account_id = ?", (enabled, account_id))
+            if source is not None:
+                self._conn.execute("UPDATE accounts SET enabled_source = ? WHERE account_id = ?", (source, account_id))
             if alias is not None:
                 self._conn.execute("UPDATE accounts SET alias = ? WHERE account_id = ?", (alias, account_id))
 

@@ -85,6 +85,21 @@ async def test_account_management(client: AsyncClient, container):
     accts = {a["account_id"]: a for a in (await client.get("/api/accounts")).json()}
     assert accts["Sim103"]["connected"] is False and accts["Sim101"]["connected"] is True
     assert accts["Sim101"]["connection"] == "Simulación"
+    # política auto: desconectada => oculta; al conectarse se activa sola
+    assert accts["Sim103"]["enabled"] is False and accts["Sim103"]["enabled_source"] == "auto"
+    container.bridge.disconnected.clear()
+    await container.accounts.sync_once()
+    assert container.accounts.accounts["Sim103"].enabled is True
+    container.bridge.disconnected.add("Sim103")
+    await container.accounts.sync_once()
+    assert container.accounts.accounts["Sim103"].enabled is False
+    # fijada a mano: se mantiene activa aunque esté desconectada
+    r = await client.patch("/api/accounts/Sim103", json={"enabled": True})
+    assert r.json()["enabled_source"] == "user"
+    await container.accounts.sync_once()
+    assert container.accounts.accounts["Sim103"].enabled is True
+    r = await client.patch("/api/accounts/Sim103", json={"auto": True})
+    assert r.json()["enabled"] is False and r.json()["enabled_source"] == "auto"
 
     r = await client.patch("/api/accounts/Sim103", json={"enabled": False, "alias": "Eval MFF"})
     assert r.json()["enabled"] is False and r.json()["alias"] == "Eval MFF"

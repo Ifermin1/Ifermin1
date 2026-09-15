@@ -22,7 +22,10 @@ import zmq
 
 ACCOUNTS = {"Sim101": 50000.0, "Sim102": 25000.0}
 # cuentas que NinjaTrader conoce pero no están conectadas ahora (solo salen con GET_ACCOUNTS_ALL)
-OFFLINE = {"APEX-112924-1": 0.0, "MFFUEVREOD": 50162.72}
+OFFLINE = {"APEX-112924-1": 0.0, "MFFUEVREOD": 50162.72, "Backtest": 0.0, "Playback101": 0.0}
+# NinjaTrader recuerda todas las cuentas históricas: simulamos un usuario con muchas evaluaciones
+OFFLINE.update({f"APEX-112924-{i}": 0.0 for i in range(86, 250)})
+OFFLINE.update({f"NarvaezIbrahimUPTN{i}": 0.0 for i in range(91021, 91060)})
 CONNECTION = "MFF"
 MASTER = "Sim101"
 SYMBOL = "NQ 12-26"

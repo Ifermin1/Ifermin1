@@ -23,7 +23,8 @@ class AccountService:
         for row in (store.get_accounts() if store else []):
             self.accounts[row["account_id"]] = AccountSnapshot(
                 account_id=row["account_id"], balance=row["last_balance"] or 0.0, net_liquidity=row["last_balance"] or 0.0,
-                enabled=bool(row["enabled"]), alias=row["alias"] or "", reported=False,
+                enabled=bool(row["enabled"]), enabled_source=row["enabled_source"] or "auto",
+                alias=row["alias"] or "", reported=False,
                 updated_at=datetime.fromisoformat(row["last_seen"]) if row["last_seen"] else datetime.now())
         self._task: asyncio.Task | None = None
         self._running = False
@@ -41,41 +42,72 @@ class AccountService:
         data = await self.bridge.get_accounts()
         now = datetime.now()
         reported = {a.account_id for a in data}
+        new_hidden = 0
         for info in data:
+            # Política "auto": una cuenta está activa mientras esté conectada. Si el addon no informa
+            # del estado (versión antigua) todo lo reportado cuenta como conectado.
+            auto_enabled = True if info.connected is None else info.connected
             snap = self.accounts.get(info.account_id)
             if snap is None:
-                snap = self.accounts[info.account_id] = AccountSnapshot(account_id=info.account_id, updated_at=now)
-                logger.info(f"Cuenta nueva detectada: {info.account_id} ({info.connection or 'sin conexión'})")
+                snap = self.accounts[info.account_id] = AccountSnapshot(account_id=info.account_id, updated_at=now,
+                                                                        enabled=auto_enabled)
+                if auto_enabled:
+                    logger.info(f"Cuenta conectada detectada: {info.account_id} ({info.connection or 'sin conexión'})")
+                else:
+                    new_hidden += 1
+            elif snap.enabled_source == "auto" and snap.enabled != auto_enabled:
+                snap.enabled = auto_enabled
+                logger.info(f"Cuenta {info.account_id} {'activada (conectada)' if auto_enabled else 'oculta (desconectada)'}")
             snap.balance = snap.net_liquidity = info.balance
             snap.connected, snap.connection, snap.reported, snap.updated_at = info.connected, info.connection, True, now
             if self.store:
-                self.store.upsert_account_seen(info.account_id, info.balance, now.isoformat())
+                self.store.upsert_account_seen(info.account_id, info.balance, now.isoformat(), snap.enabled, info.connected)
+        if new_hidden:
+            logger.info(f"{new_hidden} cuentas nuevas sin conexión quedan ocultas (se activan solas al conectarse)")
         if data:
             for acc, snap in self.accounts.items():
                 if acc not in reported:
                     snap.reported = False
                     snap.connected = False if snap.connected is not None else None
+                    if snap.enabled_source == "auto" and snap.enabled:
+                        snap.enabled = False
+                        if self.store:
+                            self.store.set_account_settings(acc, enabled=False)
             await self.publish_accounts()
         await self.bus.publish(TOPIC_HEALTH, self.health().model_dump(mode="json"))
 
-    async def publish_accounts(self) -> None:
-        await self.bus.publish(TOPIC_ACCOUNTS, [a.model_dump(mode="json") for a in self.accounts.values()])
+    _last_signature: tuple | None = None
+
+    async def publish_accounts(self, force: bool = False) -> None:
+        """Publica el snapshot solo si cambió algo relevante (con cientos de cuentas importa)."""
+        sig = tuple((a.account_id, a.balance, a.connected, a.enabled, a.alias, a.reported,
+                     tuple((p.symbol, p.quantity) for p in a.open_positions)) for a in self.accounts.values())
+        if force or sig != self._last_signature:
+            self._last_signature = sig
+            await self.bus.publish(TOPIC_ACCOUNTS, [a.model_dump(mode="json") for a in self.accounts.values()])
 
     # ---- gestión desde la consola ----
     def is_enabled(self, account_id: str) -> bool:
         snap = self.accounts.get(account_id)
         return True if snap is None else snap.enabled
 
-    async def set_settings(self, account_id: str, enabled: bool | None = None, alias: str | None = None) -> AccountSnapshot:
+    async def set_settings(self, account_id: str, enabled: bool | None = None, alias: str | None = None,
+                           auto: bool = False) -> AccountSnapshot:
+        """enabled fija la cuenta a mano (source=user); auto=True vuelve a la política automática."""
         snap = self.accounts.get(account_id)
         if snap is None:
             snap = self.accounts[account_id] = AccountSnapshot(account_id=account_id, reported=False, updated_at=datetime.now())
-        if enabled is not None:
+        source = None
+        if auto:
+            snap.enabled_source = source = "auto"
+            snap.enabled = enabled = bool(snap.connected) if snap.connected is not None else snap.reported
+        elif enabled is not None:
             snap.enabled = enabled
+            snap.enabled_source = source = "user"
         if alias is not None:
             snap.alias = alias.strip()
         if self.store:
-            self.store.set_account_settings(account_id, enabled, alias)
+            self.store.set_account_settings(account_id, enabled, alias, source)
         await self.publish_accounts()
         return snap
 

@@ -48,3 +48,4 @@ class LinkRequest(BaseModel):
 class AccountSettings(BaseModel):
     enabled: Optional[bool] = None
     alias: Optional[str] = Field(default=None, max_length=40)
+    auto: bool = False   # volver a la política automática (activa = conectada)

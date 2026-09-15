@@ -33,7 +33,7 @@ def accounts(request: Request):
 @router.patch("/accounts/{account_id}")
 async def account_settings(account_id: str, body: AccountSettings, request: Request):
     """Activar/desactivar una cuenta o ponerle alias desde la consola."""
-    return await _c(request).accounts.set_settings(account_id, body.enabled, body.alias)
+    return await _c(request).accounts.set_settings(account_id, body.enabled, body.alias, body.auto)
 
 
 @router.delete("/accounts/{account_id}", status_code=204)

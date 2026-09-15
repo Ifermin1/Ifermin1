@@ -9,7 +9,7 @@ export type Health = {
 };
 export type Position = { account_id: string; symbol: string; quantity: number; avg_price: number; unrealized_pnl: number };
 export type Account = { account_id: string; balance: number; net_liquidity: number; daily_pnl: number; open_positions: Position[]; updated_at: string;
-                        enabled: boolean; alias: string; connected: boolean | null; connection: string; reported: boolean };
+                        enabled: boolean; enabled_source: "auto" | "user"; alias: string; connected: boolean | null; connection: string; reported: boolean };
 export type Rule = { id: string; master_account: string; follower_account: string; multiplier: number;
                      symbol_filter: string | null; enabled: boolean };
 export type AuditEvent = { id: number | null; timestamp: string; event_type: string; source_account: string | null;
@@ -47,7 +47,7 @@ export function makeClient(s: Session) {
     createRule: (b: Omit<Rule, "id">) => req<Rule>("/api/rules", { method: "POST", body: JSON.stringify(b) }),
     updateRule: (id: string, b: Partial<Rule>) => req<Rule>(`/api/rules/${id}`, { method: "PATCH", body: JSON.stringify(b) }),
     deleteRule: (id: string) => req<void>(`/api/rules/${id}`, { method: "DELETE" }),
-    setAccount: (id: string, body: { enabled?: boolean; alias?: string }) =>
+    setAccount: (id: string, body: { enabled?: boolean; alias?: string; auto?: boolean }) =>
       req<Account>(`/api/accounts/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) }),
     forgetAccount: (id: string) => req<void>(`/api/accounts/${encodeURIComponent(id)}`, { method: "DELETE" }),
     link: (follower: string, master_account: string, multiplier: number, enabled: boolean) =>

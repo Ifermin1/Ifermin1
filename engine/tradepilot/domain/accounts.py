@@ -44,6 +44,7 @@ class AccountSnapshot(DomainModel):
     updated_at: datetime
     # gestión desde la consola
     enabled: bool = True               # desactivada = oculta y nunca recibe copias
+    enabled_source: str = "auto"       # "auto": sigue el estado de conexión; "user": fijada a mano
     alias: str = ""
     connected: Optional[bool] = None
     connection: str = ""

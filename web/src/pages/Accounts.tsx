@@ -20,6 +20,8 @@ export function Accounts() {
   const detected = health?.bridge.master_account ?? null;
   const [master, setMaster] = useState<string>(detected ?? "");
   const [manage, setManage] = useState(false);
+  const [q, setQ] = useState("");
+  const [filter, setFilter] = useState<"connected" | "enabled" | "all">("connected");
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => { if (detected && !master) setMaster(detected); }, [detected, master]);
@@ -40,6 +42,7 @@ export function Accounts() {
   });
   const remove = (acc: string) => guard(acc, async () => { const id = linkOf(acc)?.id; await client!.unlink(acc, master); setRules(rules.filter((r) => r.id !== id)); });
   const setEnabled = (acc: string, enabled: boolean) => guard(acc, async () => { await client!.setAccount(acc, { enabled }); });
+  const setAuto = (acc: string) => guard(acc, async () => { await client!.setAccount(acc, { auto: true }); });
   const setAlias = (acc: string, alias: string) => guard(acc, async () => { await client!.setAccount(acc, { alias }); });
   const forget = (acc: string) => guard(acc, async () => { if (confirm(`¿Olvidar ${acc}? Volverá a aparecer si NinjaTrader la reporta.`)) await client!.forgetAccount(acc); });
 
@@ -48,6 +51,13 @@ export function Accounts() {
   const hidden = accounts.filter((a) => !a.enabled).length;
   const linked = followers.filter((a) => linkOf(a.account_id)?.enabled).length;
   const connectedCount = accounts.filter((a) => a.connected).length;
+  const enabledCount = accounts.filter((a) => a.enabled).length;
+  const rank = (a: Account) => (a.connected ? 0 : a.enabled ? 1 : a.reported ? 2 : 3);
+  const needle = q.trim().toLowerCase();
+  const managed = accounts
+    .filter((a) => filter === "all" || (filter === "connected" ? !!a.connected : a.enabled))
+    .filter((a) => !needle || a.account_id.toLowerCase().includes(needle) || a.alias.toLowerCase().includes(needle) || a.connection.toLowerCase().includes(needle))
+    .sort((x, y) => rank(x) - rank(y) || x.account_id.localeCompare(y.account_id));
 
   return (
     <div className="grid">
@@ -106,14 +116,23 @@ export function Accounts() {
       </Card>
 
       {manage && (
-        <Card title={`Todas las cuentas · ${accounts.length} conocidas, ${connectedCount} conectadas`}>
-          <p className="muted small">Lo que NinjaTrader conoce en tu sesión, conectado o no. Una cuenta desactivada no aparece arriba y nunca recibe copias. El alias es solo para ti.</p>
+        <Card title={`Todas las cuentas · ${accounts.length} conocidas, ${connectedCount} conectadas, ${enabledCount} activas`}>
+          <p className="muted small">Todo lo que NinjaTrader conoce, conectado o no. Por defecto una cuenta está <b>activa mientras está conectada</b> y se oculta al desconectarse (modo <i>auto</i>). Si tocas su interruptor queda fijada a mano; con <i>auto</i> vuelve a la política automática. Una cuenta oculta nunca recibe copias.</p>
+          <div className="manage-bar">
+            <input placeholder="Buscar cuenta, alias o conexión…" value={q} onChange={(e) => setQ(e.target.value)} />
+            <div className="chips">
+              {([["connected", `Conectadas (${connectedCount})`], ["enabled", `Activas (${enabledCount})`], ["all", `Todas (${accounts.length})`]] as const).map(([k, l]) => (
+                <button key={k} className={`chip-btn ${filter === k ? "active" : ""}`} onClick={() => setFilter(k)}>{l}</button>))}
+            </div>
+          </div>
+          {managed.length === 0 && <Empty>Nada que mostrar con este filtro.</Empty>}
           <div className="table-wrap"><table className="manage">
             <thead><tr><th>Activa</th><th>Cuenta</th><th>Alias</th><th>Conexión</th><th className="num">Saldo</th><th>Vista</th><th></th></tr></thead>
-            <tbody>{accounts.map((a) => (
+            <tbody>{managed.slice(0, 300).map((a) => (
               <tr key={a.account_id} className={a.enabled ? "" : "off"}>
-                <td><label className="switch small"><input type="checkbox" checked={a.enabled} disabled={busy === a.account_id || a.account_id === master}
-                  onChange={(e) => void setEnabled(a.account_id, e.target.checked)} /><span /></label></td>
+                <td><div className="act-cell"><label className="switch small"><input type="checkbox" checked={a.enabled} disabled={busy === a.account_id || a.account_id === master}
+                  onChange={(e) => void setEnabled(a.account_id, e.target.checked)} /><span /></label>
+                  {a.enabled_source === "user" ? <button className="link tiny" title="Volver a automático" onClick={() => void setAuto(a.account_id)}>fijada · auto</button> : <span className="muted tiny">auto</span>}</div></td>
                 <td><b>{a.account_id}</b>{a.account_id === master && <span className="badge ok">maestra</span>}</td>
                 <td><input className="alias" defaultValue={a.alias} placeholder="p. ej. Eval MFF 50k" maxLength={40}
                   onBlur={(e) => { if (e.target.value !== a.alias) void setAlias(a.account_id, e.target.value); }} /></td>
@@ -124,6 +143,7 @@ export function Accounts() {
               </tr>
             ))}</tbody>
           </table></div>
+          {managed.length > 300 && <p className="muted small">Mostrando 300 de {managed.length}. Afina la búsqueda.</p>}
         </Card>
       )}
     </div>
