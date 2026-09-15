@@ -50,7 +50,7 @@ Componentes:
    - Recuerda la URL del engine y el token; reconecta el WebSocket sola.
    - La API nunca se cachea: siempre datos en vivo.
 
-3. **Acceso remoto**. El engine no debe abrirse a Internet directamente. Dos opciones, ambas sin abrir puertos en el router:
+3. **Acceso remoto** (fase posterior; mientras se prueba, todo va por la Wi-Fi local con la IP del PC). El engine no debe abrirse a Internet directamente. Dos opciones, ambas sin abrir puertos en el router:
    - **Cloudflare Tunnel** (recomendado si quieres una URL tipo `https://tradepilot.tudominio.com` con HTTPS gratis y, opcionalmente, login de Cloudflare Access delante). `cloudflared tunnel --url http://localhost:8000`.
    - **Tailscale** (VPN privada; el teléfono y el PC quedan en la misma red virtual). Más simple, sin dominio, pero hay que instalar Tailscale en cada dispositivo.
 

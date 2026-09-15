@@ -5,6 +5,7 @@ from loguru import logger
 
 from tradepilot.core.config import Settings, settings as default_settings
 from tradepilot.core.events import EventBus
+from tradepilot.core.netinfo import console_urls
 from tradepilot.infrastructure.brokers.base import BrokerBridge
 from tradepilot.infrastructure.persistence.sqlite_store import SQLiteStore
 from tradepilot.services.account_service import AccountService
@@ -30,6 +31,13 @@ class Container:
         await self.accounts.start()
         self.audit.log("ENGINE_START", f"Engine iniciado en modo {self.settings.ENGINE_MODE}")
         logger.info(f"TradePilot X engine listo (modo={self.settings.ENGINE_MODE})")
+        if self.settings.API_HOST in ("0.0.0.0", "::"):
+            urls = console_urls(self.settings.API_PORT)
+            logger.info("Consola disponible en: " + "  |  ".join(urls))
+            if len(urls) > 1:
+                logger.info(f"Desde el teléfono (misma Wi-Fi) abre {urls[1]} y usa el API_TOKEN del .env")
+        if self.settings.API_TOKEN == "cambiame":
+            logger.warning("API_TOKEN sigue siendo el valor por defecto; cámbialo en engine/.env antes de exponer el engine")
 
     async def stop(self) -> None:
         await self.accounts.stop()
