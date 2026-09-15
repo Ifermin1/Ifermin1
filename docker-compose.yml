@@ -1,0 +1,13 @@
+services:
+  tradepilot:
+    build: .
+    ports: ["8000:8000"]
+    environment:
+      ENGINE_MODE: ${ENGINE_MODE:-mock}
+      API_TOKEN: ${API_TOKEN:-cambiame}
+      ZMQ_HOST: ${ZMQ_HOST:-host.docker.internal}
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    volumes: ["tradepilot-data:/data"]
+    restart: unless-stopped
+volumes:
+  tradepilot-data:

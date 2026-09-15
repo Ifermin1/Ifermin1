@@ -1,0 +1,114 @@
+import json
+import sqlite3
+import threading
+from datetime import datetime
+from pathlib import Path
+
+from tradepilot.domain.audit import AuditEvent
+from tradepilot.domain.replication import ReplicationRule
+from tradepilot.domain.risk import RiskLimit
+
+
+class SQLiteStore:
+    """Persistencia local del engine. Una sola conexión protegida por lock:
+    el volumen es bajo y así evitamos "database is locked"."""
+
+    def __init__(self, db_path: str = "data/tradepilot.db") -> None:
+        self.db_path = Path(db_path)
+        if str(db_path) != ":memory:":
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        self._conn.row_factory = sqlite3.Row
+        self._lock = threading.Lock()
+        self._init_db()
+
+    def _init_db(self) -> None:
+        with self._lock, self._conn:
+            self._conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS replication_rules (
+                    id TEXT PRIMARY KEY, master_account TEXT, follower_account TEXT,
+                    multiplier REAL, symbol_filter TEXT, enabled BOOLEAN
+                );
+                CREATE TABLE IF NOT EXISTS audit_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, event_type TEXT,
+                    source_account TEXT, target_account TEXT, message TEXT, details TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_logs(timestamp DESC);
+                CREATE TABLE IF NOT EXISTS risk_limits (
+                    account_id TEXT PRIMARY KEY, max_daily_loss REAL, max_position_size INTEGER,
+                    trading_halted BOOLEAN
+                );
+                CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);
+                """
+            )
+
+    # ---- reglas ----
+    def get_all_rules(self) -> list[ReplicationRule]:
+        with self._lock:
+            rows = self._conn.execute("SELECT * FROM replication_rules").fetchall()
+        return [ReplicationRule(id=r["id"], master_account=r["master_account"],
+                                follower_account=r["follower_account"], multiplier=r["multiplier"],
+                                symbol_filter=r["symbol_filter"] or None, enabled=bool(r["enabled"])) for r in rows]
+
+    def save_rule(self, rule: ReplicationRule) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO replication_rules VALUES (?, ?, ?, ?, ?, ?)",
+                (rule.id, rule.master_account, rule.follower_account, rule.multiplier, rule.symbol_filter, rule.enabled),
+            )
+
+    def delete_rule(self, rule_id: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM replication_rules WHERE id = ?", (rule_id,))
+
+    # ---- auditoría ----
+    def save_audit(self, event: AuditEvent) -> int:
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "INSERT INTO audit_logs (timestamp, event_type, source_account, target_account, message, details) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (event.timestamp.isoformat(), event.event_type, event.source_account, event.target_account,
+                 event.message, json.dumps(event.details) if event.details else None),
+            )
+            return int(cur.lastrowid)
+
+    def get_recent_audits(self, limit: int = 50, event_type: str | None = None) -> list[AuditEvent]:
+        sql = "SELECT * FROM audit_logs"
+        params: tuple = ()
+        if event_type:
+            sql += " WHERE event_type = ?"
+            params = (event_type,)
+        sql += " ORDER BY id DESC LIMIT ?"
+        with self._lock:
+            rows = self._conn.execute(sql, params + (limit,)).fetchall()
+        return [AuditEvent(id=r["id"], timestamp=datetime.fromisoformat(r["timestamp"]), event_type=r["event_type"],
+                           source_account=r["source_account"], target_account=r["target_account"],
+                           message=r["message"], details=json.loads(r["details"]) if r["details"] else None)
+                for r in rows]
+
+    # ---- riesgo ----
+    def get_risk_limits(self) -> list[RiskLimit]:
+        with self._lock:
+            rows = self._conn.execute("SELECT * FROM risk_limits").fetchall()
+        return [RiskLimit(account_id=r["account_id"], max_daily_loss=r["max_daily_loss"] or 0.0,
+                          max_position_size=r["max_position_size"] or 0, trading_halted=bool(r["trading_halted"]))
+                for r in rows]
+
+    def save_risk_limit(self, limit: RiskLimit) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("INSERT OR REPLACE INTO risk_limits VALUES (?, ?, ?, ?)",
+                               (limit.account_id, limit.max_daily_loss, limit.max_position_size, limit.trading_halted))
+
+    def get_kv(self, key: str, default: str | None = None) -> str | None:
+        with self._lock:
+            row = self._conn.execute("SELECT value FROM kv WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else default
+
+    def set_kv(self, key: str, value: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("INSERT OR REPLACE INTO kv VALUES (?, ?)", (key, value))
+
+    def close(self) -> None:
+        with self._lock:
+            self._conn.close()
