@@ -43,3 +43,8 @@ class LinkRequest(BaseModel):
     master_account: str = Field(min_length=1)
     multiplier: float = Field(default=1.0, gt=0)
     enabled: bool = True
+
+
+class AccountSettings(BaseModel):
+    enabled: Optional[bool] = None
+    alias: Optional[str] = Field(default=None, max_length=40)

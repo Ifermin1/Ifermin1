@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
 from tradepilot.core.events import EventBus
-from tradepilot.domain.accounts import BridgeHealth
+from tradepilot.domain.accounts import BridgeHealth, BrokerAccount
 
 
 class BrokerBridge(ABC):
@@ -23,8 +23,8 @@ class BrokerBridge(ABC):
     async def stop(self) -> None: ...
 
     @abstractmethod
-    async def get_accounts(self) -> dict[str, float]:
-        """Devuelve {account_id: balance}."""
+    async def get_accounts(self) -> list[BrokerAccount]:
+        """Cuentas que el bróker conoce (conectadas o no, si el addon lo soporta)."""
 
     @abstractmethod
     async def send_order(

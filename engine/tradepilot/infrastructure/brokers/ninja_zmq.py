@@ -3,7 +3,8 @@
 Protocolo (sin cambios respecto a la versión anterior):
 - SUB tcp://host:5555  -> NinjaTrader publica JSON de eventos del maestro.
 - PUB tcp://host:5556  -> el engine publica JSON de órdenes al ejecutor.
-- REQ tcp://host:5557  -> "GET_ACCOUNTS" responde "Sim101|1000.5;Sim102|2000"
+- REQ tcp://host:5557  -> "GET_ACCOUNTS_ALL" responde "Sim101|1000.5|Connected|MFF;Sim102|2000|Disconnected|MFF"
+                          (addons antiguos: "GET_ACCOUNTS" -> "Sim101|1000.5;Sim102|2000", solo conectadas)
 """
 import asyncio
 import json
@@ -16,6 +17,7 @@ from loguru import logger
 
 from tradepilot.core.config import settings
 from tradepilot.core.events import TOPIC_MASTER_EVENT, EventBus
+from tradepilot.domain.accounts import BrokerAccount
 from tradepilot.infrastructure.brokers.base import BrokerBridge
 
 
@@ -30,6 +32,7 @@ class NinjaZmqBridge(BrokerBridge):
         self._running = False
         self._listen_task: asyncio.Task | None = None
         self._req_lock = asyncio.Lock()
+        self._supports_all = True   # se desactiva si el addon no conoce GET_ACCOUNTS_ALL
 
     async def start(self) -> None:
         host = settings.ZMQ_HOST
@@ -86,12 +89,13 @@ class NinjaZmqBridge(BrokerBridge):
                 self.health.error_count += 1
                 logger.error(f"Error en listener ZMQ: {exc}")
 
-    async def get_accounts(self) -> dict[str, float]:
+    async def get_accounts(self) -> list[BrokerAccount]:
         if not self._running:
-            return {}
+            return []
+        request = "GET_ACCOUNTS_ALL" if self._supports_all else "GET_ACCOUNTS"
         async with self._req_lock:
             try:
-                await self.req_socket.send_string("GET_ACCOUNTS")
+                await self.req_socket.send_string(request)
                 if not await self.req_socket.poll(3000):
                     self.health.sync_up = False
                     self.health.connected = False
@@ -99,15 +103,24 @@ class NinjaZmqBridge(BrokerBridge):
                     self._warn_once("Timeout sincronizando cuentas (5557): ¿está NinjaTrader abierto con el addon cargado?")
                     # Un REQ sin respuesta queda bloqueado: lo recreamos.
                     self._reset_req_socket()
-                    return {}
+                    return []
                 response = await self.req_socket.recv_string()
             except Exception as exc:
                 self.health.sync_up = False
                 self.health.connected = False
                 self.health.error_count += 1
-                self._warn_once(f"Error GET_ACCOUNTS: {exc}")
+                self._warn_once(f"Error {request}: {exc}")
                 self._reset_req_socket()
-                return {}
+                return []
+
+        if response.startswith("ERROR|"):
+            if self._supports_all:
+                self._supports_all = False
+                logger.warning("El addon no soporta GET_ACCOUNTS_ALL (versión antigua): solo se verán las cuentas "
+                               "conectadas. Actualiza ninjatrader/TradePilotXBridge.cs para ver todas.")
+                return await self.get_accounts()
+            self._warn_once(f"Respuesta de error del addon: {response}")
+            return []
 
         if not self.health.sync_up:
             logger.info("Sincronización de cuentas con NinjaTrader restablecida")
@@ -115,14 +128,25 @@ class NinjaZmqBridge(BrokerBridge):
         self.health.last_sync = datetime.now()
         self.health.sync_up = True
         self.health.connected = True
-        accounts: dict[str, float] = {}
+        return self.parse_accounts(response)
+
+    @staticmethod
+    def parse_accounts(response: str) -> list[BrokerAccount]:
+        """'acc|cash' (addon antiguo) o 'acc|cash|status|connection' (GET_ACCOUNTS_ALL)."""
+        accounts: list[BrokerAccount] = []
         for part in response.split(";"):
-            if "|" in part:
-                acc, bal = part.split("|", 1)
-                try:
-                    accounts[acc.strip()] = float(bal)
-                except ValueError:
-                    pass
+            fields = [f.strip() for f in part.split("|")]
+            if len(fields) < 2 or not fields[0]:
+                continue
+            try:
+                balance = float(fields[1])
+            except ValueError:
+                continue
+            connected: bool | None = None
+            if len(fields) >= 3 and fields[2]:
+                connected = fields[2].lower() == "connected"
+            connection = fields[3] if len(fields) >= 4 else ""
+            accounts.append(BrokerAccount(account_id=fields[0], balance=balance, connected=connected, connection=connection))
         return accounts
 
     _last_warning: str | None = None

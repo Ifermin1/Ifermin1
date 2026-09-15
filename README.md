@@ -55,7 +55,7 @@ En modo `mock` el engine **no está conectado a NinjaTrader**: las operaciones s
 1. En `engine\.env` cambia `ENGINE_MODE=mock` por `ENGINE_MODE=ninja` (y los puertos ZMQ si no son 5555/5556/5557).
 2. Abre NinjaTrader con el addon ZMQ de TradePilot activo (el mismo que usaba la versión de escritorio).
 3. Ctrl+C en el engine y arráncalo de nuevo con `scripts\run_engine.ps1`. En el Inicio de la consola el puente debe decir **NinjaTrader (ZMQ)** y la pestaña *Cuentas* debe mostrar tus cuentas reales al cabo de unos segundos.
-4. Crea las reglas con los **nombres de cuenta reales** que aparecen en *Cuentas* (maestro y seguidor tienen que ser cuentas distintas).
+4. En *Cuentas*, enciende el interruptor de cada cuenta que deba copiar a la maestra. Con el addon actualizado (`ninjatrader/TradePilotXBridge.cs`, ver `ninjatrader/README.md`) se listan **todas** las cuentas que NinjaTrader conoce, conectadas o no; con *Gestionar cuentas* decides cuáles están activas y les pones alias. Con el addon antiguo solo se ven las conectadas.
 
 Si *Cuentas* queda vacío, el addon no está respondiendo en 5557: revisa que NinjaTrader esté abierto y el addon cargado. Sin NinjaTrader a mano puedes probar el modo `ninja` con `python scripts\fake_ninja.py`, que imita el addon.
 3. Acceso desde fuera de casa (túnel Cloudflare / Tailscale): fase posterior, ver `docs/ARQUITECTURA.md` §2.

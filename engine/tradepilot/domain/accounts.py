@@ -26,6 +26,14 @@ class PositionSnapshot(DomainModel):
     unrealized_pnl: float = 0.0
 
 
+class BrokerAccount(DomainModel):
+    """Lo que el bróker reporta de una cuenta en cada sincronización."""
+    account_id: str
+    balance: float = 0.0
+    connected: Optional[bool] = None   # None = el addon no informa del estado
+    connection: str = ""
+
+
 class AccountSnapshot(DomainModel):
     account_id: str
     balance: float = 0.0
@@ -33,3 +41,9 @@ class AccountSnapshot(DomainModel):
     daily_pnl: float = 0.0
     open_positions: list[PositionSnapshot] = []
     updated_at: datetime
+    # gestión desde la consola
+    enabled: bool = True               # desactivada = oculta y nunca recibe copias
+    alias: str = ""
+    connected: Optional[bool] = None
+    connection: str = ""
+    reported: bool = True              # False = el bróker no la reportó en la última sincronización

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from tradepilot.api.auth import require_token
-from tradepilot.api.schemas import KillSwitchRequest, LinkRequest, MockEventRequest, RiskLimitUpsert, RuleCreate, RuleUpdate
+from tradepilot.api.schemas import AccountSettings, KillSwitchRequest, LinkRequest, MockEventRequest, RiskLimitUpsert, RuleCreate, RuleUpdate
 from tradepilot.container import Container
 from tradepilot.domain.risk import RiskLimit
 
@@ -28,6 +28,18 @@ def health(request: Request):
 @router.get("/accounts")
 def accounts(request: Request):
     return _c(request).accounts.all()
+
+
+@router.patch("/accounts/{account_id}")
+async def account_settings(account_id: str, body: AccountSettings, request: Request):
+    """Activar/desactivar una cuenta o ponerle alias desde la consola."""
+    return await _c(request).accounts.set_settings(account_id, body.enabled, body.alias)
+
+
+@router.delete("/accounts/{account_id}", status_code=204)
+async def forget_account(account_id: str, request: Request):
+    if not await _c(request).accounts.forget(account_id):
+        raise HTTPException(409, "Solo se pueden olvidar cuentas que el bróker ya no reporta")
 
 
 @router.put("/accounts/{follower}/link")

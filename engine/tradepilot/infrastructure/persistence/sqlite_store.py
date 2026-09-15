@@ -40,6 +40,10 @@ class SQLiteStore:
                     trading_halted BOOLEAN
                 );
                 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);
+                CREATE TABLE IF NOT EXISTS accounts (
+                    account_id TEXT PRIMARY KEY, enabled BOOLEAN DEFAULT 1, alias TEXT DEFAULT '',
+                    first_seen TEXT, last_seen TEXT, last_balance REAL DEFAULT 0
+                );
                 """
             )
 
@@ -99,6 +103,31 @@ class SQLiteStore:
         with self._lock, self._conn:
             self._conn.execute("INSERT OR REPLACE INTO risk_limits VALUES (?, ?, ?, ?)",
                                (limit.account_id, limit.max_daily_loss, limit.max_position_size, limit.trading_halted))
+
+    # ---- cuentas conocidas ----
+    def get_accounts(self) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute("SELECT * FROM accounts ORDER BY account_id").fetchall()
+        return [dict(r) for r in rows]
+
+    def upsert_account_seen(self, account_id: str, balance: float, when: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO accounts (account_id, enabled, alias, first_seen, last_seen, last_balance) VALUES (?, 1, '', ?, ?, ?) "
+                "ON CONFLICT(account_id) DO UPDATE SET last_seen = excluded.last_seen, last_balance = excluded.last_balance",
+                (account_id, when, when, balance))
+
+    def set_account_settings(self, account_id: str, enabled: bool | None = None, alias: str | None = None) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("INSERT OR IGNORE INTO accounts (account_id, enabled, alias) VALUES (?, 1, '')", (account_id,))
+            if enabled is not None:
+                self._conn.execute("UPDATE accounts SET enabled = ? WHERE account_id = ?", (enabled, account_id))
+            if alias is not None:
+                self._conn.execute("UPDATE accounts SET alias = ? WHERE account_id = ?", (alias, account_id))
+
+    def delete_account(self, account_id: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM accounts WHERE account_id = ?", (account_id,))
 
     def get_kv(self, key: str, default: str | None = None) -> str | None:
         with self._lock:

@@ -77,3 +77,40 @@ async def test_quick_link(client: AsyncClient):
     assert (await client.get("/api/rules")).json() == []
     r = await client.post("/api/rules", json={"master_account": "A", "follower_account": "a"})
     assert r.status_code == 422
+
+
+async def test_account_management(client: AsyncClient, container):
+    container.bridge.disconnected.add("Sim103")
+    await container.accounts.sync_once()
+    accts = {a["account_id"]: a for a in (await client.get("/api/accounts")).json()}
+    assert accts["Sim103"]["connected"] is False and accts["Sim101"]["connected"] is True
+    assert accts["Sim101"]["connection"] == "Simulación"
+
+    r = await client.patch("/api/accounts/Sim103", json={"enabled": False, "alias": "Eval MFF"})
+    assert r.json()["enabled"] is False and r.json()["alias"] == "Eval MFF"
+    # persistido: un servicio nuevo sobre el mismo store lo recuerda
+    from tradepilot.services.account_service import AccountService
+    again = AccountService(container.bridge, container.bus, container.store)
+    assert again.accounts["Sim103"].enabled is False and again.accounts["Sim103"].alias == "Eval MFF"
+    assert again.accounts["Sim103"].reported is False
+
+    # una cuenta desactivada no recibe copias
+    await client.put("/api/accounts/Sim103/link", json={"master_account": "Sim101"})
+    await client.post("/api/mock/master-event", json={"quantity": 1})
+    last = (await client.get("/api/audit?event_type=BLOCKED")).json()[0]
+    assert "desactivada" in last["message"]
+
+    # solo se olvidan cuentas que ya no se reportan
+    r = await client.delete("/api/accounts/Sim103")
+    assert r.status_code == 409
+    container.bridge.accounts.pop("Sim103")
+    await container.accounts.sync_once()
+    assert (await client.delete("/api/accounts/Sim103")).status_code == 204
+
+
+def test_parse_accounts_old_and_new_format():
+    from tradepilot.infrastructure.brokers.ninja_zmq import NinjaZmqBridge
+    old = NinjaZmqBridge.parse_accounts("Sim101|50000.00;Sim102|25000.00")
+    assert [(a.account_id, a.balance, a.connected) for a in old] == [("Sim101", 50000.0, None), ("Sim102", 25000.0, None)]
+    new = NinjaZmqBridge.parse_accounts("Sim101|50000.00|Connected|MFF;APEX-1|0.00|Disconnected|APEX TRADOVATE;basura;x|nan|")
+    assert [(a.account_id, a.connected, a.connection) for a in new][:2] == [("Sim101", True, "MFF"), ("APEX-1", False, "APEX TRADOVATE")]

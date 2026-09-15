@@ -148,6 +148,8 @@ class ReplicationService:
                                source=event.account, target=rule.follower_account)
                 continue
             ok, reason = self.risk.allows(rule.follower_account, qty)
+            if ok and self.accounts is not None and not self.accounts.is_enabled(rule.follower_account):
+                ok, reason = False, f"cuenta {rule.follower_account} desactivada en la consola"
             if not ok:
                 self.stats["blocked"] += 1
                 self.audit.log("BLOCKED", f"Bloqueado por riesgo: {reason}", source=event.account,

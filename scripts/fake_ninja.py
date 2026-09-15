@@ -9,6 +9,7 @@ Imita el addon TradePilotXBridge:
 Uso:  python scripts/fake_ninja.py            (una operación del maestro cada 5 s)
       python scripts/fake_ninja.py --once     (una y termina)
       python scripts/fake_ninja.py --reject   (los followers rechazan las órdenes)
+      python scripts/fake_ninja.py --old-addon (imita un addon sin GET_ACCOUNTS_ALL)
 """
 import json
 import random
@@ -20,6 +21,9 @@ from datetime import datetime
 import zmq
 
 ACCOUNTS = {"Sim101": 50000.0, "Sim102": 25000.0}
+# cuentas que NinjaTrader conoce pero no están conectadas ahora (solo salen con GET_ACCOUNTS_ALL)
+OFFLINE = {"APEX-112924-1": 0.0, "MFFUEVREOD": 50162.72}
+CONNECTION = "MFF"
 MASTER = "Sim101"
 SYMBOL = "NQ 12-26"
 
@@ -49,7 +53,13 @@ while True:
     for sock, _ in poller.poll(100):
         if sock is rep:
             msg = rep.recv_string()
-            rep.send_string(";".join(f"{a}|{b:.2f}" for a, b in ACCOUNTS.items()) if msg == "GET_ACCOUNTS" else "PONG" if msg == "PING" else "ERROR|unknown request")
+            if msg == "GET_ACCOUNTS":
+                rep.send_string(";".join(f"{a}|{b:.2f}" for a, b in ACCOUNTS.items()))
+            elif msg == "GET_ACCOUNTS_ALL" and "--old-addon" not in sys.argv:
+                rep.send_string(";".join([f"{a}|{b:.2f}|Connected|{CONNECTION}" for a, b in ACCOUNTS.items()]
+                                         + [f"{a}|{b:.2f}|Disconnected|{CONNECTION}" for a, b in OFFLINE.items()]))
+            else:
+                rep.send_string("PONG" if msg == "PING" else "ERROR|unknown request")
         elif sock is sub:
             raw = sub.recv_string(); o = json.loads(raw)
             print("ORDEN RECIBIDA DEL ENGINE:", raw)

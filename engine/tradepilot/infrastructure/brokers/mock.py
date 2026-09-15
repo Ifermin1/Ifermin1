@@ -11,6 +11,7 @@ from datetime import datetime
 from loguru import logger
 
 from tradepilot.core.events import TOPIC_MASTER_EVENT, EventBus
+from tradepilot.domain.accounts import BrokerAccount
 from tradepilot.infrastructure.brokers.base import BrokerBridge
 
 SYMBOLS = ["NQ 12-26", "ES 12-26", "MNQ 12-26", "CL 11-26"]
@@ -24,6 +25,7 @@ class MockBridge(BrokerBridge):
         self.emit_events = emit_events
         self.interval = interval
         self.accounts = accounts or {"Sim101": 50_000.0, "Sim102": 25_000.0, "Sim103": 100_000.0}
+        self.disconnected: set[str] = set()   # cuentas que el simulador reporta como desconectadas
         self.sent_orders: list[dict] = []
         self._task: asyncio.Task | None = None
         self._running = False
@@ -68,10 +70,12 @@ class MockBridge(BrokerBridge):
         await self.bus.publish(TOPIC_MASTER_EVENT, event)
         return event
 
-    async def get_accounts(self) -> dict[str, float]:
+    async def get_accounts(self) -> list[BrokerAccount]:
         self.health.last_sync = datetime.now()
         # pequeño ruido para que el dashboard se mueva
-        return {k: round(v + random.uniform(-25, 25), 2) for k, v in self.accounts.items()}
+        return [BrokerAccount(account_id=k, balance=round(v + random.uniform(-25, 25), 2),
+                              connected=k not in self.disconnected, connection="Simulación")
+                for k, v in self.accounts.items()]
 
     async def send_order(self, target_account, action, symbol, quantity, order_type, master_order_id,
                          msg_type="EXECUTION", price=0.0, limit_price=0.0, stop_price=0.0) -> None:
