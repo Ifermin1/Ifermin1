@@ -78,6 +78,14 @@ class ReplicationRule(DomainModel):
             return None
         return v.strip().upper() if isinstance(v, str) else v
 
+    @field_validator("follower_account")
+    @classmethod
+    def _not_self(cls, v: str, info):
+        master = info.data.get("master_account", "")
+        if v.strip().lower() == str(master).strip().lower():
+            raise ValueError("maestro y seguidor no pueden ser la misma cuenta")
+        return v
+
     def matches(self, event: MasterEvent) -> bool:
         return self.enabled and self.master_matches(event.account) and self.symbol_matches(event.symbol)
 

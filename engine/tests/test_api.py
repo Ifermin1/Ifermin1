@@ -61,3 +61,19 @@ async def test_kill_switch_and_limits(client: AsyncClient):
     assert r.json()["limits"][0]["account_id"] == "Sim102"
     r = await client.post("/api/risk/kill-switch", json={"active": False})
     assert r.json()["kill_switch"] is False
+
+
+async def test_quick_link(client: AsyncClient):
+    r = await client.put("/api/accounts/Sim102/link", json={"master_account": "Sim101", "multiplier": 2})
+    assert r.status_code == 200 and r.json()["multiplier"] == 2
+    rule_id = r.json()["id"]
+    r = await client.put("/api/accounts/Sim102/link", json={"master_account": "Sim101", "multiplier": 3, "enabled": False})
+    assert r.json()["id"] == rule_id and r.json()["enabled"] is False  # misma regla, actualizada
+    assert len((await client.get("/api/rules")).json()) == 1
+    r = await client.put("/api/accounts/Sim101/link", json={"master_account": "Sim101"})
+    assert r.status_code == 422
+    r = await client.delete("/api/accounts/Sim102/link?master_account=Sim101")
+    assert r.status_code == 204
+    assert (await client.get("/api/rules")).json() == []
+    r = await client.post("/api/rules", json={"master_account": "A", "follower_account": "a"})
+    assert r.status_code == 422

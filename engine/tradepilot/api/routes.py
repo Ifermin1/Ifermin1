@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from tradepilot.api.auth import require_token
-from tradepilot.api.schemas import KillSwitchRequest, MockEventRequest, RiskLimitUpsert, RuleCreate, RuleUpdate
+from tradepilot.api.schemas import KillSwitchRequest, LinkRequest, MockEventRequest, RiskLimitUpsert, RuleCreate, RuleUpdate
 from tradepilot.container import Container
 from tradepilot.domain.risk import RiskLimit
 
@@ -30,6 +30,21 @@ def accounts(request: Request):
     return _c(request).accounts.all()
 
 
+@router.put("/accounts/{follower}/link")
+def link_account(follower: str, body: LinkRequest, request: Request):
+    """Vincular (o actualizar) una cuenta seguidora al maestro con un clic."""
+    try:
+        return _c(request).replication.link(body.master_account, follower, body.multiplier, body.enabled)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
+@router.delete("/accounts/{follower}/link", status_code=204)
+def unlink_account(follower: str, master_account: str, request: Request):
+    if not _c(request).replication.unlink(master_account, follower):
+        raise HTTPException(404, "No hay vínculo entre esas cuentas")
+
+
 @router.get("/rules")
 def list_rules(request: Request):
     return _c(request).replication.rules
@@ -37,8 +52,11 @@ def list_rules(request: Request):
 
 @router.post("/rules", status_code=201)
 def create_rule(body: RuleCreate, request: Request):
-    return _c(request).replication.add_rule(body.master_account, body.follower_account, body.multiplier,
-                                            body.symbol_filter, body.enabled)
+    try:
+        return _c(request).replication.add_rule(body.master_account, body.follower_account, body.multiplier,
+                                                body.symbol_filter, body.enabled)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
 
 
 @router.patch("/rules/{rule_id}")

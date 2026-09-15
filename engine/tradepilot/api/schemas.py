@@ -37,3 +37,9 @@ class MockEventRequest(BaseModel):
     symbol: Optional[str] = None
     quantity: Optional[int] = Field(default=None, gt=0)
     price: Optional[float] = None
+
+
+class LinkRequest(BaseModel):
+    master_account: str = Field(min_length=1)
+    multiplier: float = Field(default=1.0, gt=0)
+    enabled: bool = True

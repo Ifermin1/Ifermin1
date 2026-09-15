@@ -50,6 +50,26 @@ class ReplicationService:
                        source=rule.master_account, target=rule.follower_account)
         return rule
 
+    def find_link(self, master: str, follower: str) -> ReplicationRule | None:
+        """Regla simple (sin filtro de símbolo) entre dos cuentas, si existe."""
+        for r in self.rules:
+            if r.master_matches(master) and r.follower_account.strip().lower() == follower.strip().lower() and not r.symbol_filter:
+                return r
+        return None
+
+    def link(self, master: str, follower: str, multiplier: float = 1.0, enabled: bool = True) -> ReplicationRule:
+        """Vincula follower al master de un clic: crea la regla o actualiza la existente."""
+        if master.strip().lower() == follower.strip().lower():
+            raise ValueError("una cuenta no puede copiarse a sí misma")
+        existing = self.find_link(master, follower)
+        if existing is None:
+            return self.add_rule(master, follower, multiplier, None, enabled)
+        return self.update_rule(existing.id, multiplier=multiplier, enabled=enabled)  # type: ignore[return-value]
+
+    def unlink(self, master: str, follower: str) -> bool:
+        existing = self.find_link(master, follower)
+        return self.delete_rule(existing.id) if existing else False
+
     def update_rule(self, rule_id: str, **changes) -> ReplicationRule | None:
         for i, r in enumerate(self.rules):
             if r.id == rule_id:
@@ -77,6 +97,8 @@ class ReplicationService:
 
         if msg_type == MSG_HEARTBEAT:
             self.bridge.health.last_heartbeat = datetime.now()
+            if data.get("account"):
+                self.bridge.health.master_account = str(data["account"])
             return []
         if msg_type == MSG_PRICE:
             await self.bus.publish(TOPIC_PRICE, data)

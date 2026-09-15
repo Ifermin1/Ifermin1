@@ -4,7 +4,7 @@
 export type Health = {
   app: string; mode: "mock" | "ninja";
   bridge: { mode: string; connected: boolean; last_msg_in: string | null; last_msg_out: string | null;
-            last_sync: string | null; last_heartbeat: string | null; error_count: number; master_feed_up: boolean; follower_feed_up: boolean; sync_up: boolean };
+            last_sync: string | null; last_heartbeat: string | null; master_account: string | null; error_count: number; master_feed_up: boolean; follower_feed_up: boolean; sync_up: boolean };
   risk: RiskState; stats: { events_in: number; orders_out: number; blocked: number; errors: number; rejected: number; fills: number; duplicates: number }; ws_clients: number;
 };
 export type Position = { account_id: string; symbol: string; quantity: number; avg_price: number; unrealized_pnl: number };
@@ -46,6 +46,10 @@ export function makeClient(s: Session) {
     createRule: (b: Omit<Rule, "id">) => req<Rule>("/api/rules", { method: "POST", body: JSON.stringify(b) }),
     updateRule: (id: string, b: Partial<Rule>) => req<Rule>(`/api/rules/${id}`, { method: "PATCH", body: JSON.stringify(b) }),
     deleteRule: (id: string) => req<void>(`/api/rules/${id}`, { method: "DELETE" }),
+    link: (follower: string, master_account: string, multiplier: number, enabled: boolean) =>
+      req<Rule>(`/api/accounts/${encodeURIComponent(follower)}/link`, { method: "PUT", body: JSON.stringify({ master_account, multiplier, enabled }) }),
+    unlink: (follower: string, master: string) =>
+      req<void>(`/api/accounts/${encodeURIComponent(follower)}/link?master_account=${encodeURIComponent(master)}`, { method: "DELETE" }),
     audit: (limit = 100, type?: string) => req<AuditEvent[]>(`/api/audit?limit=${limit}${type ? `&event_type=${type}` : ""}`),
     risk: () => req<RiskState>("/api/risk"),
     killSwitch: (active: boolean, reason?: string) =>
