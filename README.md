@@ -23,6 +23,17 @@ python -m tradepilot.main
 
 Abre <http://localhost:8000>, pon la URL del engine y el token. En modo simulador, el botón **"Simular operación del maestro"** de la pestaña *Copiar* genera operaciones para ver el replicador trabajando.
 
+## Actualizar a la última versión (Windows)
+
+Con el engine parado (Ctrl+C en su ventana):
+
+```powershell
+cd $HOME\tradepilot
+powershell -ExecutionPolicy Bypass -File scripts\update.ps1
+```
+
+Descarga los cambios, copia el addon actualizado a la carpeta de AddOns de NinjaTrader (con copia de seguridad del anterior) y arranca el engine. Si el addon cambió, compílalo en NinjaTrader (*New → NinjaScript Editor → F5*) y reinicia NinjaTrader.
+
 ## Probar desde el teléfono en local (misma Wi-Fi, sin dominio)
 
 1. Arranca el engine en el PC. Al iniciar imprime algo como `Consola disponible en: http://localhost:8000 | http://192.168.1.40:8000`.
