@@ -60,6 +60,12 @@ En modo `mock` el engine **no está conectado a NinjaTrader**: las operaciones s
 Si *Cuentas* queda vacío, el addon no está respondiendo en 5557: revisa que NinjaTrader esté abierto y el addon cargado. Sin NinjaTrader a mano puedes probar el modo `ninja` con `python scripts\fake_ninja.py`, que imita el addon.
 3. Acceso desde fuera de casa (túnel Cloudflare / Tailscale): fase posterior, ver `docs/ARQUITECTURA.md` §2.
 
+## Problemas comunes
+
+- **`Proactor event loop does not implement add_reader`** en Windows: versión antigua del engine. Haz `git pull`; el arranque actual fuerza el bucle de eventos que ZMQ necesita.
+- **`Timeout sincronizando cuentas (5557)`** o *Cuentas* vacío: NinjaTrader no está abierto o el addon no está cargado (en NinjaTrader, *Tools → Output* debe mostrar `[TradePilotX] Bridge online`).
+- **`Failed to fetch`** en la pantalla de login: el engine no está arrancado. Comprueba que la ventana de PowerShell muestra `Uvicorn running`.
+
 ## Desarrollo
 
 ```bash

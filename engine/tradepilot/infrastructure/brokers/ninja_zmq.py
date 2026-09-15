@@ -7,6 +7,7 @@ Protocolo (sin cambios respecto a la versión anterior):
 """
 import asyncio
 import json
+import sys
 from datetime import datetime
 
 import zmq
@@ -32,6 +33,9 @@ class NinjaZmqBridge(BrokerBridge):
 
     async def start(self) -> None:
         host = settings.ZMQ_HOST
+        loop = asyncio.get_running_loop()
+        if sys.platform == "win32" and not isinstance(loop, asyncio.SelectorEventLoop):
+            raise RuntimeError("ZMQ necesita SelectorEventLoop en Windows; arranca con `python -m tradepilot.main`")
         try:
             self.sub_socket.connect(f"tcp://{host}:{settings.ZMQ_MASTER_PORT}")
             self.sub_socket.setsockopt_string(zmq.SUBSCRIBE, "")
@@ -92,7 +96,7 @@ class NinjaZmqBridge(BrokerBridge):
                     self.health.sync_up = False
                     self.health.connected = False
                     self.health.error_count += 1
-                    logger.warning("Timeout sincronizando cuentas (5557)")
+                    self._warn_once("Timeout sincronizando cuentas (5557): ¿está NinjaTrader abierto con el addon cargado?")
                     # Un REQ sin respuesta queda bloqueado: lo recreamos.
                     self._reset_req_socket()
                     return {}
@@ -101,10 +105,13 @@ class NinjaZmqBridge(BrokerBridge):
                 self.health.sync_up = False
                 self.health.connected = False
                 self.health.error_count += 1
-                logger.error(f"Error GET_ACCOUNTS: {exc}")
+                self._warn_once(f"Error GET_ACCOUNTS: {exc}")
                 self._reset_req_socket()
                 return {}
 
+        if not self.health.sync_up:
+            logger.info("Sincronización de cuentas con NinjaTrader restablecida")
+            self._last_warning = None
         self.health.last_sync = datetime.now()
         self.health.sync_up = True
         self.health.connected = True
@@ -117,6 +124,13 @@ class NinjaZmqBridge(BrokerBridge):
                 except ValueError:
                     pass
         return accounts
+
+    _last_warning: str | None = None
+
+    def _warn_once(self, msg: str) -> None:
+        if msg != self._last_warning:
+            logger.warning(msg + " (se silencia hasta que cambie)")
+            self._last_warning = msg
 
     def _reset_req_socket(self) -> None:
         try:
