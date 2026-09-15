@@ -13,7 +13,15 @@ if (-not (Test-Path ".env")) {
     Write-Host "Creado engine\.env: edita API_TOKEN y ENGINE_MODE antes de exponerlo." -ForegroundColor Yellow
 }
 if (-not (Test-Path "..\web\dist\index.html")) {
-    Write-Host "No hay build de la consola web; ejecuta 'npm install && npm run build' en web\ (solo API por ahora)." -ForegroundColor Yellow
+    if (Get-Command npm -ErrorAction SilentlyContinue) {
+        Write-Host "Compilando la consola web (primera vez, tarda un minuto)..." -ForegroundColor Cyan
+        Push-Location "..\web"
+        if (-not (Test-Path "node_modules")) { npm install --no-audit --no-fund }
+        npm run build
+        Pop-Location
+    } else {
+        Write-Host "No hay build de la consola web y npm no está instalado; solo API por ahora. Instala Node.js y vuelve a ejecutar." -ForegroundColor Yellow
+    }
 }
 # Abre el puerto en el firewall de Windows para que el teléfono (misma Wi-Fi) pueda entrar.
 $port = 8000

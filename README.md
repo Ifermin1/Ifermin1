@@ -35,6 +35,19 @@ Abre <http://localhost:8000>, pon la URL del engine y el token. En modo simulado
 
 Nota: sobre `http://` con IP (sin HTTPS) el navegador no registra el *service worker*, así que el icono en el escritorio funciona como acceso directo a pantalla completa pero no hay instalación "oficial" ni caché offline. La app funciona igual; la instalación completa llega cuando se ponga HTTPS (túnel), más adelante.
 
+## Arranque en Windows con un solo comando
+
+Abre PowerShell en tu carpeta de usuario (no en `C:\WINDOWS\system32`):
+
+```powershell
+cd $HOME
+git clone -b claude/eager-cannon-n4krnv https://github.com/Ifermin1/Ifermin1 tradepilot
+cd tradepilot
+powershell -ExecutionPolicy Bypass -File scripts\run_engine.ps1
+```
+
+El script crea el entorno virtual de Python, compila la consola web si falta (necesita Node.js), crea `engine\.env`, abre el puerto en el firewall y arranca el engine. Requisitos: Python 3.11+, Node.js 18+ y Git.
+
 ## Con NinjaTrader real (PC Windows)
 
 1. En `engine/.env`: `ENGINE_MODE=ninja` (y los puertos ZMQ si no son 5555/5556/5557).
