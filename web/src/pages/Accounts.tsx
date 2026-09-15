@@ -10,7 +10,7 @@ export function Accounts() {
       {accounts.length === 0 ? <Empty>Esperando datos del bróker…</Empty> : (
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Cuenta</th><th className="num">Balance</th><th className="num">P&L día</th><th>Riesgo</th><th>Actualizada</th></tr></thead>
+            <thead><tr><th>Cuenta</th><th className="num">Balance</th><th>Posiciones</th><th>Riesgo</th><th>Actualizada</th></tr></thead>
             <tbody>
               {accounts.map((a) => {
                 const l = limits.get(a.account_id);
@@ -18,7 +18,8 @@ export function Accounts() {
                   <tr key={a.account_id}>
                     <td><b>{a.account_id}</b></td>
                     <td className="num">{money(a.balance)}</td>
-                    <td className={`num ${a.daily_pnl < 0 ? "bad" : a.daily_pnl > 0 ? "ok" : ""}`}>{money(a.daily_pnl)}</td>
+                    <td>{a.open_positions.length === 0 ? <span className="muted">plana</span> : a.open_positions.map((p) => (
+                      <span key={p.symbol} className={`chip ${p.quantity > 0 ? "ok" : "bad"}`}>{p.quantity > 0 ? "L" : "S"} {Math.abs(p.quantity)} {p.symbol} @ {p.avg_price}</span>))}</td>
                     <td>{l ? (l.trading_halted ? <span className="badge bad">pausada</span> : <span className="badge ok">límites</span>) : <span className="badge muted">sin límites</span>}</td>
                     <td className="muted">{ago(a.updated_at)}</td>
                   </tr>

@@ -12,9 +12,15 @@ if (-not (Test-Path ".env")) {
     Copy-Item .env.example .env
     Write-Host "Creado engine\.env: edita API_TOKEN y ENGINE_MODE antes de exponerlo." -ForegroundColor Yellow
 }
-if (-not (Test-Path "..\web\dist\index.html")) {
+$needBuild = -not (Test-Path "..\web\dist\index.html")
+if (-not $needBuild) {
+    $built = (Get-Item "..\web\dist\index.html").LastWriteTime
+    $newest = Get-ChildItem "..\web\src" -Recurse -File | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($newest -and $newest.LastWriteTime -gt $built) { $needBuild = $true }
+}
+if ($needBuild) {
     if (Get-Command npm -ErrorAction SilentlyContinue) {
-        Write-Host "Compilando la consola web (primera vez, tarda un minuto)..." -ForegroundColor Cyan
+        Write-Host "Compilando la consola web (tarda un minuto)..." -ForegroundColor Cyan
         Push-Location "..\web"
         if (-not (Test-Path "node_modules")) { npm install --no-audit --no-fund }
         npm run build

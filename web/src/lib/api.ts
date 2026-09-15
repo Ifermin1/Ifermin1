@@ -4,10 +4,11 @@
 export type Health = {
   app: string; mode: "mock" | "ninja";
   bridge: { mode: string; connected: boolean; last_msg_in: string | null; last_msg_out: string | null;
-            last_sync: string | null; error_count: number; master_feed_up: boolean; follower_feed_up: boolean; sync_up: boolean };
-  risk: RiskState; stats: { events_in: number; orders_out: number; blocked: number; errors: number }; ws_clients: number;
+            last_sync: string | null; last_heartbeat: string | null; error_count: number; master_feed_up: boolean; follower_feed_up: boolean; sync_up: boolean };
+  risk: RiskState; stats: { events_in: number; orders_out: number; blocked: number; errors: number; rejected: number; fills: number; duplicates: number }; ws_clients: number;
 };
-export type Account = { account_id: string; balance: number; net_liquidity: number; daily_pnl: number; updated_at: string };
+export type Position = { account_id: string; symbol: string; quantity: number; avg_price: number; unrealized_pnl: number };
+export type Account = { account_id: string; balance: number; net_liquidity: number; daily_pnl: number; open_positions: Position[]; updated_at: string };
 export type Rule = { id: string; master_account: string; follower_account: string; multiplier: number;
                      symbol_filter: string | null; enabled: boolean };
 export type AuditEvent = { id: number | null; timestamp: string; event_type: string; source_account: string | null;

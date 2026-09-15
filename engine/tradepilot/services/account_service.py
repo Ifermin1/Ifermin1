@@ -4,7 +4,7 @@ from datetime import datetime
 from loguru import logger
 
 from tradepilot.core.events import TOPIC_ACCOUNTS, TOPIC_HEALTH, EventBus
-from tradepilot.domain.accounts import AccountSnapshot, BridgeHealth
+from tradepilot.domain.accounts import AccountSnapshot, BridgeHealth, PositionSnapshot
 from tradepilot.infrastructure.brokers.base import BrokerBridge
 
 
@@ -52,6 +52,21 @@ class AccountService:
             except Exception as exc:
                 logger.error(f"Error sincronizando cuentas: {exc}")
             await asyncio.sleep(self.interval)
+
+    async def update_position(self, account_id: str, symbol: str, market_position: str, quantity: int,
+                              avg_price: float) -> None:
+        """POSITION del addon: mantiene las posiciones abiertas de la cuenta."""
+        now = datetime.now()
+        snap = self.accounts.get(account_id)
+        if snap is None:
+            snap = self.accounts[account_id] = AccountSnapshot(account_id=account_id, updated_at=now)
+        positions = [p for p in snap.open_positions if p.symbol != symbol]
+        if quantity > 0 and market_position.upper() != "FLAT":
+            signed = quantity if market_position.upper() == "LONG" else -quantity
+            positions.append(PositionSnapshot(account_id=account_id, symbol=symbol, quantity=signed, avg_price=avg_price))
+        snap.open_positions = positions
+        snap.updated_at = now
+        await self.bus.publish(TOPIC_ACCOUNTS, [a.model_dump(mode="json") for a in self.accounts.values()])
 
     def all(self) -> list[AccountSnapshot]:
         return list(self.accounts.values())

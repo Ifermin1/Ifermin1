@@ -14,7 +14,8 @@ export function Dashboard() {
         <Stat label="Cuentas" value={accounts.length} />
         <Stat label="Reglas activas" value={`${active} / ${rules.length}`} tone={active ? "ok" : "muted"} />
         <Stat label="Órdenes replicadas" value={health?.stats.orders_out ?? 0} />
-        <Stat label="Bloqueadas" value={health?.stats.blocked ?? 0} tone={health?.stats.blocked ? "warn" : "muted"} />
+        <Stat label="Fills seguidores" value={health?.stats.fills ?? 0} tone={health?.stats.fills ? "ok" : "muted"} />
+        <Stat label="Rechazadas" value={(health?.stats.rejected ?? 0) + (health?.stats.blocked ?? 0)} tone={(health?.stats.rejected || health?.stats.blocked) ? "bad" : "muted"} />
         <Stat label="Errores" value={health?.stats.errors ?? 0} tone={health?.stats.errors ? "bad" : "ok"} />
       </div>
 
@@ -31,6 +32,7 @@ export function Dashboard() {
             <div><span>Feed maestro (5555)</span><b className={b.master_feed_up ? "ok" : "bad"}>{b.master_feed_up ? "arriba" : "caído"}</b></div>
             <div><span>Ejecutor (5556)</span><b className={b.follower_feed_up ? "ok" : "bad"}>{b.follower_feed_up ? "arriba" : "caído"}</b></div>
             <div><span>Sync cuentas (5557)</span><b className={b.sync_up ? "ok" : "bad"}>{b.sync_up ? "arriba" : "caído"}</b></div>
+            <div><span>Heartbeat del addon</span><b>{time(b.last_heartbeat)} <i className="muted">{ago(b.last_heartbeat)}</i></b></div>
             <div><span>Último evento IN</span><b>{time(b.last_msg_in)} <i className="muted">{ago(b.last_msg_in)}</i></b></div>
             <div><span>Última orden OUT</span><b>{time(b.last_msg_out)} <i className="muted">{ago(b.last_msg_out)}</i></b></div>
             <div><span>Errores del puente</span><b className={b.error_count ? "bad" : "ok"}>{b.error_count}</b></div>

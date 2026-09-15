@@ -20,4 +20,9 @@ class RiskLevel(str, Enum):
     CRITICAL = "CRITICAL"
 
 
+# Mensajes del addon de NinjaTrader (puerto 5555)
 REPLICABLE_MSG_TYPES = {"EXECUTION", "ORDER_PENDING", "ORDER_MODIFIED", "ORDER_CANCELLED"}
+MSG_HEARTBEAT = "HEARTBEAT"
+MSG_PRICE = "PRICE"
+MSG_POSITION = "POSITION"
+MSG_ORDER_STATUS = "ORDER_STATUS"   # estado de una orden replicada en un follower (ACK / rechazo)

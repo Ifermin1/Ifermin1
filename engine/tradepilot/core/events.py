@@ -50,3 +50,4 @@ TOPIC_ACCOUNTS = "accounts.snapshot"         # lista de cuentas actualizada
 TOPIC_AUDIT = "audit.event"                  # nueva entrada de auditoría
 TOPIC_HEALTH = "broker.health"               # salud del puente
 TOPIC_RISK = "risk.state"                    # cambio de kill switch / límites
+TOPIC_PRICE = "market.price"                 # tick de precio del addon

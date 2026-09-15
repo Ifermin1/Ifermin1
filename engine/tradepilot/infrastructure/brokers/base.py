@@ -37,4 +37,6 @@ class BrokerBridge(ABC):
         master_order_id: str,
         msg_type: str = "EXECUTION",
         price: float = 0.0,
+        limit_price: float = 0.0,
+        stop_price: float = 0.0,
     ) -> None: ...

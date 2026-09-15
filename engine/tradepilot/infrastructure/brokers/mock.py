@@ -74,10 +74,11 @@ class MockBridge(BrokerBridge):
         return {k: round(v + random.uniform(-25, 25), 2) for k, v in self.accounts.items()}
 
     async def send_order(self, target_account, action, symbol, quantity, order_type, master_order_id,
-                         msg_type="EXECUTION", price=0.0) -> None:
+                         msg_type="EXECUTION", price=0.0, limit_price=0.0, stop_price=0.0) -> None:
         self.sent_orders.append({
             "account": target_account, "action": action, "symbol": symbol, "quantity": quantity,
             "order_type": order_type, "master_order_id": master_order_id, "msg_type": msg_type, "price": price,
+            "limit_price": limit_price, "stop_price": stop_price,
         })
         self.health.last_msg_out = datetime.now()
         logger.info(f"[mock] orden -> {target_account} {action} {quantity} {symbol}")

@@ -60,5 +60,5 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
     audit = AuditService(store, bus)
     risk = RiskService(store, bus, audit)
     accounts = AccountService(bridge, bus, interval=cfg.ACCOUNT_SYNC_SECONDS)
-    replication = ReplicationService(bridge, store, audit, risk, bus)
+    replication = ReplicationService(bridge, store, audit, risk, bus, accounts)
     return Container(cfg, bus, store, bridge, audit, risk, accounts, replication)
