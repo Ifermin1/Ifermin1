@@ -44,6 +44,11 @@ export function Accounts() {
   const setEnabled = (acc: string, enabled: boolean) => guard(acc, async () => { await client!.setAccount(acc, { enabled }); });
   const setAuto = (acc: string) => guard(acc, async () => { await client!.setAccount(acc, { auto: true }); });
   const setAlias = (acc: string, alias: string) => guard(acc, async () => { await client!.setAccount(acc, { alias }); });
+  const changeMaster = (acc: string) => guard("__master", async () => {
+    if (!acc || acc === detected) { setMaster(acc); return; }
+    if (!confirm(`¿Cambiar la cuenta maestra a ${acc}?\n\nA partir de ahora se replicarán las operaciones de ${acc}. Las cuentas que copiaban a ${detected ?? "la anterior"} dejan de copiar hasta que las vincules a la nueva.`)) return;
+    const r = await client!.setMaster(acc); setMaster(r.master_account);
+  });
   const forget = (acc: string) => guard(acc, async () => { if (confirm(`¿Olvidar ${acc}? Volverá a aparecer si NinjaTrader la reporta.`)) await client!.forgetAccount(acc); });
 
   const masterAcc = accounts.find((a) => a.account_id.toLowerCase() === master.toLowerCase());
@@ -63,15 +68,17 @@ export function Accounts() {
     <div className="grid">
       <Card title="Cuenta maestra" right={<span className="muted small">{detected ? "detectada del addon" : "sin heartbeat del addon"}</span>}>
         <div className="master-row">
-          <select value={master} onChange={(e) => setMaster(e.target.value)}>
+          <select value={master} disabled={busy === "__master"} onChange={(e) => void changeMaster(e.target.value)}>
             {!master && <option value="">Selecciona…</option>}
             {accounts.map((a) => <option key={a.account_id} value={a.account_id}>{label(a)}{a.account_id === detected ? " · maestro del addon" : ""}</option>)}
           </select>
           {masterAcc && <><ConnBadge a={masterAcc} /><span className="muted">{money(masterAcc.balance)} · {posText(masterAcc)}</span></>}
         </div>
         {detected && master && master !== detected && (
-          <p className="error">El addon de NinjaTrader publica las operaciones de <b>{detected}</b>. Para usar {master} como maestra cambia <code>MasterAccount</code> en el config.json del addon.</p>
+          <p className="error">El addon sigue publicando <b>{detected}</b>; el cambio a {master} no se aplicó.</p>
         )}
+        {err && busy === null && <p className="error">{err}</p>}
+        <p className="muted small">Al elegir otra cuenta, el engine se lo pide a NinjaTrader y el addon la guarda: sobrevive a reinicios. Requiere addon v1.2 o superior.</p>
       </Card>
 
       <Card title={`Seguidoras · ${linked} de ${followers.length} copiando`}

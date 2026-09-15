@@ -141,3 +141,13 @@ async def test_addon_upgrade_detected_from_heartbeat(container):
     container.replication.bridge = b
     await container.replication.process_master_event({"msg_type": "HEARTBEAT", "account": "Sim101", "version": "1.1"})
     assert b._supports_all is True and b.health.addon_version == "1.1"
+
+
+async def test_set_master(client: AsyncClient, container):
+    r = await client.post("/api/master", json={"account": "Sim102"})
+    assert r.status_code == 200 and r.json()["master_account"] == "Sim102"
+    assert container.bridge.health.master_account == "Sim102"
+    assert (await client.get("/api/health")).json()["bridge"]["master_account"] == "Sim102"
+    r = await client.post("/api/master", json={"account": "NoExiste"})
+    assert r.status_code == 400 and "desconocida" in r.json()["detail"]
+    assert (await client.get("/api/audit?event_type=MASTER_CHANGED")).json()[0]["source_account"] == "Sim102"

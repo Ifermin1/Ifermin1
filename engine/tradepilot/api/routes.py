@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from tradepilot.api.auth import require_token
-from tradepilot.api.schemas import AccountSettings, KillSwitchRequest, LinkRequest, MockEventRequest, RiskLimitUpsert, RuleCreate, RuleUpdate
+from tradepilot.api.schemas import AccountSettings, KillSwitchRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, RuleCreate, RuleUpdate
 from tradepilot.container import Container
 from tradepilot.domain.risk import RiskLimit
 
@@ -28,6 +28,19 @@ def health(request: Request):
 @router.get("/accounts")
 def accounts(request: Request):
     return _c(request).accounts.all()
+
+
+@router.post("/master")
+async def set_master(body: MasterRequest, request: Request):
+    """Cambia la cuenta maestra en NinjaTrader (addon v1.2+) y lo registra en la auditoría."""
+    c = _c(request)
+    try:
+        applied = await c.bridge.set_master(body.account.strip())
+    except RuntimeError as exc:
+        raise HTTPException(400, str(exc))
+    c.audit.log("MASTER_CHANGED", f"Cuenta maestra cambiada a {applied}", source=applied)
+    await c.bus.publish("broker.health", c.accounts.health().model_dump(mode="json"))
+    return {"master_account": applied}
 
 
 @router.patch("/accounts/{account_id}")

@@ -50,6 +50,7 @@ export function makeClient(s: Session) {
     setAccount: (id: string, body: { enabled?: boolean; alias?: string; auto?: boolean }) =>
       req<Account>(`/api/accounts/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) }),
     forgetAccount: (id: string) => req<void>(`/api/accounts/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    setMaster: (account: string) => req<{ master_account: string }>("/api/master", { method: "POST", body: JSON.stringify({ account }) }),
     link: (follower: string, master_account: string, multiplier: number, enabled: boolean) =>
       req<Rule>(`/api/accounts/${encodeURIComponent(follower)}/link`, { method: "PUT", body: JSON.stringify({ master_account, multiplier, enabled }) }),
     unlink: (follower: string, master: string) =>

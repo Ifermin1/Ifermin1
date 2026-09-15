@@ -26,6 +26,10 @@ class BrokerBridge(ABC):
         """El addon anuncia su versión en el HEARTBEAT; las implementaciones pueden reaccionar."""
         self.health.addon_version = version
 
+    async def set_master(self, account: str) -> str:
+        """Cambia la cuenta maestra en el bróker. Devuelve el nombre aplicado o lanza RuntimeError."""
+        raise RuntimeError("este puente no permite cambiar la maestra")
+
     @abstractmethod
     async def get_accounts(self) -> list[BrokerAccount]:
         """Cuentas que el bróker conoce (conectadas o no, si el addon lo soporta)."""

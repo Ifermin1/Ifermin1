@@ -70,6 +70,13 @@ class MockBridge(BrokerBridge):
         await self.bus.publish(TOPIC_MASTER_EVENT, event)
         return event
 
+    async def set_master(self, account: str) -> str:
+        if account not in self.accounts:
+            raise RuntimeError(f"cuenta desconocida: {account}")
+        self.health.master_account = account
+        await self.bus.publish(TOPIC_MASTER_EVENT, {"msg_type": "HEARTBEAT", "account": account, "version": "mock"})
+        return account
+
     async def get_accounts(self) -> list[BrokerAccount]:
         self.health.last_sync = datetime.now()
         # pequeño ruido para que el dashboard se mueva

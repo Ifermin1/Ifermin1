@@ -7,6 +7,8 @@
 //   :5556 SUB  <- TradePilot PUB   órdenes para las cuentas follower
 //   :5557 REP  <- TradePilot REQ   "GET_ACCOUNTS"     -> "Sim101|50000.0;Sim102|25000.0"  (conectadas)
 //                                  "GET_ACCOUNTS_ALL" -> "Sim101|50000.0|Connected|MFF;..." (todas)
+//                                  "GET_MASTER"       -> "Sim101"
+//                                  "SET_MASTER|Sim102" -> "OK|Sim102"  (cambia la master en caliente y la guarda)
 //
 // Instalación: ver ninjatrader/README.md (requiere NetMQ.dll + AsyncIO.dll en
 // Documents\NinjaTrader 8\bin\Custom y añadirlas como referencias).
@@ -34,7 +36,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 {
     public class TradePilotXBridge : AddOnBase
     {
-        private const string BridgeVersion = "1.1";
+        private const string BridgeVersion = "1.2";
 
         // ---- configuración ------------------------------------------------
         private class BridgeConfig
@@ -154,7 +156,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                     foreach (string sym in cfg.PriceInstruments)
                         EnsurePriceFeed(sym);
 
-                    Info(string.Format("Bridge v{0} online. master={1} pub={2} sub={3} sync={4} (GET_ACCOUNTS_ALL disponible)",
+                    Info(string.Format("Bridge v{0} online. master={1} pub={2} sub={3} sync={4} (GET_ACCOUNTS_ALL, SET_MASTER disponibles)",
                         BridgeVersion, cfg.MasterAccount, cfg.MasterPort, cfg.FollowerPort, cfg.SyncPort));
                 }
                 catch (Exception ex)
@@ -221,6 +223,27 @@ namespace NinjaTrader.NinjaScript.AddOns
                 master.PositionUpdate += OnMasterPosition;
                 Info("Escuchando cuenta master " + master.Name);
             }
+        }
+
+        /// <summary>Cambia la cuenta master en caliente (desde TradePilot) y lo persiste en config.json.</summary>
+        private string SetMaster(string name)
+        {
+            name = (name ?? "").Trim();
+            if (name.Length == 0) return "ERROR|nombre vacío";
+            bool exists;
+            lock (Account.All) exists = Account.All.Any(a => a.Name == name);
+            if (!exists) return "ERROR|cuenta desconocida: " + name;
+            lock (lifecycleLock)
+            {
+                if (name == cfg.MasterAccount && master != null) return "OK|" + name;
+                DetachMaster();
+                cfg.MasterAccount = name;
+                SaveConfig();
+                AttachMaster();
+                Publish(Json.Obj("msg_type", "HEARTBEAT", "account", cfg.MasterAccount, "version", BridgeVersion, "timestamp", Now()));
+                Info("Cuenta master cambiada a " + name + (master == null ? " (aún no conectada)" : ""));
+            }
+            return "OK|" + name;
         }
 
         private void DetachMaster()
@@ -642,6 +665,14 @@ namespace NinjaTrader.NinjaScript.AddOns
                     }
                     reply = string.Join(";", parts);
                 }
+                else if (request == "GET_MASTER")
+                {
+                    reply = cfg.MasterAccount;
+                }
+                else if (request.StartsWith("SET_MASTER|"))
+                {
+                    reply = SetMaster(request.Substring("SET_MASTER|".Length));
+                }
                 else if (request == "PING")
                 {
                     reply = "PONG";
@@ -757,7 +788,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                 Directory.CreateDirectory(ConfigDir);
                 if (!File.Exists(ConfigPath))
                 {
-                    File.WriteAllText(ConfigPath, DefaultConfigJson(c), new UTF8Encoding(false));
+                    File.WriteAllText(ConfigPath, ConfigJson(c), new UTF8Encoding(false));
                     Info("Config creada con valores por defecto: " + ConfigPath);
                     return c;
                 }
@@ -780,13 +811,28 @@ namespace NinjaTrader.NinjaScript.AddOns
             return c;
         }
 
+        private void SaveConfig()
+        {
+            try
+            {
+                Directory.CreateDirectory(ConfigDir);
+                File.WriteAllText(ConfigPath, ConfigJson(cfg), new UTF8Encoding(false));
+            }
+            catch (Exception ex) { Error("No se pudo guardar config.json: " + ex.Message); }
+        }
+
         private static List<string> ParseList(string raw)
         {
             return (raw ?? "").Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)
                 .Select(x => x.Trim().Trim('"')).Where(x => x.Length > 0).ToList();
         }
 
-        private static string DefaultConfigJson(BridgeConfig c)
+        private static string JsonList(List<string> items)
+        {
+            return "[" + string.Join(", ", items.Select(x => "\"" + x.Replace("\"", "") + "\"")) + "]";
+        }
+
+        private static string ConfigJson(BridgeConfig c)
         {
             return "{\n"
                 + "  \"MasterAccount\": \"" + c.MasterAccount + "\",\n"
@@ -794,11 +840,11 @@ namespace NinjaTrader.NinjaScript.AddOns
                 + "  \"MasterPort\": " + c.MasterPort + ",\n"
                 + "  \"FollowerPort\": " + c.FollowerPort + ",\n"
                 + "  \"SyncPort\": " + c.SyncPort + ",\n"
-                + "  \"PublishPrices\": true,\n"
+                + "  \"PublishPrices\": " + (c.PublishPrices ? "true" : "false") + ",\n"
                 + "  \"PriceThrottleMs\": " + c.PriceThrottleMs + ",\n"
                 + "  \"HeartbeatMs\": " + c.HeartbeatMs + ",\n"
-                + "  \"PriceInstruments\": [],\n"
-                + "  \"AccountFilter\": []\n"
+                + "  \"PriceInstruments\": " + JsonList(c.PriceInstruments) + ",\n"
+                + "  \"AccountFilter\": " + JsonList(c.AccountFilter) + "\n"
                 + "}\n";
         }
 

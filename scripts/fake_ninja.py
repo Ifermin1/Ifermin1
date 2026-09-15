@@ -58,6 +58,16 @@ while True:
             msg = rep.recv_string()
             if msg == "GET_ACCOUNTS":
                 rep.send_string(";".join(f"{a}|{b:.2f}" for a, b in ACCOUNTS.items()))
+            elif msg == "GET_MASTER":
+                rep.send_string(MASTER)
+            elif msg.startswith("SET_MASTER|") and "--old-addon" not in sys.argv:
+                new = msg.split("|", 1)[1]
+                if new in ACCOUNTS or new in OFFLINE:
+                    MASTER = new; print("MASTER CAMBIADA A", MASTER)
+                    send({"msg_type": "HEARTBEAT", "account": MASTER, "version": "1.2", "timestamp": now()})
+                    rep.send_string("OK|" + new)
+                else:
+                    rep.send_string("ERROR|cuenta desconocida: " + new)
             elif msg == "GET_ACCOUNTS_ALL" and "--old-addon" not in sys.argv:
                 rep.send_string(";".join([f"{a}|{b:.2f}|Connected|{CONNECTION}" for a, b in ACCOUNTS.items()]
                                          + [f"{a}|{b:.2f}|Disconnected|{CONNECTION}" for a, b in OFFLINE.items()]))
@@ -83,7 +93,7 @@ while True:
               "ask": round(price + 0.25, 2), "timestamp": now()})
         next_price = t + 0.25
     if t >= next_hb:
-        send({"msg_type": "HEARTBEAT", "account": MASTER, "timestamp": now()}); next_hb = t + 5
+        send({"msg_type": "HEARTBEAT", "account": MASTER, "version": "1.2", "timestamp": now()}); next_hb = t + 5
     if t >= next_emit:
         oid = uuid.uuid4().hex[:8]; action = random.choice(["BUY", "SELL"])
         send({"msg_type": "EXECUTION", "account": MASTER, "action": action, "symbol": SYMBOL, "quantity": 1,

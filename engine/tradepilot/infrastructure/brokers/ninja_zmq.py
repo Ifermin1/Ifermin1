@@ -91,6 +91,34 @@ class NinjaZmqBridge(BrokerBridge):
                 self.health.error_count += 1
                 logger.error(f"Error en listener ZMQ: {exc}")
 
+    async def request(self, message: str, timeout_ms: int = 3000) -> str | None:
+        """Petición REQ/REP genérica al addon. None si no responde."""
+        if not self._running:
+            return None
+        async with self._req_lock:
+            try:
+                await self.req_socket.send_string(message)
+                if not await self.req_socket.poll(timeout_ms):
+                    self._reset_req_socket()
+                    return None
+                return await self.req_socket.recv_string()
+            except Exception as exc:
+                logger.error(f"Error en petición '{message[:40]}': {exc}")
+                self._reset_req_socket()
+                return None
+
+    async def set_master(self, account: str) -> str:
+        reply = await self.request(f"SET_MASTER|{account}")
+        if reply is None:
+            raise RuntimeError("NinjaTrader no responde (¿addon cargado?)")
+        if reply.startswith("OK|"):
+            self.health.master_account = reply[3:]
+            logger.info(f"Cuenta maestra cambiada en NinjaTrader a {self.health.master_account}")
+            return self.health.master_account
+        if reply.startswith("ERROR|unknown request"):
+            raise RuntimeError("el addon es antiguo: actualiza a v1.2 para cambiar la maestra desde la consola")
+        raise RuntimeError(reply.replace("ERROR|", "El addon respondió: "))
+
     async def get_accounts(self) -> list[BrokerAccount]:
         if not self._running:
             return []
