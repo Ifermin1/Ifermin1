@@ -130,6 +130,13 @@ class ReplicationService:
             self._on_follower_fill(event)
             return []
 
+        master = self.bridge.health.master_account
+        if master and event.account.strip().lower() != master.strip().lower():
+            # operación manual en una cuenta que no es la maestra (p. ej. cerrar a mano una seguidora)
+            self.audit.log("ACCOUNT_FILL", f"{event.account}: {event.action} {event.quantity} {event.symbol} @ {event.price} (manual, no replicado)",
+                           target=event.account, details={"order_id": event.order_id})
+            return []
+
         return await self._replicate(event)
 
     # ---- maestro ----

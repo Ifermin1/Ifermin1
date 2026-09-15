@@ -53,7 +53,10 @@ class MasterEvent(DomainModel):
 
     @property
     def dedup_key(self) -> tuple:
-        return (self.msg_type, self.account, self.order_id, self.quantity, self.execution_id, self.state)
+        """Misma orden en distintos estados (Accepted/Working) = mismo evento. Un fill se
+        distingue por execution_id; una modificación, por sus precios."""
+        return (self.msg_type, self.account, self.order_id, self.quantity, self.execution_id,
+                round(self.limit_price, 6), round(self.stop_price, 6))
 
 
 class ReplicationRule(DomainModel):

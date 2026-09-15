@@ -126,3 +126,30 @@ async def test_no_rule_is_explained(container):
     await rep.process_master_event(_event(order_id="b", symbol="NQ SEP26").model_dump(mode="json"))
     last = container.audit.recent(1)[0]
     assert last.event_type == "NO_RULE" and "filtro" in last.message
+
+
+async def test_pending_order_in_two_states_is_one_order(container):
+    """NinjaTrader publica ORDER_PENDING en Accepted y luego en Working: debe replicarse UNA vez."""
+    rep = container.replication
+    rep.add_rule("Sim101", "Sim102")
+    base = dict(msg_type="ORDER_PENDING", order_type="LIMIT", price=20100.0, limit_price=20100.0, order_id="TP1", action="SELL")
+    assert len(await rep.process_master_event(_event(**base, state="Accepted").model_dump(mode="json"))) == 1
+    assert len(await rep.process_master_event(_event(**base, state="Working").model_dump(mode="json"))) == 0
+    # una modificación real (otro precio) sí pasa
+    mod = dict(base, msg_type="ORDER_MODIFIED", price=20150.0, limit_price=20150.0)
+    assert len(await rep.process_master_event(_event(**mod, state="ChangeSubmitted").model_dump(mode="json"))) == 1
+    assert len(await rep.process_master_event(_event(**mod, state="Working").model_dump(mode="json"))) == 0
+    assert rep.stats["orders_out"] == 2 and rep.stats["duplicates"] == 2
+
+
+async def test_manual_fill_in_other_account_is_not_replicated(container):
+    rep = container.replication
+    container.bridge.health.master_account = "Sim101"
+    rep.add_rule("Sim101", "Sim102")
+    # cierre manual en Sim102: EXECUTION sin master_order_id desde una cuenta que no es la maestra
+    tasks = await rep.process_master_event(_event(account="Sim102", order_id="manual1").model_dump(mode="json"))
+    assert tasks == [] and rep.stats["orders_out"] == 0
+    last = container.audit.recent(1)[0]
+    assert last.event_type == "ACCOUNT_FILL" and last.target_account == "Sim102"
+    # y de la maestra sí
+    assert len(await rep.process_master_event(_event(order_id="m1").model_dump(mode="json"))) == 1

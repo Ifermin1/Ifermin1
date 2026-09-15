@@ -36,7 +36,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 {
     public class TradePilotXBridge : AddOnBase
     {
-        private const string BridgeVersion = "1.2";
+        private const string BridgeVersion = "1.3";
 
         // ---- configuración ------------------------------------------------
         private class BridgeConfig
@@ -80,6 +80,8 @@ namespace NinjaTrader.NinjaScript.AddOns
         private readonly ConcurrentDictionary<string, bool> feedWarned = new ConcurrentDictionary<string, bool>();
         // (follower, master_order_id) -> orden del follower, para modificar/cancelar y evitar duplicados
         private readonly ConcurrentDictionary<string, Order> followerOrders = new ConcurrentDictionary<string, Order>();
+        // Órdenes pendientes del master ya publicadas: NinjaTrader emite Accepted y Working seguidos
+        private readonly ConcurrentDictionary<string, bool> pendingPublished = new ConcurrentDictionary<string, bool>();
         // Cuentas follower cuyas órdenes/ejecuciones ya escuchamos (ACK de vuelta a TradePilot)
         private readonly ConcurrentDictionary<string, Account> followers = new ConcurrentDictionary<string, Account>();
         private readonly object lifecycleLock = new object();
@@ -156,7 +158,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                     foreach (string sym in cfg.PriceInstruments)
                         EnsurePriceFeed(sym);
 
-                    Info(string.Format("Bridge v{0} online. master={1} pub={2} sub={3} sync={4} (GET_ACCOUNTS_ALL, SET_MASTER disponibles)",
+                    Info(string.Format("Bridge v{0} online. master={1} pub={2} sub={3} sync={4} (GET_ACCOUNTS_ALL, SET_MASTER disponibles; sin duplicados de órdenes pendientes)",
                         BridgeVersion, cfg.MasterAccount, cfg.MasterPort, cfg.FollowerPort, cfg.SyncPort));
                 }
                 catch (Exception ex)
@@ -293,17 +295,23 @@ namespace NinjaTrader.NinjaScript.AddOns
                 if (order.OrderType == OrderType.Market) return;
 
                 string msgType = null;
+                string orderKey = OrderKey(order);
                 switch (e.OrderState)
                 {
                     case OrderState.Accepted:
                     case OrderState.Working:
-                        msgType = order.Filled > 0 ? null : "ORDER_PENDING";
+                        // Sólo la primera vez: Accepted -> Working (y Working tras un cambio) es la misma orden
+                        msgType = order.Filled > 0 || !pendingPublished.TryAdd(orderKey, true) ? null : "ORDER_PENDING";
                         break;
                     case OrderState.ChangeSubmitted:
                         msgType = "ORDER_MODIFIED";
                         break;
                     case OrderState.Cancelled:
                         msgType = "ORDER_CANCELLED";
+                        goto case OrderState.Rejected;
+                    case OrderState.Filled:
+                    case OrderState.Rejected:
+                        bool dummy; pendingPublished.TryRemove(orderKey, out dummy);
                         break;
                 }
                 if (msgType == null) return;
@@ -451,12 +459,12 @@ namespace NinjaTrader.NinjaScript.AddOns
                 {
                     case "EXECUTION":
                         // Si ya replicamos la orden limitada del master (ORDER_PENDING), su fill lo hará la propia orden del follower.
-                        if (existing != null && IsWorking(existing)) { Info("EXECUTION ignorada: el follower ya tiene orden trabajando para " + masterOrderId); return; }
+                        if (existing != null && IsLive(existing)) { Info("EXECUTION ignorada: el follower ya tiene orden viva para " + masterOrderId); return; }
                         SubmitNew(account, symbol, Get(m, "action"), OrderType.Market, qty, 0, 0, key, masterOrderId);
                         break;
 
                     case "ORDER_PENDING":
-                        if (existing != null && IsWorking(existing)) return; // duplicado
+                        if (existing != null && IsLive(existing)) { Info("ORDER_PENDING duplicada ignorada para " + key); return; }
                         {
                             OrderType type = ParseType(Get(m, "order_type"));
                             double limit = NumOr(m, "limit_price", type == OrderType.Limit || type == OrderType.StopLimit ? price : 0);
@@ -567,7 +575,12 @@ namespace NinjaTrader.NinjaScript.AddOns
                 string native = e.Comment ?? "";
                 string line = string.Format("Follower {0}: {1} {2} {3} {4} -> {5}{6}", account, order.Name, order.OrderAction,
                     order.Quantity, order.Instrument.FullName, e.OrderState, string.IsNullOrEmpty(error) ? "" : " ERROR=" + error + " " + native);
-                if (e.OrderState == OrderState.Rejected) Error(line); else Info(line);
+                if (e.OrderState == OrderState.Rejected)
+                {
+                    Error(line);
+                    Order dead; followerOrders.TryRemove(account + "|" + MasterIdFromName(order.Name), out dead);
+                }
+                else Info(line);
                 Publish(Json.Obj(
                     "msg_type", "ORDER_STATUS",
                     "account", account,
@@ -613,6 +626,13 @@ namespace NinjaTrader.NinjaScript.AddOns
                     "timestamp", e.Time.ToString("o")));
             }
             catch (Exception ex) { Error("OnFollowerExecution: " + ex.Message); }
+        }
+
+        /// <summary>Orden en cualquier estado no terminal (incluye Initialized/Submitted): sirve para no duplicar.</summary>
+        private static bool IsLive(Order o)
+        {
+            return o.OrderState != OrderState.Filled && o.OrderState != OrderState.Cancelled
+                && o.OrderState != OrderState.Rejected && o.OrderState != OrderState.Unknown;
         }
 
         private static bool IsWorking(Order o)
