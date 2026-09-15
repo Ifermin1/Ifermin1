@@ -87,7 +87,7 @@ button:disabled { opacity: .6; cursor: default; }
 .t-REPLICATED, .t-FOLLOWER_FILL { background: rgba(52,211,153,.15); color: var(--ok); }
 .t-MASTER_RECEIVED { background: rgba(34,211,238,.15); color: var(--accent); }
 .t-BLOCKED, .t-ERROR, .t-KILL_SWITCH_ON, .t-FOLLOWER_REJECTED { background: rgba(248,113,113,.15); color: var(--bad); }
-.t-SKIPPED, .t-RISK_LIMIT_SET { background: rgba(251,191,36,.15); color: var(--warn); }
+.t-SKIPPED, .t-RISK_LIMIT_SET, .t-NO_RULE { background: rgba(251,191,36,.15); color: var(--warn); }
 
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; }

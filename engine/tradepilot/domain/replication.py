@@ -79,11 +79,19 @@ class ReplicationRule(DomainModel):
         return v.strip().upper() if isinstance(v, str) else v
 
     def matches(self, event: MasterEvent) -> bool:
-        if not self.enabled or self.master_account != event.account:
-            return False
-        if self.symbol_filter and self.symbol_filter != event.symbol.upper():
-            return False
-        return True
+        return self.enabled and self.master_matches(event.account) and self.symbol_matches(event.symbol)
+
+    def master_matches(self, account: str) -> bool:
+        return self.master_account.strip().lower() == (account or "").strip().lower()
+
+    def symbol_matches(self, symbol: str) -> bool:
+        """Sin filtro: todo. Con filtro: nombre exacto ("NQ SEP26") o raíz ("NQ"),
+        para que no importe si NinjaTrader lo llama "NQ 12-26" o "NQ SEP26"."""
+        if not self.symbol_filter:
+            return True
+        sym = (symbol or "").strip().upper()
+        flt = self.symbol_filter
+        return sym == flt or sym.split(" ")[0] == flt.split(" ")[0]
 
     def scale(self, quantity: int) -> int:
         return int(quantity * self.multiplier)

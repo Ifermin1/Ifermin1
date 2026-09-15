@@ -105,3 +105,24 @@ def test_bad_timestamp_does_not_drop_trade():
     for ts in ["2026-09-15T17:58:49.981841+00:000", "basura", "", None, "2026-09-15T14:37:20.0725123-05:00"]:
         e = _event(timestamp=ts)
         assert isinstance(e.timestamp, datetime)
+
+
+def test_symbol_root_and_case_insensitive_master():
+    rule = ReplicationRule(id="r", master_account=" sim101 ", follower_account="Sim102", symbol_filter="NQ 12-26")
+    assert rule.matches(_event(account="Sim101", symbol="NQ SEP26"))   # misma raíz, distinto nombre de contrato
+    assert rule.matches(_event(symbol="NQ 12-26"))
+    assert not rule.matches(_event(symbol="MNQ SEP26"))                # MNQ no es NQ
+    rule2 = ReplicationRule(id="r2", master_account="Sim101", follower_account="Sim102", symbol_filter="ES")
+    assert rule2.matches(_event(symbol="ES DEC26")) and not rule2.matches(_event(symbol="NQ SEP26"))
+
+
+async def test_no_rule_is_explained(container):
+    rep = container.replication
+    rep.add_rule("Sim999", "Sim102")
+    await rep.process_master_event(_event(order_id="a").model_dump(mode="json"))
+    last = container.audit.recent(1)[0]
+    assert last.event_type == "NO_RULE" and "Sim999" in last.message and "Sim101" in last.message
+    rep.add_rule("Sim101", "Sim102", symbol_filter="ES")
+    await rep.process_master_event(_event(order_id="b", symbol="NQ SEP26").model_dump(mode="json"))
+    last = container.audit.recent(1)[0]
+    assert last.event_type == "NO_RULE" and "filtro" in last.message

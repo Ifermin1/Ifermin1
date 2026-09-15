@@ -115,9 +115,11 @@ class ReplicationService:
                        source=event.account, details={"order_id": event.order_id, "state": event.state})
 
         tasks: list[ReplicationTask] = []
+        matched = 0
         for rule in self.rules:
             if not rule.matches(event):
                 continue
+            matched += 1
             qty = rule.scale(event.quantity)
             if qty <= 0:
                 self.audit.log("SKIPPED", f"Regla {rule.id[:8]}: qty escalada {qty} <= 0",
@@ -133,7 +135,22 @@ class ReplicationService:
                                    scaled_quantity=qty, master_order_id=event.order_id)
             await self._execute(task)
             tasks.append(task)
+        if matched == 0:
+            self._explain_no_match(event)
         return tasks
+
+    def _explain_no_match(self, event: MasterEvent) -> None:
+        """Deja en la auditoría por qué no se replicó, para no fallar en silencio."""
+        enabled = [r for r in self.rules if r.enabled]
+        if not enabled:
+            reason = "no hay reglas activas"
+        elif not any(r.master_matches(event.account) for r in enabled):
+            masters = sorted({r.master_account for r in enabled})
+            reason = f"ninguna regla tiene como maestro '{event.account}' (maestros configurados: {', '.join(masters)})"
+        else:
+            filters = sorted({r.symbol_filter for r in enabled if r.master_matches(event.account) and r.symbol_filter})
+            reason = f"el símbolo '{event.symbol}' no pasa el filtro ({', '.join(filters)})"
+        self.audit.log("NO_RULE", f"No replicado: {reason}", source=event.account)
 
     async def _execute(self, task: ReplicationTask) -> None:
         ev = task.master_event

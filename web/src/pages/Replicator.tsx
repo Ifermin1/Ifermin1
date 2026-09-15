@@ -30,7 +30,7 @@ export function Replicator() {
   }
 
   const ids = accounts.map((a) => a.account_id);
-  const feed = audit.filter((a) => ["MASTER_RECEIVED", "REPLICATED", "BLOCKED", "SKIPPED", "ERROR", "FOLLOWER_FILL", "FOLLOWER_REJECTED"].includes(a.event_type)).slice(0, 25);
+  const feed = audit.filter((a) => ["MASTER_RECEIVED", "REPLICATED", "BLOCKED", "SKIPPED", "ERROR", "FOLLOWER_FILL", "FOLLOWER_REJECTED", "NO_RULE"].includes(a.event_type)).slice(0, 25);
 
   return (
     <div className="grid">
@@ -39,7 +39,7 @@ export function Replicator() {
           <label>Maestro<input list="accts" value={master} onChange={(e) => setMaster(e.target.value)} placeholder="Sim101" required /></label>
           <label>Seguidor<input list="accts" value={follower} onChange={(e) => setFollower(e.target.value)} placeholder="Sim102" required /></label>
           <label>Multiplicador<input type="number" step="0.1" min="0.1" value={mult} onChange={(e) => setMult(e.target.value)} /></label>
-          <label>Símbolo (opcional)<input value={symbol} onChange={(e) => setSymbol(e.target.value)} placeholder="Todos" /></label>
+          <label>Símbolo (opcional)<input value={symbol} onChange={(e) => setSymbol(e.target.value)} placeholder="Todos · ej. NQ" /></label>
           <datalist id="accts">{ids.map((i) => <option key={i} value={i} />)}</datalist>
           <button className="primary">Añadir</button>
         </form>
