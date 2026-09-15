@@ -50,8 +50,14 @@ El script crea el entorno virtual de Python, compila la consola web si falta (ne
 
 ## Con NinjaTrader real (PC Windows)
 
-1. En `engine/.env`: `ENGINE_MODE=ninja` (y los puertos ZMQ si no son 5555/5556/5557).
-2. `powershell -File scripts/run_engine.ps1`
+En modo `mock` el engine **no está conectado a NinjaTrader**: las operaciones son inventadas y lo que abras en NinjaTrader no llega. Para replicar operaciones reales:
+
+1. En `engine\.env` cambia `ENGINE_MODE=mock` por `ENGINE_MODE=ninja` (y los puertos ZMQ si no son 5555/5556/5557).
+2. Abre NinjaTrader con el addon ZMQ de TradePilot activo (el mismo que usaba la versión de escritorio).
+3. Ctrl+C en el engine y arráncalo de nuevo con `scripts\run_engine.ps1`. En el Inicio de la consola el puente debe decir **NinjaTrader (ZMQ)** y la pestaña *Cuentas* debe mostrar tus cuentas reales al cabo de unos segundos.
+4. Crea las reglas con los **nombres de cuenta reales** que aparecen en *Cuentas* (maestro y seguidor tienen que ser cuentas distintas).
+
+Si *Cuentas* queda vacío, el addon no está respondiendo en 5557: revisa que NinjaTrader esté abierto y el addon cargado. Sin NinjaTrader a mano puedes probar el modo `ninja` con `python scripts\fake_ninja.py`, que imita el addon.
 3. Acceso desde fuera de casa (túnel Cloudflare / Tailscale): fase posterior, ver `docs/ARQUITECTURA.md` §2.
 
 ## Desarrollo
