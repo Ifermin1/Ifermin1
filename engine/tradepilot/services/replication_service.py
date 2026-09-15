@@ -1,3 +1,4 @@
+import time
 import uuid
 from collections import OrderedDict
 from datetime import datetime
@@ -33,8 +34,15 @@ class ReplicationService:
         self.bus = bus
         self.accounts = accounts
         self.rules: list[ReplicationRule] = store.get_all_rules()
-        self.stats = {"events_in": 0, "orders_out": 0, "blocked": 0, "errors": 0, "rejected": 0, "fills": 0, "duplicates": 0}
+        self.stats = {"events_in": 0, "orders_out": 0, "blocked": 0, "errors": 0, "rejected": 0, "fills": 0, "duplicates": 0,
+                      "latency_ms_last": None, "latency_ms_avg": None, "slippage_last": None, "slippage_avg": None}
         self._seen: OrderedDict[tuple, None] = OrderedDict()
+        # (follower, master_order_id) -> qty de la orden pendiente que ya copiamos (stop / take profit)
+        self._sent_pending: OrderedDict[tuple, int] = OrderedDict()
+        # (follower, master_order_id) -> qty que el follower ya ejecutó de esa orden
+        self._follower_filled: OrderedDict[tuple, int] = OrderedDict()
+        # master_order_id -> (precio, monotonic al recibirlo, action)  para medir latencia y deslizamiento
+        self._master_execs: OrderedDict[str, tuple] = OrderedDict()
 
     async def start(self) -> None:
         self.bus.subscribe(TOPIC_MASTER_EVENT, self.process_master_event)
@@ -145,6 +153,9 @@ class ReplicationService:
         self.audit.log("MASTER_RECEIVED", f"[{event.msg_type}] {event.action} {event.quantity} {event.symbol} @ {event.price}",
                        source=event.account, details={"order_id": event.order_id, "state": event.state})
 
+        if event.msg_type == "EXECUTION":
+            self._remember(self._master_execs, event.order_id, (event.price, time.monotonic(), event.action))
+
         tasks: list[ReplicationTask] = []
         matched = 0
         for rule in self.rules:
@@ -152,6 +163,13 @@ class ReplicationService:
                 continue
             matched += 1
             qty = rule.scale(event.quantity)
+            key = (rule.follower_account.lower(), event.order_id)
+            if event.msg_type == "EXECUTION" and key in self._sent_pending \
+                    and self._follower_filled.get(key, 0) >= self._sent_pending[key]:
+                # El follower ya ejecutó su propia copia de esa orden (stop / TP): copiar el fill sería una salida doble.
+                self.audit.log("SKIPPED", f"Fill del maestro no copiado: {rule.follower_account} ya ejecutó su orden {event.order_id[:8]}",
+                               source=event.account, target=rule.follower_account)
+                continue
             if qty <= 0:
                 self.audit.log("SKIPPED", f"Regla {rule.id[:8]}: qty escalada {qty} <= 0",
                                source=event.account, target=rule.follower_account)
@@ -194,6 +212,8 @@ class ReplicationService:
                                          limit_price=ev.limit_price, stop_price=ev.stop_price)
             task.status = "SENT"
             self.stats["orders_out"] += 1
+            if ev.msg_type == "ORDER_PENDING":
+                self._remember(self._sent_pending, (task.target_account.lower(), task.master_order_id), task.scaled_quantity)
             self.audit.log("REPLICATED", f"[{ev.msg_type}] {ev.action} {task.scaled_quantity} {ev.symbol} -> {task.target_account}",
                            source=ev.account, target=task.target_account,
                            details={"rule_id": task.rule_id, "master_order_id": task.master_order_id})
@@ -206,8 +226,23 @@ class ReplicationService:
     # ---- followers (ACK de vuelta) ----
     def _on_follower_fill(self, event: MasterEvent) -> None:
         self.stats["fills"] += 1
-        self.audit.log("FOLLOWER_FILL", f"{event.account}: {event.action} {event.quantity} {event.symbol} @ {event.price}",
-                       target=event.account, details={"master_order_id": event.master_order_id, "order_id": event.order_id})
+        key = (event.account.lower(), event.master_order_id)
+        self._remember(self._follower_filled, key, self._follower_filled.get(key, 0) + event.quantity)
+        msg = f"{event.account}: {event.action} {event.quantity} {event.symbol} @ {event.price}"
+        details: dict = {"master_order_id": event.master_order_id, "order_id": event.order_id}
+        ref = self._master_execs.get(event.master_order_id)
+        if ref:
+            m_price, m_at, m_action = ref
+            latency_ms = round((time.monotonic() - m_at) * 1000)
+            # deslizamiento con signo: positivo = peor para el follower
+            worse = event.price - m_price if m_action.upper().startswith("BUY") else m_price - event.price
+            slip = round(worse, 4)
+            details.update({"latency_ms": latency_ms, "master_price": m_price, "slippage": slip})
+            msg += f" (maestro {m_price}, {'+' if slip >= 0 else ''}{slip}, {latency_ms} ms)"
+            self.stats["latency_ms_last"], self.stats["slippage_last"] = latency_ms, slip
+            self.stats["latency_ms_avg"] = round(_ema(self.stats["latency_ms_avg"], latency_ms))
+            self.stats["slippage_avg"] = round(_ema(self.stats["slippage_avg"], slip), 4)
+        self.audit.log("FOLLOWER_FILL", msg, target=event.account, details=details)
 
     def _on_follower_status(self, data: dict) -> None:
         account = str(data.get("account", ""))
@@ -232,6 +267,13 @@ class ReplicationService:
         except Exception as exc:
             logger.warning(f"POSITION inválida: {exc} | {data}")
 
+    @staticmethod
+    def _remember(store: OrderedDict, key, value, limit: int = 2000) -> None:
+        store[key] = value
+        store.move_to_end(key)
+        while len(store) > limit:
+            store.popitem(last=False)
+
     def _is_duplicate(self, event: MasterEvent) -> bool:
         key = event.dedup_key
         if key in self._seen:
@@ -240,3 +282,7 @@ class ReplicationService:
         if len(self._seen) > 2000:
             self._seen.popitem(last=False)
         return False
+
+
+def _ema(prev: float | None, value: float, alpha: float = 0.3) -> float:
+    return value if prev is None else prev + alpha * (value - prev)

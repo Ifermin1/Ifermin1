@@ -36,7 +36,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 {
     public class TradePilotXBridge : AddOnBase
     {
-        private const string BridgeVersion = "1.3";
+        private const string BridgeVersion = "1.4";
 
         // ---- configuración ------------------------------------------------
         private class BridgeConfig
@@ -82,6 +82,8 @@ namespace NinjaTrader.NinjaScript.AddOns
         private readonly ConcurrentDictionary<string, Order> followerOrders = new ConcurrentDictionary<string, Order>();
         // Órdenes pendientes del master ya publicadas: NinjaTrader emite Accepted y Working seguidos
         private readonly ConcurrentDictionary<string, bool> pendingPublished = new ConcurrentDictionary<string, bool>();
+        // Cantidad ya copiada a mercado para cubrir lo que la orden del follower NO ejecutó (rechazo/cancelación)
+        private readonly ConcurrentDictionary<string, int> reconciledQty = new ConcurrentDictionary<string, int>();
         // Cuentas follower cuyas órdenes/ejecuciones ya escuchamos (ACK de vuelta a TradePilot)
         private readonly ConcurrentDictionary<string, Account> followers = new ConcurrentDictionary<string, Account>();
         private readonly object lifecycleLock = new object();
@@ -158,7 +160,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                     foreach (string sym in cfg.PriceInstruments)
                         EnsurePriceFeed(sym);
 
-                    Info(string.Format("Bridge v{0} online. master={1} pub={2} sub={3} sync={4} (GET_ACCOUNTS_ALL, SET_MASTER disponibles; sin duplicados de órdenes pendientes)",
+                    Info(string.Format("Bridge v{0} online. master={1} pub={2} sub={3} sync={4} (GET_ACCOUNTS_ALL, SET_MASTER; sin duplicados ni salidas dobles)",
                         BridgeVersion, cfg.MasterAccount, cfg.MasterPort, cfg.FollowerPort, cfg.SyncPort));
                 }
                 catch (Exception ex)
@@ -458,8 +460,24 @@ namespace NinjaTrader.NinjaScript.AddOns
                 switch (msgType)
                 {
                     case "EXECUTION":
-                        // Si ya replicamos la orden limitada del master (ORDER_PENDING), su fill lo hará la propia orden del follower.
-                        if (existing != null && IsLive(existing)) { Info("EXECUTION ignorada: el follower ya tiene orden viva para " + masterOrderId); return; }
+                        // Si ya replicamos esa orden del master (ORDER_PENDING), su fill lo hace la propia orden del follower.
+                        // Da igual que llegue antes o después: si la orden del follower está viva o ya ejecutó, no se copia.
+                        if (existing != null)
+                        {
+                            if (IsLive(existing)) { Info("EXECUTION ignorada: el follower ya tiene orden viva para " + masterOrderId); return; }
+                            int remaining = existing.Quantity - existing.Filled;
+                            if (remaining <= 0) { Info("EXECUTION ignorada: la orden del follower ya se ejecutó (" + masterOrderId + ")"); return; }
+                            // La orden del follower quedó sin ejecutar del todo (rechazada / cancelada): copiamos el fill del
+                            // master a mercado, pero nunca más de lo que faltó por ejecutar.
+                            int already = reconciledQty.GetOrAdd(key, 0);
+                            int toSend = Math.Min(qty, remaining - already);
+                            if (toSend <= 0) { Info("EXECUTION ignorada: lo pendiente de " + masterOrderId + " ya se cubrió"); return; }
+                            reconciledQty[key] = already + toSend;
+                            Warn(string.Format("Orden del follower {0} quedó {1} con {2}/{3} ejecutados: copiando {4} a mercado",
+                                masterOrderId, existing.OrderState, existing.Filled, existing.Quantity, toSend));
+                            SubmitNew(account, symbol, Get(m, "action"), OrderType.Market, toSend, 0, 0, key + "#recon" + already, masterOrderId);
+                            return;
+                        }
                         SubmitNew(account, symbol, Get(m, "action"), OrderType.Market, qty, 0, 0, key, masterOrderId);
                         break;
 
@@ -488,9 +506,9 @@ namespace NinjaTrader.NinjaScript.AddOns
                         break;
 
                     case "ORDER_CANCELLED":
-                        if (existing == null || !IsWorking(existing)) { Info("ORDER_CANCELLED sin orden trabajando para " + key); return; }
-                        account.Cancel(new[] { existing });
-                        Info("Cancelada " + key);
+                        if (existing == null || !IsLive(existing)) { Info("ORDER_CANCELLED sin orden viva para " + key); return; }
+                        try { account.Cancel(new[] { existing }); Info("Cancelada " + key); }
+                        catch (Exception cx) { Warn("No se pudo cancelar " + key + " en estado " + existing.OrderState + ": " + cx.Message); }
                         break;
 
                     default:
@@ -575,12 +593,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                 string native = e.Comment ?? "";
                 string line = string.Format("Follower {0}: {1} {2} {3} {4} -> {5}{6}", account, order.Name, order.OrderAction,
                     order.Quantity, order.Instrument.FullName, e.OrderState, string.IsNullOrEmpty(error) ? "" : " ERROR=" + error + " " + native);
-                if (e.OrderState == OrderState.Rejected)
-                {
-                    Error(line);
-                    Order dead; followerOrders.TryRemove(account + "|" + MasterIdFromName(order.Name), out dead);
-                }
-                else Info(line);
+                if (e.OrderState == OrderState.Rejected) Error(line); else Info(line);
                 Publish(Json.Obj(
                     "msg_type", "ORDER_STATUS",
                     "account", account,

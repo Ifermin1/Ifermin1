@@ -153,3 +153,38 @@ async def test_manual_fill_in_other_account_is_not_replicated(container):
     assert last.event_type == "ACCOUNT_FILL" and last.target_account == "Sim102"
     # y de la maestra sí
     assert len(await rep.process_master_event(_event(order_id="m1").model_dump(mode="json"))) == 1
+
+
+async def test_master_exit_fill_after_follower_already_filled_is_not_copied(container):
+    """Carrera real: el stop del follower se ejecuta antes de que llegue el fill del stop del maestro."""
+    rep = container.replication
+    container.bridge.health.master_account = "Sim101"
+    rep.add_rule("Sim101", "Sim102")
+    ts = "2026-09-15T16:50:00.0000000-05:00"
+    # 1. entrada a mercado del maestro
+    await rep.process_master_event(_event(order_id="E1", execution_id="x1", timestamp=ts).model_dump(mode="json"))
+    # 2. stop del maestro -> copiado como ORDER_PENDING al follower
+    await rep.process_master_event(_event(msg_type="ORDER_PENDING", order_type="STOPMARKET", action="SELL", quantity=2,
+                                          stop_price=19900.0, price=19900.0, order_id="S1", timestamp=ts).model_dump(mode="json"))
+    sent_before = len(container.bridge.sent_orders)
+    # 3. el follower ejecuta SU stop primero (EXECUTION con master_order_id=S1)
+    await rep.process_master_event(_event(account="Sim102", action="SELL", quantity=2, price=19899.5, order_id="F1",
+                                          master_order_id="S1", execution_id="f1", timestamp=ts).model_dump(mode="json"))
+    # 4. ahora llega el fill del stop del maestro: NO debe copiarse
+    tasks = await rep.process_master_event(_event(action="SELL", quantity=2, price=19900.0, order_id="S1",
+                                                  execution_id="m1", timestamp=ts).model_dump(mode="json"))
+    assert tasks == [] and len(container.bridge.sent_orders) == sent_before
+    assert any(a.event_type == "SKIPPED" and "ya ejecutó" in a.message for a in container.audit.recent(3))
+
+
+async def test_latency_and_slippage_measured(container):
+    rep = container.replication
+    container.bridge.health.master_account = "Sim101"
+    rep.add_rule("Sim101", "Sim102")
+    await rep.process_master_event(_event(order_id="M1", price=20000.0, action="BUY", execution_id="a").model_dump(mode="json"))
+    await rep.process_master_event(_event(account="Sim102", order_id="F9", master_order_id="M1", price=20000.5, action="BUY",
+                                          execution_id="b").model_dump(mode="json"))
+    fill = container.audit.recent(1)[0]
+    assert fill.event_type == "FOLLOWER_FILL" and fill.details["slippage"] == 0.5 and fill.details["latency_ms"] >= 0
+    assert rep.stats["slippage_avg"] == 0.5 and rep.stats["latency_ms_avg"] is not None
+    assert "maestro 20000.0" in fill.message

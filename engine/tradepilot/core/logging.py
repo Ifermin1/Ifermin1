@@ -14,4 +14,4 @@ def setup_logging() -> None:
     )
     logger.add(sys.stderr, format=fmt, level="DEBUG" if settings.DEBUG else "INFO")
     Path("logs").mkdir(exist_ok=True)
-    logger.add("logs/tradepilot_{time:YYYY-MM-DD}.log", rotation="100 MB", retention="10 days", format=fmt)
+    logger.add("logs/tradepilot_{time:YYYY-MM-DD}.log", rotation="100 MB", retention="10 days", format=fmt, enqueue=True)

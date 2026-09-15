@@ -17,7 +17,12 @@ export function Dashboard() {
         <Stat label="Fills seguidores" value={health?.stats.fills ?? 0} tone={health?.stats.fills ? "ok" : "muted"} />
         <Stat label="Rechazadas" value={(health?.stats.rejected ?? 0) + (health?.stats.blocked ?? 0)} tone={(health?.stats.rejected || health?.stats.blocked) ? "bad" : "muted"} />
         <Stat label="Errores" value={health?.stats.errors ?? 0} tone={health?.stats.errors ? "bad" : "ok"} />
+        <Stat label="Latencia copia" value={health?.stats.latency_ms_avg != null ? `${health.stats.latency_ms_avg} ms` : "—"}
+              tone={health?.stats.latency_ms_avg == null ? "muted" : health.stats.latency_ms_avg > 500 ? "warn" : "ok"} />
+        <Stat label="Deslizamiento medio" value={health?.stats.slippage_avg != null ? `${health.stats.slippage_avg > 0 ? "+" : ""}${health.stats.slippage_avg} pts` : "—"}
+              tone={health?.stats.slippage_avg == null ? "muted" : health.stats.slippage_avg > 1 ? "warn" : "ok"} />
       </div>
+      <p className="muted small">Latencia: desde que el engine recibe el fill del maestro hasta que recibe el fill del seguidor. Deslizamiento: precio del seguidor frente al del maestro, positivo = peor para el seguidor.</p>
 
       {risk?.kill_switch && (
         <Card className="alert-card">

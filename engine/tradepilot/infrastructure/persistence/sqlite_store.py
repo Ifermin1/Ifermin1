@@ -19,6 +19,10 @@ class SQLiteStore:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        if str(db_path) != ":memory:":
+            # Cada auditoría hacía un commit con fsync (~10 ms en Windows) en el camino crítico de la copia.
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA synchronous=NORMAL")
         self._lock = threading.Lock()
         self._init_db()
 
