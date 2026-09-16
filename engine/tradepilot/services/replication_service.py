@@ -19,6 +19,11 @@ STOP_TYPES = {"STOPMARKET", "STOPLIMIT", "STOP", "MIT"}
 
 REJECTED_STATES = {"REJECTED", "ERROR"}
 
+# El addon publica desde varios hilos de NinjaTrader: un seq puede llegar unos mensajes tarde sin que se haya perdido nada
+# (16/9 14:11: 15957 -> 15959 -> 15958 se contó como reinicio). Un reinicio real vuelve a empezar desde 1.
+SEQ_REORDER_WINDOW = 20      # seq hasta N por detrás del último: fuera de orden, no reinicio
+SEQ_RESTART_BELOW = 10       # seq <= N tras uno mayor: el addon arrancó de nuevo
+
 
 # Qué hizo el addon con la orden cuando no fue la copia normal (respuesta "OK|<detalle>", addon >= 2.0)
 ADDON_NOTES = {
@@ -57,6 +62,8 @@ class ReplicationService:
         self.close_on_stop_reject = close_on_stop_reject
         self.sync = None                      # SyncService, lo inyecta el contenedor
         self._last_seq: int | None = None
+        self._missing_seq: dict[int, float] = {}   # seq que aún no ha llegado -> monotonic en que se echó en falta
+        self.seq_grace = 2.0                       # s que se espera un seq atrasado antes de contarlo como perdido
         self.suppress_master_until: float = 0.0   # tras un FLATTEN de la maestra, sus fills no se copian
         self.rules: list[ReplicationRule] = store.get_all_rules()
         self.stats = {"events_in": 0, "orders_out": 0, "blocked": 0, "errors": 0, "rejected": 0, "fills": 0, "duplicates": 0,
@@ -69,6 +76,8 @@ class ReplicationService:
         self._follower_filled: OrderedDict[tuple, int] = OrderedDict()
         # master_order_id -> (precio, monotonic al recibirlo, action)  para medir latencia y deslizamiento
         self._master_execs: OrderedDict[str, tuple] = OrderedDict()
+        # órdenes pendientes (stop / TP / entrada límite) que el maestro ha tenido trabajando: id -> stop|limit
+        self._master_pending: OrderedDict[str, str] = OrderedDict()
 
     async def start(self) -> None:
         self.bus.subscribe(TOPIC_MASTER_EVENT, self.process_master_event)
@@ -206,6 +215,8 @@ class ReplicationService:
 
         if event.msg_type == "EXECUTION":
             self._remember(self._master_execs, event.order_id, (event.price, time.monotonic(), event.action))
+        elif event.msg_type in ("ORDER_PENDING", "ORDER_MODIFIED"):
+            self._remember(self._master_pending, event.order_id, self._kind(event.order_type))
 
         if time.monotonic() < self.suppress_master_until:
             # La maestra se está cerrando por emergencia: las seguidoras se cierran por su cuenta,
@@ -261,10 +272,32 @@ class ReplicationService:
                                    source=event.account, target=follower)
                     qty = allowed
             elif event.msg_type == "EXECUTION" and exit_:
-                if exp == 0:
-                    self.audit.log("SKIPPED", f"Cierre del maestro no copiado: {follower} no tiene posición en {root} "
-                                   "(no se abre una posición nueva con una salida)", source=event.account, target=follower)
+                closes_long = not event.action.upper().startswith("BUY")
+                if exp == 0 or (exp > 0) != closes_long:
+                    side = "larga" if closes_long else "corta"
+                    self.audit.log("SKIPPED", f"Cierre del maestro no copiado: {follower} no tiene posición {side} en {root} "
+                                   f"(esperada {exp:+d}); una salida nunca abre ni invierte posición", source=event.account, target=follower)
                     continue
+                kind = self._master_pending.get(event.order_id)
+                if kind is not None and key not in self._sent_pending:
+                    # Saltó un stop/TP del maestro que la seguidora NO tiene copiado (su entrada se bloqueó por límite, o
+                    # el stop mismo se bloqueó por no tener qué proteger). Lo que la seguidora sí tiene ya está cubierto
+                    # por sus propias copias: solo se cierra lo que quede sin cobertura. (16/9 14:14: 173 quedó corta 3
+                    # al copiar el stop de una entrada bloqueada justo cuando su propio stop la dejaba plana)
+                    ledger = self._live_exits.get((fl, root), {})
+                    covered = max([0] + [sum(abs(s) for k_, s in ledger.values() if k_ == kk) for kk in ("stop", "limit")])
+                    allowed = abs(exp) - covered
+                    if allowed <= 0:
+                        self.audit.log("SKIPPED", f"Cierre del maestro no copiado: es el {kind} de una entrada que {follower} "
+                                       f"no tiene, y sus {abs(exp)} {root} ya tienen salida propia viva ({covered})",
+                                       source=event.account, target=follower,
+                                       details={"expected": exp, "covered": covered, "kind": kind})
+                        continue
+                    if qty > allowed:
+                        self.audit.log("TRIMMED", f"[EXECUTION] {event.action} {qty} {symbol} recortada a {allowed} para {follower}: "
+                                       f"es el {kind} de una entrada que no tiene; solo se cierra lo que no cubren sus salidas vivas ({covered})",
+                                       source=event.account, target=follower)
+                        qty = allowed
                 if qty > abs(exp):
                     self.audit.log("TRIMMED", f"[EXECUTION] {event.action} {qty} {symbol} recortada a {abs(exp)} para {follower}: "
                                    "un cierre nunca invierte la posición", source=event.account, target=follower)
@@ -338,7 +371,7 @@ class ReplicationService:
                                            "master_order_id": task.master_order_id, "rule_id": task.rule_id, **(entry or {})})
             task.status = "SENT"
             self.stats["orders_out"] += 1
-            if ev.msg_type == "ORDER_PENDING":
+            if ev.msg_type in ("ORDER_PENDING", "ORDER_MODIFIED"):
                 self._remember(self._sent_pending, (task.target_account.lower(), task.master_order_id), task.scaled_quantity)
             how = f" (límite ±{entry['tolerance_ticks']} ticks)" if entry else ""
             detail = reply[3:] if isinstance(reply, str) and reply.startswith("OK|") else ""
@@ -438,32 +471,63 @@ class ReplicationService:
         return self._last_seq
 
     def _check_seq(self, data: dict) -> str | None:
-        """Devuelve un texto si detecta que el addon se reinició (seq hacia atrás)."""
+        """Devuelve un texto si detecta que el addon se reinició (seq vuelve a empezar). Un seq que llega unos mensajes
+        tarde no es reinicio ni pérdida: se espera `seq_grace` s antes de dar un hueco por perdido."""
         seq = data.get("seq")
         if not isinstance(seq, int):
             return None
+        now = time.monotonic()
         restarted = None
-        if self._last_seq is not None:
-            if seq < self._last_seq:
+        if self._last_seq is None:
+            self._last_seq = seq
+        elif seq in self._missing_seq:
+            del self._missing_seq[seq]                      # llegó tarde: era un reorden, no una pérdida
+        elif seq <= self._last_seq:
+            if seq <= SEQ_RESTART_BELOW or seq < self._last_seq - SEQ_REORDER_WINDOW:
                 self.stats["addon_restarts"] += 1
                 restarted = f"El addon de NinjaTrader se reinició (seq {self._last_seq} -> {seq})"
+                self._flush_missing_seq(now, all_=True)        # lo que faltaba ya no va a llegar
                 self.audit.log("ADDON_RESTART", restarted + "; revisando posiciones")
-            elif seq > self._last_seq + 1:
-                missed = seq - self._last_seq - 1
-                self.stats["seq_gaps"] += missed
-                self.audit.log("GAP", f"Se perdieron {missed} mensajes del addon (seq {self._last_seq} -> {seq}); revisando posiciones",
-                               details={"missed": missed})
-        self._last_seq = seq
+                self._last_seq = seq
+            # si no: duplicado o fuera de orden dentro de la ventana; no cambia nada
+        else:
+            if seq > self._last_seq + 1:
+                for missing in range(self._last_seq + 1, min(seq, self._last_seq + 1 + 500)):
+                    self._missing_seq[missing] = now
+                if seq - self._last_seq - 1 > 500:              # salto enorme: no merece la pena esperar
+                    self._flush_missing_seq(now, all_=True, extra=seq - self._last_seq - 1 - 500)
+            self._last_seq = seq
+        self._flush_missing_seq(now)
         return restarted
+
+    def _flush_missing_seq(self, now: float, all_: bool = False, extra: int = 0) -> None:
+        lost = sorted(s for s, t in self._missing_seq.items() if all_ or now - t > self.seq_grace)
+        for s in lost:
+            del self._missing_seq[s]
+        missed = len(lost) + extra
+        if not missed:
+            return
+        self.stats["seq_gaps"] += missed
+        span = f"seq {lost[0]}" + (f"..{lost[-1]}" if len(lost) > 1 else "") if lost else "seq"
+        self.audit.log("GAP", f"Se perdieron {missed} mensajes del addon ({span}); revisando posiciones",
+                       details={"missed": missed, "seqs": lost[:50]})
 
     # ---- followers (ACK de vuelta) ----
     def _on_follower_fill(self, event: MasterEvent) -> None:
         self.stats["fills"] += 1
         key = (event.account.lower(), event.master_order_id)
         self._remember(self._follower_filled, key, self._follower_filled.get(key, 0) + event.quantity)
+        matched = False
         for k, e in self._inflight.items():
             if k[0] == key[0] and k[1] == event.master_order_id:
                 e["filled"] = min(abs(e["signed"]), e["filled"] + event.quantity)
+                matched = True
+        if not matched and event.quantity > 0:
+            # Saltó una copia que no era un fill del maestro (su stop/TP, una entrada límite): hasta que el bróker refresque
+            # posiciones cuenta como cambio en vuelo, para que un cierre del maestro de ese mismo segundo no cierre dos veces.
+            self._remember(self._inflight, (key[0], event.master_order_id, event.execution_id or event.order_id),
+                           {"root": self._root(event.symbol), "signed": self._sign(event.action) * event.quantity,
+                            "filled": event.quantity, "settled": 0, "at": time.monotonic()})
         self._forget_exit(key[0], event.master_order_id, filled_qty=event.quantity)
         msg = f"{event.account}: {event.action} {event.quantity} {event.symbol} @ {event.price}"
         details: dict = {"master_order_id": event.master_order_id, "order_id": event.order_id}

@@ -376,3 +376,97 @@ async def test_partially_filled_entry_keeps_counting_the_unfilled_part(container
     b.positions[("Sim102", sym)] = 2
     await container.accounts.sync_once()
     assert rep.expected_position("Sim102", sym) == 2 and not rep._inflight
+
+
+async def test_exit_fill_of_a_blocked_entry_never_flips_the_follower(container):
+    """16/9 14:14: la maestra (larga 3 con stop S1 copiado) añadió otra entrada de 3 que a 173 se le bloqueó por tamaño,
+    y su stop S2 también. Al saltar los dos stops a la vez, el fill de S2 se copió a 173 (ya plana por su S1) y quedó
+    corta 3. Ahora el fill de un stop/TP que la seguidora no tiene copiado solo cierra lo que sus salidas vivas no cubren,
+    en cualquier orden de llegada, y un cierre nunca invierte la posición."""
+    sym = "MNQ 12-26"
+    rep, b = await _setup(container, follower_pos=3, max_size=3)
+
+    async def scenario(follower_first: bool, p: str):
+        b.positions[("Sim102", sym)] = 3
+        await container.accounts.sync_once()
+        b.fill_orders = True
+        await rep.process_master_event(_event(msg_type="ORDER_PENDING", action="SELL", quantity=3, symbol=sym,
+                                              order_type="STOPMARKET", order_id=p + "S1").model_dump(mode="json"))
+        assert [o["master_order_id"] for o in b.sent_orders] == [p + "S1"]
+        # segunda entrada de la maestra: bloqueada (6 > 3); su stop, bloqueado (no hay nada más que proteger)
+        b.fill_orders = False
+        t = await rep.process_master_event(_event(action="BUY", quantity=3, symbol=sym, order_id=p + "E2", execution_id=p + "e2",
+                                                  is_exit=False).model_dump(mode="json"))
+        assert t == [] and "BLOCKED" in _types(container, 2)
+        t = await rep.process_master_event(_event(msg_type="ORDER_PENDING", action="SELL", quantity=3, symbol=sym,
+                                                  order_type="STOPMARKET", order_id=p + "S2").model_dump(mode="json"))
+        assert t == [] and "no tiene posición que proteger" in container.audit.recent(1)[0].message
+        follower_fill = _event(account="Sim102", action="SELL", quantity=3, symbol=sym, order_id=p + "F1",
+                               master_order_id=p + "S1", execution_id=p + "f1").model_dump(mode="json")
+        master_s2 = _event(action="SELL", quantity=3, symbol=sym, order_id=p + "S2", execution_id=p + "s2fill",
+                           is_exit=True).model_dump(mode="json")
+        master_s1 = _event(action="SELL", quantity=3, symbol=sym, order_id=p + "S1", execution_id=p + "s1fill",
+                           is_exit=True).model_dump(mode="json")
+        if follower_first:
+            # el stop propio de la seguidora salta (queda plana, el bróker aún no lo refleja) y luego llega el fill de S2
+            await rep.process_master_event(follower_fill)
+            assert rep.expected_position("Sim102", sym) == 0
+            t = await rep.process_master_event(master_s2)
+            assert t == [] and container.audit.recent(1)[0].event_type == "SKIPPED"
+            t = await rep.process_master_event(master_s1)
+            assert t == [] and "ya ejecutó su orden" in container.audit.recent(1)[0].message
+        else:
+            # el fill de S2 llega antes que el de la seguidora: sus 3 siguen cubiertos por su copia viva de S1
+            t = await rep.process_master_event(master_s2)
+            assert t == [] and "ya tienen salida propia viva" in container.audit.recent(1)[0].message
+            await rep.process_master_event(follower_fill)
+            t = await rep.process_master_event(master_s1)
+            assert t == []
+        assert [o["master_order_id"] for o in b.sent_orders] == [p + "S1"], "solo se copió el stop; ningún cierre extra"
+        # el bróker refresca: la seguidora está plana y nada queda en vuelo
+        b.positions[("Sim102", sym)] = 0
+        await container.accounts.sync_once()
+        assert rep.expected_position("Sim102", sym) == 0 and not rep._inflight
+        b.sent_orders.clear()
+
+    await scenario(follower_first=True, p="a")
+    await scenario(follower_first=False, p="b")
+
+
+async def test_master_close_is_copied_when_the_follower_has_no_exit_of_its_own(container):
+    """Lo contrario: si la seguidora tiene posición sin stop/TP propio (p. ej. igualada a mano), el fill de un stop de la
+    maestra que no tiene copiado sí la cierra, hasta su posición."""
+    rep, b = await _setup(container, follower_pos=2, max_size=3)
+    sym = "MNQ 12-26"
+    await rep.process_master_event(_event(msg_type="ORDER_PENDING", action="SELL", quantity=3, symbol=sym,
+                                          order_type="STOPMARKET", order_id="S9").model_dump(mode="json"))
+    assert len(b.sent_orders) == 1       # el stop se copia (recortado a 2)
+    rep._sent_pending.clear(); rep._live_exits.clear()   # como si esa copia no existiera: seguidora sin cobertura
+    t = await rep.process_master_event(_event(action="SELL", quantity=3, symbol=sym, order_id="S9", execution_id="s9",
+                                              is_exit=True).model_dump(mode="json"))
+    assert len(t) == 1 and b.sent_orders[-1]["quantity"] == 2 and "TRIMMED" in _types(container, 3)
+    # un cierre contra el signo de la posición (la seguidora ya está corta) nunca se copia
+    b.positions[("Sim102", sym)] = -1
+    rep._inflight.clear()
+    await container.accounts.sync_once()
+    t = await rep.process_master_event(_event(action="SELL", quantity=1, symbol=sym, order_id="S10", execution_id="s10",
+                                              is_exit=True).model_dump(mode="json"))
+    assert t == [] and "no tiene posición larga" in container.audit.recent(1)[0].message
+
+
+async def test_out_of_order_seq_is_neither_restart_nor_gap(container):
+    """16/9 14:11: 15957 -> 15959 -> 15958 se auditó como GAP + ADDON_RESTART. Un seq atrasado unos mensajes es reorden."""
+    rep = container.replication
+    for seq in (100, 101, 103, 102, 104, 104):
+        await rep.process_master_event({"msg_type": "HEARTBEAT", "account": "Sim101", "seq": seq})
+    assert rep.stats["seq_gaps"] == 0 and rep.stats["addon_restarts"] == 0 and rep.last_seq == 104
+    assert not any(a.event_type in ("GAP", "ADDON_RESTART") for a in container.audit.recent(10))
+    # un hueco que no se rellena en el plazo sí es una pérdida
+    rep.seq_grace = 0.0
+    await rep.process_master_event({"msg_type": "HEARTBEAT", "account": "Sim101", "seq": 107})
+    assert rep.stats["seq_gaps"] == 0            # todavía dentro del plazo (se evalúa en el siguiente mensaje)
+    await rep.process_master_event({"msg_type": "HEARTBEAT", "account": "Sim101", "seq": 108})
+    assert rep.stats["seq_gaps"] == 2 and container.audit.recent(1)[0].event_type == "GAP"
+    # seq que vuelve a empezar: reinicio
+    await rep.process_master_event({"msg_type": "HEARTBEAT", "account": "Sim101", "seq": 3})
+    assert rep.stats["addon_restarts"] == 1 and rep.last_seq == 3
