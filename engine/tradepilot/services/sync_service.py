@@ -16,14 +16,21 @@ from tradepilot.services.audit_service import AuditService
 
 class SyncService:
     def __init__(self, accounts: AccountService, bridge: BrokerBridge, audit: AuditService, bus: EventBus,
-                 grace_seconds: float = 6.0) -> None:
+                 grace_seconds: float = 6.0, auto_fix: bool = True) -> None:
         self.accounts = accounts
         self.bridge = bridge
         self.audit = audit
         self.bus = bus
         self.grace = grace_seconds
         self.rules_provider = lambda: []          # lo inyecta el contenedor (evita import circular)
+        self.replication = None                   # ReplicationService, lo inyecta el contenedor
         self._mismatch_since: dict[str, float] = {}
+        # Sobrecierre: una seguidora con posición contraria a la esperada (o con posición y la maestra plana) tras una
+        # copia se cierra sola. El addon >= 2.4 lo corrige en milisegundos; esto es el respaldo del engine.
+        self.auto_fix = auto_fix
+        self.fix_grace = 2.0                      # s que debe persistir (dos sincronizaciones): da tiempo al addon
+        self._inverted_since: dict[tuple, float] = {}
+        self._fixed_at: dict[tuple, float] = {}
 
     # ---- cálculo ----
     def expected_positions(self, follower: str) -> dict[str, int] | None:
@@ -68,6 +75,7 @@ class SyncService:
             if not snap.enabled or acc == self.bridge.health.master_account:
                 continue
             d = self.diff(acc)
+            await self._fix_overclose(acc, d, now)
             if not d:
                 self._mismatch_since.pop(acc, None)
                 if snap.desync:
@@ -82,6 +90,40 @@ class SyncService:
                                target=acc, details={"diff": d})
         if changed:
             await self.accounts.publish_accounts(force=True)
+
+    async def _fix_overclose(self, follower: str, d: dict, now: float) -> None:
+        """16/9 14:30: la copia de un stop ejecutó DESPUÉS de que el bróker la diera por cancelada y ya se hubiera cerrado
+        el resto a mercado: Sim102 quedó corta 1 con la maestra plana. Si la posición real de la seguidora va contra la
+        esperada (o sobra con la maestra plana), la dejó el copiador hace poco y nadie operó a mano después, se cierra
+        esa parte a mercado. Nunca abre posición ni toca lo que va en la misma dirección que la maestra (eso es DESYNC)."""
+        live = set()
+        for root, (expected, actual) in d.items():
+            inverted = actual != 0 and (expected == 0 or (expected > 0) != (actual > 0))
+            if not inverted or not self.auto_fix:
+                continue
+            key = (follower, root)
+            live.add(key)
+            if self.replication is None or not self.replication.copier_left_it(follower, root):
+                continue
+            since = self._inverted_since.setdefault(key, now)
+            if now - since < self.fix_grace or now - self._fixed_at.get(key, -1e9) < 30:
+                continue
+            qty = abs(actual)
+            action = "BUYTOCOVER" if actual < 0 else "SELL"
+            symbol = self._symbol_for(root, follower) or root
+            oid = "FIX-" + uuid.uuid4().hex[:8]
+            self._fixed_at[key] = now
+            self.audit.log("OVERCLOSE_FIX", f"{follower} quedó {'corta' if actual < 0 else 'larga'} {qty} {root} sin que la maestra lo tenga "
+                           f"(esperado {expected:+d}, real {actual:+d}) justo tras una copia: cerrando {action} {qty} {symbol} a mercado",
+                           target=follower, details={"expected": expected, "actual": actual, "order_id": oid})
+            try:
+                await self.bridge.send_order(target_account=follower, action=action, symbol=symbol, quantity=qty,
+                                             order_type="MARKET", master_order_id=oid, msg_type="EXECUTION")
+            except Exception as exc:
+                self.audit.log("ERROR", f"No se pudo cerrar la posición sobrante de {follower}: {exc}. ¡Revisa la cuenta a mano!",
+                               target=follower)
+        for key in [k for k in self._inverted_since if k[0] == follower and k not in live]:
+            del self._inverted_since[key]
 
     # ---- igualar ----
     async def resync(self, follower: str) -> list[dict]:

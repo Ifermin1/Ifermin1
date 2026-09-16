@@ -139,6 +139,11 @@ class SQLiteStore:
                 (limit.account_id, limit.max_daily_loss, limit.max_daily_profit, limit.max_position_size, limit.trading_halted,
                  limit.halted_reason, limit.halted_at.isoformat() if limit.halted_at else None))
 
+    def delete_risk_limit(self, account_id: str) -> bool:
+        with self._lock, self._conn:
+            cur = self._conn.execute("DELETE FROM risk_limits WHERE account_id = ?", (account_id,))
+        return cur.rowcount > 0
+
     # ---- cuentas conocidas ----
     def get_accounts(self) -> list[dict]:
         with self._lock:

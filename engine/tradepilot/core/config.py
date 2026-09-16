@@ -33,7 +33,8 @@ class Settings(BaseSettings):
     # Protecciones
     DESYNC_GRACE_SECONDS: float = 6.0     # cuánto puede diferir una seguidora antes de marcar DESYNC
     CLOSE_ON_STOP_REJECT: bool = True     # stop rechazado en una seguidora => cerrar su posición
-    MIN_ADDON_VERSION: str = "2.3"
+    AUTO_FIX_OVERCLOSE: bool = True       # seguidora invertida / con posición sin maestra tras una copia => cerrarla sola
+    MIN_ADDON_VERSION: str = "2.4"
 
 
 settings = Settings()

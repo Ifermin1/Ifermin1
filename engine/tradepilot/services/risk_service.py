@@ -331,6 +331,17 @@ class RiskService:
         self.bus.publish_nowait(TOPIC_RISK, self.state().model_dump(mode="json"))
         return limit
 
+    def delete_limit(self, account_id: str) -> bool:
+        """Quita los límites de una cuenta (vuelve a copiar sin tope y sin pausa)."""
+        limit = self.limits.pop(account_id, None)
+        self.store.delete_risk_limit(account_id)
+        if limit is None:
+            return False
+        self.audit.log("RISK_LIMIT_REMOVED", f"Límites de {account_id} eliminados: copia sin tope de pérdida, objetivo ni tamaño"
+                       + (" (estaba en pausa: se reanuda)" if limit.trading_halted else ""), target=account_id)
+        self.bus.publish_nowait(TOPIC_RISK, self.state().model_dump(mode="json"))
+        return True
+
     def allows(self, account_id: str, quantity: int, symbol: str = "", action: str = "") -> tuple[bool, str | None]:
         """¿Se puede enviar una orden de `quantity` a `account_id`?"""
         if self.kill_switch:

@@ -72,13 +72,15 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
     risk = RiskService(store, bus, audit, bridge, accounts)
     journal = Journal(cfg.JOURNAL_DIR or None)
     replication = ReplicationService(bridge, store, audit, risk, bus, accounts, journal, cfg.CLOSE_ON_STOP_REJECT)
-    sync = SyncService(accounts, bridge, audit, bus, cfg.DESYNC_GRACE_SECONDS)
+    sync = SyncService(accounts, bridge, audit, bus, cfg.DESYNC_GRACE_SECONDS, auto_fix=cfg.AUTO_FIX_OVERCLOSE)
     sync.rules_provider = lambda: replication.rules
+    sync.replication = replication
     risk.rules_provider = lambda: replication.rules
     risk.replication = replication
     replication.sync = sync
     replication.on_restart = risk.on_addon_restart
     accounts.on_positions_refreshed = replication.note_positions_refreshed
+    accounts.audit = audit
     async def _after_sync() -> None:
         # independientes: un fallo en una vigilancia no debe apagar la otra
         for name, fn in (("sincronización", sync.check), ("riesgo", risk.check)):

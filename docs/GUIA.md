@@ -30,7 +30,7 @@ versión de escritorio).
    - `API_TOKEN=` un token largo tuyo (es la única llave de la consola).
 5. Instalar el addon en NinjaTrader: `scripts\update.ps1` copia `ninjatrader\TradePilotXBridge.cs` a la carpeta de AddOns.
    Después, en NinjaTrader: *New → NinjaScript Editor → F5* (compilar) y **reiniciar NinjaTrader**.
-   En *New → NinjaScript Output* debe aparecer `[TradePilotX] Bridge v2.3 online`.
+   En *New → NinjaScript Output* debe aparecer `[TradePilotX] Bridge v2.4 online`.
 6. Arrancar el engine: `powershell -ExecutionPolicy Bypass -File scripts\run_engine.ps1`. Imprime las URLs de la consola.
 7. (Recomendado) Arranque automático con Windows y reinicio si se cae, PowerShell **como administrador**, una vez:
    ```powershell
@@ -93,8 +93,9 @@ ese paso.
 3. **Gestionar cuentas** (botón arriba a la derecha): todas las que NinjaTrader conoce, con buscador y filtros. Alias (por
    ejemplo "Eval MFF 172"), activar/desactivar a mano (una desactivada nunca recibe copias), y "auto" para volver a la regla
    "activa mientras está conectada".
-4. **Riesgo → Límites por cuenta**, para cada cuenta de evaluación:
-   - *Tamaño máx. por orden*: contratos máximos por orden **y** de posición resultante. Ponlo al máximo que permita el prop
+4. **Riesgo → Límites por cuenta**, para cada cuenta de evaluación (en la tabla, *Editar* carga la fila en el formulario y
+   *Quitar* elimina los límites de esa cuenta):
+   - *Posición máx. (contratos)*: contratos máximos por orden **y** de posición resultante. Ponlo al máximo que permita el prop
      firm (MFF: 3 en NQ).
    - *Pérdida diaria máx. ($)*: al llegar, la cuenta se pausa y se cierra sola. Ponlo **por debajo** del límite de la
      evaluación (si la eval permite -1.000, pon 800).
@@ -117,8 +118,8 @@ ese paso.
 
 ## 5. Operativa diaria
 
-1. Abrir NinjaTrader y conectar la cuenta maestra y las seguidoras. Comprobar en el Output `Bridge v2.3 online`.
-2. Arrancar el engine (`run_engine.ps1`) si no está corriendo. En *Inicio*: modo `NinjaTrader · addon v2.3`, heartbeat
+1. Abrir NinjaTrader y conectar la cuenta maestra y las seguidoras. Comprobar en el Output `Bridge v2.4 online`.
+2. Arrancar el engine (`run_engine.ps1`) si no está corriendo. En *Inicio*: modo `NinjaTrader · addon v2.4`, heartbeat
    actualizándose, sin avisos rojos.
 3. En *Cuentas*: las seguidoras que deben copiar con el interruptor encendido y el badge *copiando*.
 4. Operar solo en la cuenta maestra. Todo (entrada, stop, take profit, modificaciones, cancelaciones) se copia.
@@ -137,6 +138,8 @@ ese paso.
 | **DESINCRONIZADA** (Cuentas, rojo) | La seguidora no tiene la posición de la maestra × multiplicador desde hace más de 6 s. Solo se le copian salidas. | Pulsa *Igualar a la maestra* (manda la diferencia a mercado) o *Cerrar* esa cuenta. |
 | `FOLLOWER_REJECTED` | El bróker rechazó una orden copiada; el mensaje trae el motivo (límite de contratos, margen…). | Revisa límites del prop firm y el *Tamaño máx.* en *Riesgo*. Si era un stop, el engine ya cerró la cuenta (`NAKED_CLOSE`). |
 | `NAKED_CLOSE` | Un stop copiado fue rechazado y el engine cerró esa cuenta para no dejarla sin protección. | Comprobar en NinjaTrader que quedó plana. |
+| `OVERCLOSE_FIX` | La seguidora quedó con posición contraria (o con posición y la maestra plana) justo después de una copia: el bróker llenó una copia que ya había dado por cancelada. El engine la cerró a mercado (el addon 2.4 lo corrige antes por su cuenta). | Comprobar en NinjaTrader que quedó plana. Si ves varios seguidos, revisa la conexión del bróker. |
+| `PHANTOM_ORDER` | Una orden viva sin nada por ejecutar (en el gráfico sale con 0 contratos). No protege nada. El addon 2.4 cancela las copias TPX; las de la maestra no se tocan. | Si sigue ahí, cancélala a mano en NinjaTrader. |
 | **Límite de pérdida diaria alcanzado** | La cuenta se pausó y se cerró. | Nada hasta mañana. *Reanudar* solo funciona si el P&L ya no está por debajo del límite. |
 | **Objetivo de ganancia diaria alcanzado** | La cuenta se pausó y se cerró con la ganancia asegurada. | Nada hasta mañana. *Reanudar* solo funciona si subes o quitas el objetivo. |
 | **Sesión cerrada por horario** | Se ejecutó el cierre programado. | Nada. Si de verdad hay que seguir hoy, *Reabrir hoy* en *Riesgo*. |

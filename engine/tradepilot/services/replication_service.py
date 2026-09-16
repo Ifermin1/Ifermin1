@@ -78,6 +78,11 @@ class ReplicationService:
         self._master_execs: OrderedDict[str, tuple] = OrderedDict()
         # órdenes pendientes (stop / TP / entrada límite) que el maestro ha tenido trabajando: id -> stop|limit
         self._master_pending: OrderedDict[str, str] = OrderedDict()
+        # (seguidora, root) -> monotonic de la última copia enviada o fill de una copia; y del último fill manual.
+        # Con ello el vigilante de sincronización sabe si una posición invertida la dejó el copiador (la cierra) o la abrió
+        # alguien a mano en esa cuenta (no la toca).
+        self.last_copy_activity: dict[tuple, float] = {}
+        self.last_manual_fill: dict[tuple, float] = {}
 
     async def start(self) -> None:
         self.bus.subscribe(TOPIC_MASTER_EVENT, self.process_master_event)
@@ -200,6 +205,7 @@ class ReplicationService:
             # operación manual en una cuenta que no es la maestra (p. ej. cerrar a mano una seguidora)
             self.audit.log("ACCOUNT_FILL", f"{event.account}: {event.action} {event.quantity} {event.symbol} @ {event.price} (manual, no replicado)",
                            target=event.account, details={"order_id": event.order_id})
+            self.last_manual_fill[(event.account.lower(), self._root(event.symbol))] = time.monotonic()
             return []
 
         return await self._replicate(event)
@@ -424,6 +430,7 @@ class ReplicationService:
         return a == "BUYTOCOVER" or (a.startswith("SELL") and expected > 0) or (a == "BUY" and expected < 0)
 
     def _note_sent(self, fl: str, root: str, event: MasterEvent, qty: int, exit_: bool) -> None:
+        self.last_copy_activity[(fl, root)] = time.monotonic()
         if event.msg_type == "EXECUTION":
             self._remember(self._inflight, (fl, event.order_id, event.execution_id),
                            {"root": root, "signed": self._sign(event.action) * qty, "filled": 0, "settled": 0, "at": time.monotonic()})
@@ -455,6 +462,16 @@ class ReplicationService:
             e["settled"] = e["filled"]
             if e["settled"] >= abs(e["signed"]):
                 del self._inflight[k]
+
+    def copier_left_it(self, follower: str, root: str, within: float = 120.0) -> bool:
+        """¿La última actividad en ese root de la seguidora fue del copiador (copia o fill de copia) hace poco,
+        y no hubo un fill manual después? Entonces una posición que sobra la dejó el copiador."""
+        k = (follower.lower(), root.upper())
+        at = self.last_copy_activity.get(k)
+        if at is None or time.monotonic() - at > within:
+            return False
+        manual = self.last_manual_fill.get(k)
+        return manual is None or manual < at
 
     def _desync_blocks(self, follower: str, event: MasterEvent) -> bool:
         """Con DESYNC solo pasan las copias que reducen la exposición actual de la seguidora."""
@@ -516,6 +533,7 @@ class ReplicationService:
     def _on_follower_fill(self, event: MasterEvent) -> None:
         self.stats["fills"] += 1
         key = (event.account.lower(), event.master_order_id)
+        self.last_copy_activity[(key[0], self._root(event.symbol))] = time.monotonic()
         self._remember(self._follower_filled, key, self._follower_filled.get(key, 0) + event.quantity)
         matched = False
         for k, e in self._inflight.items():

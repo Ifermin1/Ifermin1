@@ -12,7 +12,7 @@ funciona también con el addon anterior (solo verá las conectadas y lo avisará
 2. En NinjaTrader: *New → NinjaScript Editor*, carpeta *AddOns*, abre `TradePilotXBridge` (o crea uno con ese nombre).
 3. Sustituye todo el contenido por el de `TradePilotXBridge.cs` y pulsa **F5** (compilar). Debe compilar sin errores.
 4. Reinicia NinjaTrader (o desactiva y activa el addon). En *Tools → Output* debe aparecer
-   `[TradePilotX] Bridge v2.3 online. master=... (v2.3: fills parciales del master y stops recreados)`.
+   `[TradePilotX] Bridge v2.4 online. master=... (v2.4: doble salida corregida al instante y copias fantasma barridas)`.
 
 ## Protocolo (puerto 5557, REQ/REP)
 
@@ -33,6 +33,14 @@ El campo de estado es el `ConnectionStatus` de NinjaTrader (`Connected`, `Discon
 La cuenta maestra inicial se lee de `Documents\NinjaTrader 8\TradePilotX\config.json` (`MasterAccount`) y se puede cambiar desde la consola (v1.2+).
 
 ## Historial
+
+- **2.4**: **doble salida corregida**. Cuando una copia a medio ejecutar se cancela para mandar el resto a mercado,
+  NinjaTrader puede dar la copia por cancelada y llenarla igualmente un instante después (16/9 14:30: Sim102 vendió 3 con 2
+  comprados y quedó corta). Ahora el addon recuerda cuánto llevaba ejecutado la copia al reconciliar y la orden a mercado
+  enviada: si la copia ejecuta más después, cancela la de mercado si aún está viva y, si no, deshace el exceso a mercado
+  en el acto (`DOBLE SALIDA` en el Output). Además barre cada 5 s las copias TPX que el bróker sigue mostrando vivas sin
+  nada por ejecutar (el "0 Sell STP" del gráfico) y las cancela; las de la maestra solo se avisan. `ORDER_MODIFIED`
+  rellena siempre cantidad y precios al cambiar una orden.
 
 - **2.3**: un fill **parcial** del master (su stop/TP ejecutó 1 de 2) ya no cancela la copia entera: se reduce en la misma
   proporción y sólo la diferencia va a mercado (antes el follower quedaba plano o con posición sin stop). `ORDER_MODIFIED`

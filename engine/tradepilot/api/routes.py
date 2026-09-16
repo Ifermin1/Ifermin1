@@ -181,6 +181,12 @@ def upsert_limit(body: RiskLimitUpsert, request: Request):
         raise HTTPException(409, str(exc))
 
 
+@router.delete("/risk/limits/{account_id}", status_code=204)
+def delete_limit(account_id: str, request: Request):
+    if not _c(request).risk.delete_limit(account_id):
+        raise HTTPException(404, f"{account_id} no tiene límites configurados")
+
+
 @router.post("/mock/master-event")
 async def mock_master_event(body: MockEventRequest, request: Request):
     """Solo en modo mock: dispara un evento del maestro a mano (útil para demos y pruebas)."""

@@ -79,6 +79,7 @@ export function makeClient(s: Session) {
     resync: (id: string) =>
       req<{ sent: { symbol: string; action: string; quantity: number }[] }>(`/api/accounts/${encodeURIComponent(id)}/resync`, { method: "POST" }),
     upsertLimit: (l: Omit<RiskLimit, "halted_reason" | "halted_at">) => req<RiskLimit>("/api/risk/limits", { method: "PUT", body: JSON.stringify(l) }),
+    deleteLimit: (id: string) => req<void>(`/api/risk/limits/${encodeURIComponent(id)}`, { method: "DELETE" }),
     setSchedule: (s: Omit<Schedule, "last_flatten_day">) => req<Schedule>("/api/risk/schedule", { method: "PUT", body: JSON.stringify(s) }),
     reopenSession: () => req<RiskState>("/api/risk/reopen", { method: "POST" }),
     mockEvent: (b: Record<string, unknown> = {}) => req<unknown>("/api/mock/master-event", { method: "POST", body: JSON.stringify(b) }),

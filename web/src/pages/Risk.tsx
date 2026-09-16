@@ -51,8 +51,17 @@ export function Risk() {
     e.preventDefault();
     try {
       await client!.upsertLimit({ account_id: account, max_daily_loss: Number(maxLoss) || 0, max_daily_profit: Number(maxProfit) || 0, max_position_size: Number(maxSize) || 0, trading_halted: halted });
-      setRisk(await client!.risk()); setAccount("");
+      setRisk(await client!.risk()); setAccount(""); setMaxLoss("0"); setMaxProfit("0"); setMaxSize("0"); setHalted(false);
     } catch (ex) { alert(ex instanceof Error ? ex.message : String(ex)); }
+  }
+  function edit(l: { account_id: string; max_daily_loss: number; max_daily_profit: number; max_position_size: number; trading_halted: boolean }) {
+    setAccount(l.account_id); setMaxLoss(String(l.max_daily_loss)); setMaxProfit(String(l.max_daily_profit)); setMaxSize(String(l.max_position_size)); setHalted(l.trading_halted);
+    document.getElementById("limit-form")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+  async function remove(id: string) {
+    if (!confirm(`¿Quitar los límites de ${id}? Volverá a copiar sin tope de pérdida, objetivo ni tamaño (y sin pausa).`)) return;
+    try { await client!.deleteLimit(id); setRisk(await client!.risk()); if (account === id) setAccount(""); }
+    catch (ex) { alert(ex instanceof Error ? ex.message : String(ex)); }
   }
 
   return (
@@ -106,19 +115,19 @@ export function Risk() {
       </Card>
 
       <Card title="Límites por cuenta">
-        <form className="rule-form" onSubmit={save}>
+        <form className="rule-form" id="limit-form" onSubmit={save}>
           <label>Cuenta<input list="accts2" value={account} onChange={(e) => setAccount(e.target.value)} required /></label>
           <label>Pérdida diaria máx. ($)<input type="number" min="0" value={maxLoss} onChange={(e) => setMaxLoss(e.target.value)} /></label>
           <label>Ganancia diaria máx. ($)<input type="number" min="0" value={maxProfit} onChange={(e) => setMaxProfit(e.target.value)} /></label>
-          <label>Tamaño máx. por orden<input type="number" min="0" value={maxSize} onChange={(e) => setMaxSize(e.target.value)} /></label>
+          <label>Posición máx. (contratos)<input type="number" min="0" value={maxSize} onChange={(e) => setMaxSize(e.target.value)} /></label>
           <label className="inline"><input type="checkbox" checked={halted} onChange={(e) => setHalted(e.target.checked)} /> Pausar cuenta</label>
           <datalist id="accts2">{accounts.map((a) => <option key={a.account_id} value={a.account_id} />)}</datalist>
-          <button className="primary">Guardar</button>
+          <button className="primary">{risk?.limits.some((l) => l.account_id === account) ? "Guardar cambios" : "Guardar"}</button>
         </form>
         <p className="muted small">0 = sin límite. Al llegar a la pérdida máxima o a la ganancia máxima del día la cuenta se pausa y se cierra sola (la ganancia queda asegurada).</p>
         {!risk || risk.limits.length === 0 ? <Empty>Sin límites configurados (0 = sin límite).</Empty> : (
           <div className="table-wrap"><table>
-            <thead><tr><th>Cuenta</th><th className="num">Pérdida máx.</th><th className="num">Ganancia máx.</th><th className="num">P&L hoy</th><th className="num">Tamaño máx.</th><th>Estado</th><th></th></tr></thead>
+            <thead><tr><th>Cuenta</th><th className="num">Pérdida máx.</th><th className="num">Ganancia máx.</th><th className="num">P&L hoy</th><th className="num">Posición máx.</th><th>Estado</th><th></th></tr></thead>
             <tbody>{risk.limits.map((l) => {
               const acc = accounts.find((a) => a.account_id === l.account_id);
               const pnl = acc?.daily_pnl ?? 0;
@@ -131,7 +140,9 @@ export function Risk() {
                   <td className={`num ${cls}`}>{acc ? money(pnl) : "—"}{ref ? <span className="muted small"> ({pct.toFixed(0)} % {pnl < 0 ? "de la pérdida" : "del objetivo"})</span> : null}</td>
                   <td className="num">{l.max_position_size || "—"}</td>
                   <td>{l.trading_halted ? <span className={`badge ${l.halted_reason === "daily_profit" ? "ok" : "bad"}`}>{badge}</span> : <span className="badge ok">activa</span>}</td>
-                  <td>{l.trading_halted && <button className="ghost small-btn" onClick={() => void client!.upsertLimit({ account_id: l.account_id, max_daily_loss: l.max_daily_loss, max_daily_profit: l.max_daily_profit, max_position_size: l.max_position_size, trading_halted: false }).then(() => client!.risk()).then(setRisk).catch((ex) => alert(ex instanceof Error ? ex.message : String(ex)))}>Reanudar</button>}</td></tr>
+                  <td className="row-actions">{l.trading_halted && <button className="ghost small-btn" onClick={() => void client!.upsertLimit({ account_id: l.account_id, max_daily_loss: l.max_daily_loss, max_daily_profit: l.max_daily_profit, max_position_size: l.max_position_size, trading_halted: false }).then(() => client!.risk()).then(setRisk).catch((ex) => alert(ex instanceof Error ? ex.message : String(ex)))}>Reanudar</button>}
+                    <button className="ghost small-btn" onClick={() => edit(l)} title="Cargar en el formulario para cambiar los límites">Editar</button>
+                    <button className="ghost small-btn danger" onClick={() => void remove(l.account_id)} title="Quitar los límites de esta cuenta">Quitar</button></td></tr>
               );
             })}</tbody>
           </table></div>

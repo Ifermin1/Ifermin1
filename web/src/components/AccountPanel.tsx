@@ -86,6 +86,7 @@ export function AccountPanel({ a, role, link, limit, lastFill, lastReject, price
                   <span>{o.action} {o.quantity - o.filled}{o.filled ? <i className="muted"> (+{o.filled} ejec.)</i> : null} {root(o.symbol)}</span>
                   <b className="num">{price}</b>
                   {dist !== null && <span className={`num small ${(bad ? -dist : dist) >= 0 ? "muted" : "warn"}`}>{pts(dist)} pts del mercado</span>}
+                  {o.quantity - o.filled <= 0 && <span className="chip bad" title="No le queda nada por ejecutar: no protege nada. El addon 2.4 la cancela; si no, cancélala en NinjaTrader">0 contratos · fantasma</span>}
                   {o.state.toLowerCase() !== "working" && <span className="chip">{o.state}</span>}
                 </li>
               );

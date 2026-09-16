@@ -133,11 +133,24 @@ class AccountService:
         if self.on_positions_refreshed:
             self.on_positions_refreshed(None)
 
+    audit = None                 # AuditService, lo inyecta el contenedor
+    _phantoms_seen: set = set()  # (cuenta, id de orden) ya avisadas
+
     def apply_orders(self, orders: list) -> None:
         """Snapshot completo de órdenes vivas (GET_ORDERS): sustituye lo que teníamos."""
         by_acc: dict[str, list] = {}
         for acc, o in orders:
             by_acc.setdefault(acc, []).append(o)
+            if o.quantity - o.filled <= 0 and (acc, o.order_id) not in self._phantoms_seen and self.audit is not None:
+                # 16/9 14:23: apareció un "0 Sell STP" en el gráfico. Una orden con 0 contratos no protege nada; se avisa
+                # una vez con todo lo que hace falta para localizarla (el addon >= 2.4 cancela solo las copias TPX).
+                self._phantoms_seen.add((acc, o.order_id))
+                price = o.stop_price or o.limit_price
+                who = f"copia TPX de la orden maestra {o.master_order_id}" if o.master_order_id else "orden propia de la cuenta, no del copiador"
+                self.audit.log("PHANTOM_ORDER", f"{acc}: orden {o.action} {o.order_type} @ {price} {o.symbol} sin nada por ejecutar "
+                               f"({o.filled}/{o.quantity}, estado {o.state}; {who}): no protege nada. El addon >= 2.4 la cancela; "
+                               "si no, cancélala en NinjaTrader",
+                               target=acc, details={"order_id": o.order_id, "master_order_id": o.master_order_id, "state": o.state})
         for acc, snap in self.accounts.items():
             new = by_acc.get(acc, [])
             if [o.model_dump() for o in snap.working_orders] != [o.model_dump() for o in new]:

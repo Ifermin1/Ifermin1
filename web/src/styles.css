@@ -110,6 +110,8 @@ table.audit td { font-size: 13px; }
 .rule-actions { display: flex; align-items: center; gap: 8px; }
 .arrow { color: var(--accent); }
 .chip { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.chip.bad { color: var(--bad); border-color: rgba(248,113,113,.6); font-weight: 600; }
+.row-actions { display: flex; gap: 6px; justify-content: flex-end; white-space: nowrap; }
 
 .switch { position: relative; width: 42px; height: 24px; display: inline-block; }
 .switch input { opacity: 0; width: 0; height: 0; }

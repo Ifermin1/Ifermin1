@@ -64,6 +64,11 @@ async def test_kill_switch_and_limits(client: AsyncClient):
     assert r.json()["limits"][0]["account_id"] == "Sim102"
     r = await client.post("/api/risk/kill-switch", json={"active": False})
     assert r.json()["kill_switch"] is False
+    # quitar los límites de una cuenta (16/9: la tabla no tenía cómo editarlos ni eliminarlos)
+    r = await client.delete("/api/risk/limits/Sim102")
+    assert r.status_code == 204
+    assert (await client.get("/api/risk")).json()["limits"] == []
+    assert (await client.delete("/api/risk/limits/Sim102")).status_code == 404
 
 
 async def test_quick_link(client: AsyncClient):
@@ -574,3 +579,53 @@ async def test_watch_is_retried_until_the_addon_confirms(client: AsyncClient, co
     assert "Sim102" in container.accounts._watched
     await container.accounts.sync_once()
     assert b.watched.count("Sim102") == 3, "una vez confirmado no se insiste"
+
+
+async def test_phantom_order_is_audited_once(container):
+    """16/9 14:23: un "0 Sell STP" en el gráfico. Una orden viva sin nada por ejecutar se avisa una vez con quién la creó."""
+    from tradepilot.infrastructure.brokers.ninja_zmq import NinjaZmqBridge
+    parsed = NinjaZmqBridge.parse_orders("Sim102|k9|661594272992|SELL|NQ 12-26|1|1|STOPMARKET|0|29468.75|Accepted;"
+                                         "Sim102|k1|m1|SELL|NQ 12-26|2|0|STOPMARKET|0|29400|Working")
+    container.bridge.working_orders = parsed
+    await container.accounts.sync_once()
+    await container.accounts.sync_once()
+    phantoms = [a for a in container.audit.recent(20) if a.event_type == "PHANTOM_ORDER"]
+    assert len(phantoms) == 1 and "661594272992" in phantoms[0].message and "1/1" in phantoms[0].message
+
+
+async def test_overclose_left_by_the_copier_is_closed_automatically(container):
+    """16/9 14:30: la copia del stop ejecutó después de 'cancelarse' y el resto ya se había cerrado a mercado: Sim102 quedó
+    corta 1 con la maestra plana. Si la dejó el copiador y persiste, el engine la cierra; si alguien operó a mano, no."""
+    b = container.bridge
+    rep, sync = container.replication, container.sync
+    b.health.master_account = "Sim101"
+    rep.add_rule("Sim101", "Sim102", multiplier=2)
+    sync.fix_grace = 0.0
+    b.positions[("Sim102", "NQ 12-26")] = -1                 # maestra plana, seguidora corta 1
+    await container.accounts.sync_once()
+    sent_before = len(b.sent_orders)
+    await sync.check()                                        # sin actividad del copiador: no se toca (posición manual)
+    assert len(b.sent_orders) == sent_before
+    rep.last_copy_activity[("sim102", "NQ")] = __import__("time").monotonic()
+    await sync.check(); await sync.check()
+    fixes = [o for o in b.sent_orders if o["master_order_id"].startswith("FIX-")]
+    assert len(fixes) == 1 and fixes[0]["action"] == "BUYTOCOVER" and fixes[0]["quantity"] == 1
+    assert any(a.event_type == "OVERCLOSE_FIX" for a in container.audit.recent(5))
+    await container.accounts.sync_once()
+    assert container.accounts.position("Sim102", "NQ 12-26") == 0
+    # invertida respecto a la maestra (maestra larga 1 -> esperado +2; seguidora corta 1): se cierra la corta, no se abre nada
+    b.positions[("Sim101", "NQ 12-26")] = 1
+    b.positions[("Sim102", "NQ 12-26")] = -1
+    await container.accounts.sync_once()
+    rep.last_copy_activity[("sim102", "NQ")] = __import__("time").monotonic()
+    sync._fixed_at.clear()
+    await sync.check(); await sync.check()
+    fixes = [o for o in b.sent_orders if o["master_order_id"].startswith("FIX-")]
+    assert len(fixes) == 2 and fixes[-1]["action"] == "BUYTOCOVER" and fixes[-1]["quantity"] == 1
+    # un fill manual posterior a la última copia: la posición es de la persona, no del copiador -> no se toca
+    b.positions[("Sim102", "NQ 12-26")] = -1
+    await container.accounts.sync_once()
+    sync._fixed_at.clear()
+    rep.last_manual_fill[("sim102", "NQ")] = __import__("time").monotonic()
+    await sync.check(); await sync.check()
+    assert len([o for o in b.sent_orders if o["master_order_id"].startswith("FIX-")]) == 2
