@@ -240,3 +240,22 @@ async def test_journal_records_in_and_out(container, tmp_path):
     import json
     dirs = [json.loads(l)["dir"] for l in lines]
     assert "in" in dirs and "out" in dirs
+
+
+async def test_master_flatten_fills_are_not_copied(client: AsyncClient, container):
+    """Cerrar TODO: el fill de salida de la maestra no debe copiarse a las seguidoras ya cerradas."""
+    b = container.bridge
+    b.health.master_account = "Sim101"
+    await client.put("/api/accounts/Sim102/link", json={"master_account": "Sim101"})
+    b.positions[("Sim101", "NQ 12-26")] = 2
+    b.positions[("Sim102", "NQ 12-26")] = 2
+    await container.accounts.sync_once()
+    sent_before = len(b.sent_orders)
+    r = await client.post("/api/risk/flatten-all", json={"include_master": True})
+    assert set(r.json()["results"]) == {"Sim101", "Sim102"}
+    # NinjaTrader reporta el fill del cierre de la maestra como EXECUTION normal
+    await client.post("/api/mock/master-event", json={"action": "SELL", "quantity": 2, "symbol": "NQ 12-26"})
+    assert len(b.sent_orders) == sent_before, "el fill del cierre de la maestra se copió a la seguidora"
+    last = (await client.get("/api/audit?limit=1")).json()[0]
+    assert last["event_type"] == "SKIPPED" and "cierre de emergencia" in last["message"]
+    assert b.positions[("Sim102", "NQ 12-26")] == 0

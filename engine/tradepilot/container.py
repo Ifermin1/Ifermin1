@@ -70,6 +70,7 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
     sync = SyncService(accounts, bridge, audit, bus, cfg.DESYNC_GRACE_SECONDS)
     sync.rules_provider = lambda: replication.rules
     risk.rules_provider = lambda: replication.rules
+    risk.replication = replication
     replication.sync = sync
     accounts.after_sync = sync.check
     return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal)

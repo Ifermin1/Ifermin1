@@ -40,6 +40,7 @@ class ReplicationService:
         self.close_on_stop_reject = close_on_stop_reject
         self.sync = None                      # SyncService, lo inyecta el contenedor
         self._last_seq: int | None = None
+        self.suppress_master_until: float = 0.0   # tras un FLATTEN de la maestra, sus fills no se copian
         self.rules: list[ReplicationRule] = store.get_all_rules()
         self.stats = {"events_in": 0, "orders_out": 0, "blocked": 0, "errors": 0, "rejected": 0, "fills": 0, "duplicates": 0,
                       "latency_ms_last": None, "latency_ms_avg": None, "slippage_last": None, "slippage_avg": None,
@@ -172,6 +173,13 @@ class ReplicationService:
 
         if event.msg_type == "EXECUTION":
             self._remember(self._master_execs, event.order_id, (event.price, time.monotonic(), event.action))
+
+        if time.monotonic() < self.suppress_master_until:
+            # La maestra se está cerrando por emergencia: las seguidoras se cierran por su cuenta,
+            # copiar este fill las dejaría con posición contraria.
+            self.audit.log("SKIPPED", f"[{event.msg_type}] {event.action} {event.quantity} {event.symbol}: cierre de emergencia de la maestra, no se copia",
+                           source=event.account)
+            return []
 
         tasks: list[ReplicationTask] = []
         matched = 0

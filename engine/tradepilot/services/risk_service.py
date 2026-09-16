@@ -17,6 +17,8 @@ class RiskService:
         self.bridge = bridge
         self.accounts = accounts
         self.rules_provider = lambda: []
+        self.replication = None               # lo inyecta el contenedor
+        self.master_flatten_grace = 20.0      # segundos sin copiar fills de la maestra tras cerrarla
         bus.subscribe("risk.naked", self._on_naked)
         self.limits: dict[str, RiskLimit] = {l.account_id: l for l in store.get_risk_limits()}
         self.kill_switch = store.get_kv("kill_switch", "0") == "1"
@@ -51,6 +53,10 @@ class RiskService:
     async def flatten(self, account_id: str, reason: str = "") -> str:
         if self.bridge is None:
             raise RuntimeError("sin puente")
+        master = self.bridge.health.master_account
+        if self.replication is not None and master and account_id.lower() == master.lower():
+            import time
+            self.replication.suppress_master_until = time.monotonic() + self.master_flatten_grace
         self.audit.log("FLATTEN", f"Cierre de emergencia en {account_id}" + (f": {reason}" if reason else ""), target=account_id)
         reply = await self.bridge.flatten(account_id)
         if self.accounts:
