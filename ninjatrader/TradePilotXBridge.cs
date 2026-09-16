@@ -44,7 +44,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 {
     public class TradePilotXBridge : AddOnBase
     {
-        private const string BridgeVersion = "2.0";
+        private const string BridgeVersion = "2.1";
 
         // ---- configuración ------------------------------------------------
         private class BridgeConfig
@@ -94,6 +94,8 @@ namespace NinjaTrader.NinjaScript.AddOns
         private readonly ConcurrentDictionary<string, int> reconciledQty = new ConcurrentDictionary<string, int>();
         // v2.0: fills del master pendientes de reconciliar mientras se cancela la copia viva del follower (clave -> qty)
         private readonly ConcurrentDictionary<string, int> reconcileRequested = new ConcurrentDictionary<string, int>();
+        // v2.1: copias canceladas por un FLATTEN: un fill posterior del master en esa orden no debe reabrir posición
+        private readonly ConcurrentDictionary<string, bool> flattenedKeys = new ConcurrentDictionary<string, bool>();
         // Claves (follower|master_order_id) cuya orden en el follower es copia de una orden PENDIENTE del master
         // (stop / take profit): sus fills los hace la propia orden del follower. Una entrada a mercado NO está aquí:
         // cada fill parcial del master se copia por separado.
@@ -183,7 +185,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                     foreach (string sym in cfg.PriceInstruments)
                         EnsurePriceFeed(sym);
 
-                    Info(string.Format("Bridge v{0} online. master={1} pub={2} sub={3} sync={4} (v2.0: is_exit en fills, copia viva se cancela y cierra a mercado)",
+                    Info(string.Format("Bridge v{0} online. master={1} pub={2} sub={3} sync={4} (v2.1: is_exit, reconciliación segura tras cierre de emergencia)",
                         BridgeVersion, cfg.MasterAccount, cfg.MasterPort, cfg.FollowerPort, cfg.SyncPort));
                 }
                 catch (Exception ex)
@@ -553,6 +555,13 @@ namespace NinjaTrader.NinjaScript.AddOns
                                 Info("Fill del master en " + masterOrderId + " con la copia del follower aún viva: cancelando y cerrando a mercado lo pendiente");
                                 return "OK|EXECUTION_RECONCILE";
                             }
+                            if (flattenedKeys.ContainsKey(key))
+                            {
+                                // v2.1: la copia se canceló en un cierre de emergencia (posición ya cerrada): el fill del master
+                                // en esa orden no se copia, o reabriría posición (incidente 16/9 12:14).
+                                Info("EXECUTION ignorada: la copia de " + masterOrderId + " se canceló en un cierre de emergencia");
+                                return "IGNORED|copia cancelada por cierre de emergencia";
+                            }
                             int remaining = existing.Quantity - existing.Filled;
                             if (remaining <= 0) { Info("EXECUTION ignorada: la orden del follower ya se ejecutó (" + masterOrderId + ")"); return "IGNORED|la orden del follower ya se ejecutó"; }
                             // La orden del follower quedó sin ejecutar del todo (rechazada / cancelada): copiamos el fill del
@@ -772,6 +781,7 @@ namespace NinjaTrader.NinjaScript.AddOns
             string key = accountName + "|" + masterId;
             int requested;
             if (!reconcileRequested.TryRemove(key, out requested)) return;
+            if (flattenedKeys.ContainsKey(key)) { Info("Copia " + key + " cancelada por cierre de emergencia: nada que reconciliar"); return; }
             if (order.OrderState == OrderState.Filled) { Info("Copia " + key + " se ejecutó antes de cancelarse: nada que reconciliar"); return; }
             int remaining = order.Quantity - order.Filled;
             int already = reconciledQty.GetOrAdd(key, 0);
@@ -849,6 +859,8 @@ namespace NinjaTrader.NinjaScript.AddOns
                 lock (account.Positions) instruments = account.Positions.Where(p => p.Quantity != 0).Select(p => p.Instrument).Distinct().ToList();
                 List<Order> live;
                 lock (account.Orders) live = account.Orders.Where(IsLive).ToList();
+                foreach (Order o in live)
+                    if ((o.Name ?? "").StartsWith("TPX ")) flattenedKeys[accountName + "|" + MasterIdFromName(o.Name)] = true;
                 if (live.Count > 0) { try { account.Cancel(live); } catch (Exception cx) { Warn("Flatten: cancelando órdenes: " + cx.Message); } }
                 if (instruments.Count > 0)
                 {
