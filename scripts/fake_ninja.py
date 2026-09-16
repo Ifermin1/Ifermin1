@@ -159,6 +159,11 @@ while True:
                 MUTE_UNTIL = time.time() + float(msg.split("|", 1)[1]); print("MUTE hasta", MUTE_UNTIL); rep.send_string("OK")
             elif msg.startswith("ORDER|"):
                 rep.send_string("ERROR|unknown request" if "--old-addon" in sys.argv else handle_order(msg[6:], "5557"))
+            elif msg.startswith("ORDERS|"):   # v2.5: lote de órdenes (una por seguidora) separadas por \x1f
+                if "--old-addon" in sys.argv or "--no-batch" in sys.argv:
+                    rep.send_string("ERROR|unknown request")
+                else:
+                    rep.send_string("\x1f".join(handle_order(raw, "5557 lote") for raw in msg[7:].split("\x1f")))
             elif msg == "PING":
                 rep.send_string("PONG" if "--old-addon" in sys.argv else f"PONG|{BOOT}|{SEQ}")
             elif msg.startswith("SET_PNL|"):  # gancho de pruebas: SET_PNL|Sim102|-510

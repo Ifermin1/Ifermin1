@@ -22,6 +22,7 @@ funciona también con el addon anterior (solo verá las conectadas y lo avisará
 | `GET_ACCOUNTS_ALL` | `Sim101\|50000.00\|Connected\|MFF;APEX-1\|0.00\|Disconnected\|APEX TRADOVATE` (todas) |
 | `GET_MASTER` | `Sim101` |
 | `GET_POSITIONS` | `Sim101\|NQ SEP26\|Long\|2\|28936.0;...` posiciones abiertas de todas las cuentas |
+| `ORDERS\|json␟json…` | `OK\|…␟IGNORED\|…` una respuesta por orden, en el mismo orden (v2.5; `␟` = `\x1f`) |
 | `FLATTEN\|Sim102` | `OK\|Sim102\|n` cancela todas las órdenes vivas de la cuenta y cierra sus posiciones a mercado |
 | `WATCH\|Sim102` | `OK\|Sim102` suscribe órdenes/ejecuciones/posiciones de esa cuenta (ACK al engine) |
 | `SET_MASTER\|Sim102` | `OK\|Sim102` o `ERROR\|motivo`. Cambia la cuenta maestra en caliente y la guarda en `config.json` |
@@ -33,6 +34,13 @@ El campo de estado es el `ConnectionStatus` de NinjaTrader (`Connected`, `Discon
 La cuenta maestra inicial se lee de `Documents\NinjaTrader 8\TradePilotX\config.json` (`MasterAccount`) y se puede cambiar desde la consola (v1.2+).
 
 ## Historial
+
+- **2.5**: **copias en lote y en paralelo**. `ORDERS|json␟json…` (separador `\x1f`) trae todas las copias de un evento en
+  una sola petición y el addon las envía a la vez, una tarea por cuenta (`ParallelSubmit` en `config.json`, por defecto
+  `true`); responde con las confirmaciones en el mismo orden. Con 11 seguidoras ahorra 10 idas y vueltas y el tiempo
+  de envío de cada cuenta deja de sumarse. El Output de NinjaTrader se escribe desde un hilo aparte y sin los estados
+  de tránsito (Initialized, Submitted, Accepted, ChangePending…), que imprimir línea a línea frenaba el envío;
+  `VerboseOutput: true` los recupera. Los estados siguen publicándose al engine como siempre.
 
 - **2.4**: **doble salida corregida**. Cuando una copia a medio ejecutar se cancela para mandar el resto a mercado,
   NinjaTrader puede dar la copia por cancelada y llenarla igualmente un instante después (16/9 14:30: Sim102 vendió 3 con 2

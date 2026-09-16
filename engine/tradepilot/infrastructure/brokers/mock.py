@@ -33,6 +33,7 @@ class MockBridge(BrokerBridge):
         self.sent_orders: list[dict] = []
         self.watched: list[str] = []      # cuentas por las que el engine pidió WATCH
         self.working_orders: list[tuple[str, WorkingOrder]] = []   # (cuenta, orden) que reporta GET_ORDERS (pruebas)
+        self.batches: list[int] = []      # tamaño de cada lote recibido por send_orders (pruebas)
         self.boot: str | None = None      # simula el "PONG|boot|seq" del addon >= 1.8 (pruebas)
         self.watch_ok = True              # False: el addon no confirma el WATCH (pruebas)
         self.next_replies: list[str] = []  # respuestas forzadas a las próximas órdenes (pruebas): "IGNORED|...", "OK|EXECUTION_PARTIAL"
@@ -122,6 +123,10 @@ class MockBridge(BrokerBridge):
                               connected=k not in self.disconnected, connection="Simulación",
                               realized_pnl=self.pnl.get(k, 0.0))
                 for k, v in self.accounts.items()]
+
+    async def send_orders(self, orders: list[dict]) -> list:
+        self.batches.append(len(orders))
+        return await super().send_orders(orders)
 
     async def send_order(self, target_account, action, symbol, quantity, order_type, master_order_id,
                          msg_type="EXECUTION", price=0.0, limit_price=0.0, stop_price=0.0, entry=None) -> str | None:

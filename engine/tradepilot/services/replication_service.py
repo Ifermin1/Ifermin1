@@ -17,6 +17,11 @@ from tradepilot.services.risk_service import RiskService
 
 STOP_TYPES = {"STOPMARKET", "STOPLIMIT", "STOP", "MIT"}
 
+# Estados de tránsito de una orden copiada: con 11 seguidoras son ~250 mensajes por operación. Van al diario y al log
+# de depuración, no a la auditoría (SQLite + WebSocket) ni al log normal, para que el bucle del engine no se atasque.
+LIFECYCLE_STATES = {"INITIALIZED", "SUBMITTED", "ACCEPTED", "CHANGEPENDING", "CHANGESUBMITTED", "CANCELPENDING",
+                    "CANCELSUBMITTED", "TRIGGERPENDING"}
+
 REJECTED_STATES = {"REJECTED", "ERROR"}
 
 # El addon publica desde varios hilos de NinjaTrader: un seq puede llegar unos mensajes tarde sin que se haya perdido nada
@@ -60,6 +65,7 @@ class ReplicationService:
         self.inflight_ttl = 20.0
         self.journal = journal
         self.close_on_stop_reject = close_on_stop_reject
+        self.audit_lifecycle = False          # auditar también los estados intermedios (AUDIT_ORDER_LIFECYCLE)
         self.sync = None                      # SyncService, lo inyecta el contenedor
         self._last_seq: int | None = None
         self._missing_seq: dict[int, float] = {}   # seq que aún no ha llegado -> monotonic en que se echó en falta
@@ -68,7 +74,7 @@ class ReplicationService:
         self.rules: list[ReplicationRule] = store.get_all_rules()
         self.stats = {"events_in": 0, "orders_out": 0, "blocked": 0, "errors": 0, "rejected": 0, "fills": 0, "duplicates": 0,
                       "latency_ms_last": None, "latency_ms_avg": None, "slippage_last": None, "slippage_avg": None,
-                      "seq_gaps": 0, "addon_restarts": 0, "flattens": 0}
+                      "seq_gaps": 0, "addon_restarts": 0, "flattens": 0, "fanout_ms_last": None, "broker_ms_last": None}
         self._seen: OrderedDict[tuple, None] = OrderedDict()
         # (follower, master_order_id) -> qty de la orden pendiente que ya copiamos (stop / take profit)
         self._sent_pending: OrderedDict[tuple, int] = OrderedDict()
@@ -220,7 +226,7 @@ class ReplicationService:
                        source=event.account, details={"order_id": event.order_id, "state": event.state})
 
         if event.msg_type == "EXECUTION":
-            self._remember(self._master_execs, event.order_id, (event.price, time.monotonic(), event.action))
+            self._remember(self._master_execs, event.order_id, (event.price, time.monotonic(), event.action, event.timestamp))
         elif event.msg_type in ("ORDER_PENDING", "ORDER_MODIFIED"):
             self._remember(self._master_pending, event.order_id, self._kind(event.order_type))
 
@@ -232,6 +238,7 @@ class ReplicationService:
             return []
 
         tasks: list[ReplicationTask] = []
+        accepted: list[tuple] = []
         matched = 0
         for rule in self.rules:
             if not rule.matches(event):
@@ -320,10 +327,14 @@ class ReplicationService:
                     continue
             task = ReplicationTask(rule_id=rule.id, master_event=event, target_account=follower,
                                    scaled_quantity=qty, master_order_id=event.order_id)
-            await self._execute(task, rule, symbol)
+            accepted.append((task, rule, symbol, fl, root, exit_))
+        # Todas las copias del evento salen en UNA petición al addon (con 11 seguidoras, 10 idas y vueltas menos) y el
+        # libro de exposición se anota después, con las respuestas.
+        await self._execute_many([(t, r, sym) for t, r, sym, _, _, _ in accepted])
+        for task, rule, symbol, fl, root, exit_ in accepted:
             tasks.append(task)
             if task.status == "SENT":
-                self._note_sent(fl, root, event, qty, exit_)
+                self._note_sent(fl, root, event, task.scaled_quantity, exit_)
         if matched == 0:
             self._explain_no_match(event)
         return tasks
@@ -354,42 +365,62 @@ class ReplicationService:
         return {"entry_mode": "limit", "tolerance_ticks": rule.tolerance_ticks,
                 "entry_timeout_s": rule.entry_timeout_s, "entry_fallback": rule.entry_fallback}
 
-    async def _execute(self, task: ReplicationTask, rule: ReplicationRule | None = None, symbol: str | None = None) -> None:
+    def _order_kwargs(self, task: ReplicationTask, rule: ReplicationRule | None, symbol: str) -> tuple[dict, dict | None]:
         ev = task.master_event
-        symbol = symbol or ev.symbol
         entry = self._entry_params(rule, ev, symbol) if rule else None
+        return ({"target_account": task.target_account, "action": ev.action, "symbol": symbol, "quantity": task.scaled_quantity,
+                 "order_type": ev.order_type, "master_order_id": task.master_order_id, "msg_type": ev.msg_type,
+                 "price": ev.price, "limit_price": ev.limit_price, "stop_price": ev.stop_price, "entry": entry}, entry)
+
+    async def _execute(self, task: ReplicationTask, rule: ReplicationRule | None = None, symbol: str | None = None) -> None:
+        await self._execute_many([(task, rule, symbol or task.master_event.symbol)])
+
+    async def _execute_many(self, items: list[tuple]) -> None:
+        """Manda las copias de un evento en lote (una petición al addon) y anota cada respuesta."""
+        if not items:
+            return
+        prepared = [(task, rule, symbol, *self._order_kwargs(task, rule, symbol)) for task, rule, symbol in items]
+        t0 = time.monotonic()
         try:
-            reply = await self.bridge.send_order(target_account=task.target_account, action=ev.action, symbol=symbol,
-                                                 quantity=task.scaled_quantity, order_type=ev.order_type,
-                                                 master_order_id=task.master_order_id, msg_type=ev.msg_type, price=ev.price,
-                                                 limit_price=ev.limit_price, stop_price=ev.stop_price, entry=entry)
-            if isinstance(reply, str) and reply.startswith("IGNORED|"):
-                # El addon recibió la orden pero no la aplicó (copia ya ejecutada, sin orden viva...): no es una réplica.
-                task.status = "IGNORED"
-                self.audit.log("SKIPPED", f"[{ev.msg_type}] {ev.action} {task.scaled_quantity} {symbol} -> {task.target_account}: "
-                                          f"el addon no la aplicó ({reply[8:]})",
-                               source=ev.account, target=task.target_account,
-                               details={"rule_id": task.rule_id, "master_order_id": task.master_order_id, "reply": reply})
-                return
-            if self.journal:
-                self.journal.write("out", {"msg_type": ev.msg_type, "account": task.target_account, "action": ev.action,
-                                           "symbol": symbol, "quantity": task.scaled_quantity, "order_type": ev.order_type,
-                                           "master_order_id": task.master_order_id, "rule_id": task.rule_id, **(entry or {})})
-            task.status = "SENT"
-            self.stats["orders_out"] += 1
-            if ev.msg_type in ("ORDER_PENDING", "ORDER_MODIFIED"):
-                self._remember(self._sent_pending, (task.target_account.lower(), task.master_order_id), task.scaled_quantity)
-            how = f" (límite ±{entry['tolerance_ticks']} ticks)" if entry else ""
-            detail = reply[3:] if isinstance(reply, str) and reply.startswith("OK|") else ""
-            note = f" · addon: {ADDON_NOTES.get(detail, detail.lower().replace('_', ' '))}" if detail and detail != ev.msg_type else ""
-            self.audit.log("REPLICATED", f"[{ev.msg_type}] {ev.action} {task.scaled_quantity} {symbol}{how} -> {task.target_account}{note}",
-                           source=ev.account, target=task.target_account,
-                           details={"rule_id": task.rule_id, "master_order_id": task.master_order_id, "reply": reply})
+            replies = await self.bridge.send_orders([kw for _, _, _, kw, _ in prepared])
         except Exception as exc:
+            replies = [exc for _ in prepared]
+        dispatch_ms = round((time.monotonic() - t0) * 1000)
+        self.stats["fanout_ms_last"] = dispatch_ms
+        for (task, rule, symbol, kw, entry), reply in zip(prepared, replies):
+            self._after_reply(task, symbol, entry, reply, dispatch_ms)
+
+    def _after_reply(self, task: ReplicationTask, symbol: str, entry: dict | None, reply, dispatch_ms: int) -> None:
+        ev = task.master_event
+        if isinstance(reply, BaseException):
             task.status = "ERROR"
             self.stats["errors"] += 1
-            self.audit.log("ERROR", f"Fallo replicando a {task.target_account}: {exc}",
+            self.audit.log("ERROR", f"Fallo replicando a {task.target_account}: {reply}",
                            source=ev.account, target=task.target_account)
+            return
+        if isinstance(reply, str) and reply.startswith("IGNORED|"):
+            # El addon recibió la orden pero no la aplicó (copia ya ejecutada, sin orden viva...): no es una réplica.
+            task.status = "IGNORED"
+            self.audit.log("SKIPPED", f"[{ev.msg_type}] {ev.action} {task.scaled_quantity} {symbol} -> {task.target_account}: "
+                                      f"el addon no la aplicó ({reply[8:]})",
+                           source=ev.account, target=task.target_account,
+                           details={"rule_id": task.rule_id, "master_order_id": task.master_order_id, "reply": reply})
+            return
+        if self.journal:
+            self.journal.write("out", {"msg_type": ev.msg_type, "account": task.target_account, "action": ev.action,
+                                       "symbol": symbol, "quantity": task.scaled_quantity, "order_type": ev.order_type,
+                                       "master_order_id": task.master_order_id, "rule_id": task.rule_id, **(entry or {})})
+        task.status = "SENT"
+        self.stats["orders_out"] += 1
+        if ev.msg_type in ("ORDER_PENDING", "ORDER_MODIFIED"):
+            self._remember(self._sent_pending, (task.target_account.lower(), task.master_order_id), task.scaled_quantity)
+        how = f" (límite ±{entry['tolerance_ticks']} ticks)" if entry else ""
+        detail = reply[3:] if isinstance(reply, str) and reply.startswith("OK|") else ""
+        note = f" · addon: {ADDON_NOTES.get(detail, detail.lower().replace('_', ' '))}" if detail and detail != ev.msg_type else ""
+        self.audit.log("REPLICATED", f"[{ev.msg_type}] {ev.action} {task.scaled_quantity} {symbol}{how} -> {task.target_account}{note}",
+                       source=ev.account, target=task.target_account,
+                       details={"rule_id": task.rule_id, "master_order_id": task.master_order_id, "reply": reply,
+                                "dispatch_ms": dispatch_ms})
 
     # ---- libro de exposición ----
     @staticmethod
@@ -551,13 +582,24 @@ class ReplicationService:
         details: dict = {"master_order_id": event.master_order_id, "order_id": event.order_id}
         ref = self._master_execs.get(event.master_order_id)
         if ref:
-            m_price, m_at, m_action = ref
+            m_price, m_at, m_action, m_ts = ref
             latency_ms = round((time.monotonic() - m_at) * 1000)
             # deslizamiento con signo: positivo = peor para el follower
             worse = event.price - m_price if m_action.upper().startswith("BUY") else m_price - event.price
             slip = round(worse, 4)
             details.update({"latency_ms": latency_ms, "master_price": m_price, "slippage": slip})
-            msg += f" (maestro {m_price}, {'+' if slip >= 0 else ''}{slip}, {latency_ms} ms)"
+            # latencia real en el bróker: reloj de NinjaTrader en los dos fills, sin la cola de mensajes del engine
+            broker_ms = None
+            try:
+                if m_ts and event.timestamp and (m_ts.tzinfo is None) == (event.timestamp.tzinfo is None):
+                    broker_ms = round((event.timestamp - m_ts).total_seconds() * 1000)
+            except Exception:
+                broker_ms = None
+            if broker_ms is not None and -1000 <= broker_ms <= 600_000:
+                details["broker_ms"] = broker_ms
+                self.stats["broker_ms_last"] = broker_ms
+            msg += (f" (maestro {m_price}, {'+' if slip >= 0 else ''}{slip}, {latency_ms} ms"
+                    + (f"; en bróker {broker_ms} ms" if broker_ms is not None else "") + ")")
             self.stats["latency_ms_last"], self.stats["slippage_last"] = latency_ms, slip
             self.stats["latency_ms_avg"] = round(_ema(self.stats["latency_ms_avg"], latency_ms))
             self.stats["slippage_avg"] = round(_ema(self.stats["slippage_avg"], slip), 4)
@@ -588,6 +630,8 @@ class ReplicationService:
             self.stats["rejected"] += 1
             self.audit.log("FOLLOWER_REJECTED", f"{account}: {desc} {error} {native} (la orden sigue viva al precio anterior)".strip(),
                            target=account, details=details)
+        elif state in LIFECYCLE_STATES and not self.audit_lifecycle:
+            logger.debug(f"{account}: {desc}")       # tránsito: queda en el diario, no en la auditoría
         else:
             self.audit.log("FOLLOWER_STATUS", f"{account}: {desc}", target=account, details=details)
 

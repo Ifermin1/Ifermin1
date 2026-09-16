@@ -72,6 +72,7 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
     risk = RiskService(store, bus, audit, bridge, accounts)
     journal = Journal(cfg.JOURNAL_DIR or None)
     replication = ReplicationService(bridge, store, audit, risk, bus, accounts, journal, cfg.CLOSE_ON_STOP_REJECT)
+    replication.audit_lifecycle = cfg.AUDIT_ORDER_LIFECYCLE
     sync = SyncService(accounts, bridge, audit, bus, cfg.DESYNC_GRACE_SECONDS, auto_fix=cfg.AUTO_FIX_OVERCLOSE)
     sync.rules_provider = lambda: replication.rules
     sync.replication = replication

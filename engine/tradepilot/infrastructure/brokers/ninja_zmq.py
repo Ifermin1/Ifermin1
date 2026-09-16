@@ -36,6 +36,8 @@ class NinjaZmqBridge(BrokerBridge):
         self._req_lock = asyncio.Lock()
         self._order_lock = asyncio.Lock()
         self._orders_via_req = True   # se desactiva si el addon no conoce ORDER| (versión antigua)
+        self._orders_batch = True     # ORDERS| (addon >= 2.5): todas las copias de un evento en una sola petición
+        self._retry_batch_at = 0.0
         self.order_timeout_ms = 3000
         self._supports_all = True   # se desactiva si el addon no conoce GET_ACCOUNTS_ALL
         self._supports_orders = True   # GET_ORDERS (addon >= 2.2)
@@ -372,11 +374,11 @@ class NinjaZmqBridge(BrokerBridge):
                 self._reset_order_socket()
                 return None
 
-    async def send_order(self, target_account, action, symbol, quantity, order_type, master_order_id,
-                         msg_type="EXECUTION", price=0.0, limit_price=0.0, stop_price=0.0, entry=None) -> str | None:
-        """Devuelve la respuesta del addon ("OK|tipo", "OK|detalle", "IGNORED|motivo") o None si fue por 5556 sin confirmación."""
-        if not self._running:
-            raise RuntimeError("Puente ZMQ no iniciado")
+    BATCH_SEP = "\x1f"    # separador de unidad: nunca aparece en el JSON ni en las respuestas del addon
+
+    @staticmethod
+    def _payload(target_account, action, symbol, quantity, order_type, master_order_id, msg_type="EXECUTION",
+                 price=0.0, limit_price=0.0, stop_price=0.0, entry=None) -> dict:
         payload = {
             "msg_type": msg_type, "account": target_account, "action": action, "symbol": symbol,
             "quantity": quantity, "price": price, "order_type": order_type, "master_order_id": master_order_id,
@@ -384,6 +386,61 @@ class NinjaZmqBridge(BrokerBridge):
         }
         if entry:
             payload.update(entry)   # entry_mode / tolerance_ticks / entry_timeout_s / entry_fallback
+        return payload
+
+    def _interpret(self, reply: str, o: dict):
+        """Aplica a una respuesta del addon la misma semántica que send_order; devuelve la respuesta o una excepción."""
+        self.health.order_channel = "req"
+        self.health.last_msg_out = datetime.now()
+        if reply.startswith("ERROR|"):
+            self.health.error_count += 1
+            return RuntimeError("NinjaTrader rechazó la orden: " + reply[6:])
+        self.health.orders_confirmed += 1
+        if reply.startswith("IGNORED|"):
+            logger.info(f"Orden {o['action']} {o['quantity']} {o['symbol']} -> {o['account']} ignorada por el addon: {reply[8:]}")
+        else:
+            logger.info(f"Orden confirmada -> {o['account']} {o['action']} {o['quantity']} {o['symbol']} ({reply})")
+        return reply
+
+    async def send_orders(self, orders: list[dict]) -> list:
+        """Todas las copias de un evento en UNA petición (ORDERS|json\x1fjson..., addon >= 2.5): con 11 seguidoras
+        ahorra 10 idas y vueltas y el addon las envía en paralelo. Si el addon es anterior, una a una como siempre."""
+        if not self._orders_batch and time.monotonic() >= self._retry_batch_at:
+            self._orders_batch = True             # el addon puede haberse actualizado en caliente
+        if len(orders) < 2 or not self._orders_via_req or not self._orders_batch or not self._running:
+            return await super().send_orders(orders)
+        payloads = [self._payload(**o) for o in orders]
+        msg = "ORDERS|" + self.BATCH_SEP.join(json.dumps(p) for p in payloads)
+        reply = await self._order_request(msg)
+        if reply is None:
+            self.health.orders_retried += 1
+            logger.warning(f"NinjaTrader no confirmó el lote de {len(orders)} órdenes: reintentando")
+            reply = await self._order_request(msg)
+        if reply is None:
+            self.health.error_count += 1
+            exc = RuntimeError(f"NinjaTrader no confirmó el lote de órdenes en {2 * self.order_timeout_ms // 1000} s "
+                               "(¿addon cargado? revisa el Output de NinjaTrader)")
+            return [exc for _ in orders]
+        if reply.startswith("ERROR|unknown request"):
+            self._orders_batch = False
+            self._retry_batch_at = time.monotonic() + 60
+            logger.warning("El addon no acepta lotes ORDERS| (anterior a v2.5): las copias van una a una. Actualiza el addon.")
+            return await super().send_orders(orders)
+        parts = reply.split(self.BATCH_SEP)
+        if len(parts) != len(orders):
+            self.health.error_count += 1
+            logger.error(f"Lote de {len(orders)} órdenes: el addon devolvió {len(parts)} respuestas ({reply[:120]})")
+            return [self._interpret(parts[i], payloads[i]) if i < len(parts) else RuntimeError("sin respuesta del addon en el lote")
+                    for i in range(len(orders))]
+        return [self._interpret(r, o) for r, o in zip(parts, payloads)]
+
+    async def send_order(self, target_account, action, symbol, quantity, order_type, master_order_id,
+                         msg_type="EXECUTION", price=0.0, limit_price=0.0, stop_price=0.0, entry=None) -> str | None:
+        """Devuelve la respuesta del addon ("OK|tipo", "OK|detalle", "IGNORED|motivo") o None si fue por 5556 sin confirmación."""
+        if not self._running:
+            raise RuntimeError("Puente ZMQ no iniciado")
+        payload = self._payload(target_account, action, symbol, quantity, order_type, master_order_id, msg_type,
+                                price, limit_price, stop_price, entry)
         raw = json.dumps(payload)
         if self._orders_via_req:
             # Canal con confirmación (addon >= 1.9): si el addon no contesta, se reintenta una vez (el addon ignora

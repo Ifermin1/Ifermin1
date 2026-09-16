@@ -629,3 +629,74 @@ async def test_overclose_left_by_the_copier_is_closed_automatically(container):
     rep.last_manual_fill[("sim102", "NQ")] = __import__("time").monotonic()
     await sync.check(); await sync.check()
     assert len([o for o in b.sent_orders if o["master_order_id"].startswith("FIX-")]) == 2
+
+
+async def test_copies_of_one_event_go_out_in_a_single_batch(client: AsyncClient, container):
+    """16/9 15:18 con 11 seguidoras: las copias salían una a una (una ida y vuelta por cuenta) y la entrada tardó
+    1,6-3,1 s en llenarse. Ahora todas las copias de un evento van en una sola petición al addon."""
+    b = container.bridge
+    b.health.master_account = "Sim101"
+    for acc in ("Sim102", "Sim103"):
+        await client.put(f"/api/accounts/{acc}/link", json={"master_account": "Sim101"})
+    await b.emit_master_event(seq=70, action="BUY", quantity=1, symbol="NQ 12-26")
+    assert b.batches[-1] == 2 and [o["account"] for o in b.sent_orders[-2:]] == ["Sim102", "Sim103"]
+    reps = [a for a in container.audit.recent(10) if a.event_type == "REPLICATED"]
+    assert len(reps) == 2 and all("dispatch_ms" in (a.details or {}) for a in reps)
+    assert container.replication.stats["fanout_ms_last"] is not None
+
+
+async def test_lifecycle_states_are_not_audited_but_terminal_ones_are(container):
+    rep = container.replication
+    base = {"msg_type": "ORDER_STATUS", "account": "Sim102", "action": "SELL", "quantity": 2, "symbol": "NQ 12-26",
+            "order_id": "k1", "master_order_id": "m1"}
+    before = len([a for a in container.audit.recent(50) if a.event_type == "FOLLOWER_STATUS"])
+    for st in ("Initialized", "Submitted", "Accepted", "ChangePending", "ChangeSubmitted", "CancelPending", "CancelSubmitted"):
+        await rep.process_master_event({**base, "state": st})
+    assert len([a for a in container.audit.recent(50) if a.event_type == "FOLLOWER_STATUS"]) == before
+    for st in ("Working", "PartFilled", "Filled"):
+        await rep.process_master_event({**base, "state": st})
+    assert len([a for a in container.audit.recent(50) if a.event_type == "FOLLOWER_STATUS"]) == before + 3
+    rep.audit_lifecycle = True
+    await rep.process_master_event({**base, "state": "Submitted", "order_id": "k2"})
+    assert container.audit.recent(1)[0].event_type == "FOLLOWER_STATUS"
+
+
+async def test_follower_fill_reports_broker_side_latency(container):
+    rep = container.replication
+    b = container.bridge
+    b.health.master_account = "Sim101"
+    rep.add_rule("Sim101", "Sim102")
+    ev = {"msg_type": "EXECUTION", "account": "Sim101", "action": "BUY", "symbol": "NQ 12-26", "quantity": 1, "price": 20000.0,
+          "order_type": "MARKET", "state": "Filled", "order_id": "M77", "execution_id": "e77", "timestamp": "2026-09-16T15:18:46.500"}
+    await rep.process_master_event(ev)
+    await rep.process_master_event({**ev, "account": "Sim102", "order_id": "F77", "master_order_id": "M77", "execution_id": "f77",
+                                    "price": 20000.25, "timestamp": "2026-09-16T15:18:46.590"})
+    fill = container.audit.recent(1)[0]
+    assert fill.event_type == "FOLLOWER_FILL" and fill.details["broker_ms"] == 90 and "en bróker 90 ms" in fill.message
+    assert rep.stats["broker_ms_last"] == 90
+
+
+async def test_zmq_bridge_batches_orders_and_falls_back_on_old_addon(monkeypatch):
+    from tradepilot.infrastructure.brokers.ninja_zmq import NinjaZmqBridge
+    from tradepilot.core.events import EventBus
+    br = NinjaZmqBridge(EventBus())
+    br._running = True
+    sent: list[str] = []
+    replies = ["OK|EXECUTION\x1fIGNORED|la orden del follower ya se ejecutó\x1fERROR|follower desconocido: X"]
+
+    async def fake_request(msg):
+        sent.append(msg)
+        return replies.pop(0) if replies else "OK|EXECUTION"
+    monkeypatch.setattr(br, "_order_request", fake_request)
+    orders = [dict(target_account=a, action="BUY", symbol="NQ 12-26", quantity=1, order_type="MARKET", master_order_id="m")
+              for a in ("A", "B", "X")]
+    out = await br.send_orders(orders)
+    assert sent[0].startswith("ORDERS|") and sent[0].count("\x1f") == 2
+    assert out[0] == "OK|EXECUTION" and out[1].startswith("IGNORED|") and isinstance(out[2], RuntimeError)
+    # addon anterior a 2.5: ERROR|unknown request -> una a una, y el lote se reintenta pasado un minuto
+    replies[:] = ["ERROR|unknown request", "OK|EXECUTION", "OK|EXECUTION", "OK|EXECUTION"]
+    sent.clear()
+    out = await br.send_orders(orders)
+    assert sent[0].startswith("ORDERS|") and all(m.startswith("ORDER|") for m in sent[1:]) and len(sent) == 4
+    assert out == ["OK|EXECUTION"] * 3 and br._orders_batch is False
+    await br.stop()          # cierra los sockets: un contexto ZMQ con sockets abiertos bloquea la salida del proceso

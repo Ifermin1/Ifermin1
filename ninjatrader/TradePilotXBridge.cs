@@ -36,6 +36,8 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
 using NetMQ;
 using NetMQ.Sockets;
 using NinjaTrader.Cbi;
@@ -47,7 +49,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 {
     public class TradePilotXBridge : AddOnBase
     {
-        private const string BridgeVersion = "2.4";
+        private const string BridgeVersion = "2.5";
 
         // ---- configuración ------------------------------------------------
         private class BridgeConfig
@@ -65,6 +67,11 @@ namespace NinjaTrader.NinjaScript.AddOns
             // Admite nombres exactos o prefijos terminados en * (p. ej. "Sim*", "APEX-112924-1*").
             // GET_ACCOUNTS_ALL ignora este filtro y devuelve todas las cuentas con su estado.
             public List<string> AccountFilter = new List<string>();
+            // v2.5: las copias de un lote ORDERS| se envían a la vez (una tarea por cuenta). false = una tras otra.
+            public bool ParallelSubmit = true;
+            // v2.5: imprimir en el Output también los estados de tránsito (Initialized, Submitted, Accepted, ChangePending...).
+            // Imprimirlos línea a línea frenaba el envío; siguen publicándose al engine.
+            public bool VerboseOutput = false;
         }
 
         private static readonly string ConfigDir = Path.Combine(Core.Globals.UserDataDir, "TradePilotX");
@@ -153,6 +160,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                 if (running) return;
                 try
                 {
+                    StartLogThread();
                     cfg = LoadConfig();
 
                     outbox = new NetMQQueue<string>();
@@ -199,7 +207,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                     foreach (string sym in cfg.PriceInstruments)
                         EnsurePriceFeed(sym);
 
-                    Info(string.Format("Bridge v{0} online. master={1} pub={2} sub={3} sync={4} (v2.4: doble salida corregida al instante y copias fantasma barridas)",
+                    Info(string.Format("Bridge v{0} online. master={1} pub={2} sub={3} sync={4} (v2.5: copias en lote y en paralelo, Output asíncrono)",
                         BridgeVersion, cfg.MasterAccount, cfg.MasterPort, cfg.FollowerPort, cfg.SyncPort));
                 }
                 catch (Exception ex)
@@ -236,6 +244,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                 poller = null; sub = null; rep = null; pub = null; outbox = null; priceTimer = null; heartbeatTimer = null;
                 try { NetMQConfig.Cleanup(false); } catch { }
                 Info("Bridge offline.");
+                StopLogThread();
             }
         }
 
@@ -521,6 +530,37 @@ namespace NinjaTrader.NinjaScript.AddOns
 
         /// <summary>Orden de TradePilot. Llega por 5556 (PUB/SUB, sin confirmación) o, desde v1.9, como "ORDER|json"
         /// por 5557 (REQ/REP): así el engine sabe con certeza si la orden llegó. Devuelve "OK|...", "IGNORED|..." o "ERROR|...".</summary>
+        private const char BatchSep = '\x1f';
+
+        /// <summary>v2.5: un lote de órdenes (una por seguidora). Con 11 cuentas, mandarlas una tras otra sumaba el tiempo
+        /// de envío de cada una (16/9 15:18: la entrada tardó 1,6-3,1 s en llenarse). Cada orden va en su propia tarea
+        /// y se responde con todas las confirmaciones, en el mismo orden.</summary>
+        private string HandleFollowerBatch(string raw)
+        {
+            string[] items = raw.Split(BatchSep);
+            string[] replies = new string[items.Length];
+            if (!cfg.ParallelSubmit || items.Length < 2)
+            {
+                for (int i = 0; i < items.Length; i++) replies[i] = HandleFollowerMessage(items[i]);
+                return string.Join(BatchSep.ToString(), replies);
+            }
+            var tasks = new Task[items.Length];
+            for (int i = 0; i < items.Length; i++)
+            {
+                int idx = i;
+                tasks[i] = Task.Run(() =>
+                {
+                    try { replies[idx] = HandleFollowerMessage(items[idx]); }
+                    catch (Exception ex) { replies[idx] = "ERROR|" + ex.Message; }
+                });
+            }
+            if (!Task.WaitAll(tasks, 2500))
+                Warn("Lote de " + items.Length + " órdenes: alguna cuenta no respondió en 2,5 s (se le contesta ERROR|timeout; la orden puede seguir en curso)");
+            for (int i = 0; i < replies.Length; i++)
+                if (replies[i] == null) replies[i] = "ERROR|timeout enviando la orden";
+            return string.Join(BatchSep.ToString(), replies);
+        }
+
         private string HandleFollowerMessage(string raw)
         {
             try
@@ -821,7 +861,8 @@ namespace NinjaTrader.NinjaScript.AddOns
                 string native = e.Comment ?? "";
                 string line = string.Format("Follower {0}: {1} {2} {3} {4} -> {5}{6}", account, order.Name, order.OrderAction,
                     order.Quantity, order.Instrument.FullName, e.OrderState, string.IsNullOrEmpty(error) ? "" : " ERROR=" + error + " " + native);
-                if (e.OrderState == OrderState.Rejected) Error(line); else Info(line);
+                if (e.OrderState == OrderState.Rejected) Error(line);
+                else if (cfg.VerboseOutput || !string.IsNullOrEmpty(error) || !IsTransitState(e.OrderState)) Info(line);
                 if (e.OrderState == OrderState.Cancelled || e.OrderState == OrderState.Rejected || e.OrderState == OrderState.Filled)
                 {
                     ReconcileAfterCancel(order, account);
@@ -1192,6 +1233,11 @@ namespace NinjaTrader.NinjaScript.AddOns
                     // v1.9: órdenes con confirmación. Si no respondemos, el engine lo sabe y reintenta; nunca se pierden en silencio.
                     reply = HandleFollowerMessage(request.Substring("ORDER|".Length));
                 }
+                else if (request.StartsWith("ORDERS|"))
+                {
+                    // v2.5: todas las copias de un evento en una petición (separadas por \x1f), enviadas en paralelo.
+                    reply = HandleFollowerBatch(request.Substring("ORDERS|".Length));
+                }
                 else if (request == "PING")
                 {
                     // v1.8: arranque y último seq publicado, para que el engine sepa si se está perdiendo eventos
@@ -1293,12 +1339,56 @@ namespace NinjaTrader.NinjaScript.AddOns
             double v; return double.TryParse(Get(m, key), NumberStyles.Float, CultureInfo.InvariantCulture, out v) && v > 0 ? v : fallback;
         }
 
-        private void Info(string msg) { NinjaTrader.Code.Output.Process("[TradePilotX] " + msg, PrintTo.OutputTab1); }
-        private void Warn(string msg) { NinjaTrader.Code.Output.Process("[TradePilotX] WARN " + msg, PrintTo.OutputTab1); }
+        // v2.5: el Output de NinjaTrader es lento (decenas de ms por línea con la ventana abierta) y se escribía desde el
+        // hilo que envía las órdenes. Ahora las líneas se encolan y un hilo aparte las vuelca en bloque cada 50 ms.
+        private readonly ConcurrentQueue<string> logQueue = new ConcurrentQueue<string>();
+        private Thread logThread;
+        private volatile bool logRunning;
+
+        private void StartLogThread()
+        {
+            if (logThread != null) return;
+            logRunning = true;
+            logThread = new Thread(() =>
+            {
+                var sb = new StringBuilder();
+                while (logRunning || !logQueue.IsEmpty)
+                {
+                    string line; int n = 0;
+                    while (n < 200 && logQueue.TryDequeue(out line)) { if (n++ > 0) sb.Append(Environment.NewLine); sb.Append(line); }
+                    if (n > 0) { try { NinjaTrader.Code.Output.Process(sb.ToString(), PrintTo.OutputTab1); } catch { } sb.Clear(); }
+                    Thread.Sleep(50);
+                }
+            }) { IsBackground = true, Name = "TradePilotX.Output" };
+            logThread.Start();
+        }
+
+        private void StopLogThread()
+        {
+            logRunning = false;
+            try { if (logThread != null) logThread.Join(1000); } catch { }
+            logThread = null;
+        }
+
+        private void Emit(string line)
+        {
+            if (logThread != null && logRunning) logQueue.Enqueue(line);
+            else { try { NinjaTrader.Code.Output.Process(line, PrintTo.OutputTab1); } catch { } }
+        }
+
+        private void Info(string msg) { Emit("[TradePilotX] " + msg); }
+        private void Warn(string msg) { Emit("[TradePilotX] WARN " + msg); }
         private void Error(string msg)
         {
-            NinjaTrader.Code.Output.Process("[TradePilotX] ERROR " + msg, PrintTo.OutputTab1);
+            Emit("[TradePilotX] ERROR " + msg);
             try { Log("[TradePilotX] " + msg, LogLevel.Error); } catch { }
+        }
+
+        private static bool IsTransitState(OrderState st)
+        {
+            return st == OrderState.Initialized || st == OrderState.Submitted || st == OrderState.Accepted
+                || st == OrderState.ChangePending || st == OrderState.ChangeSubmitted
+                || st == OrderState.CancelPending || st == OrderState.CancelSubmitted || st == OrderState.TriggerPending;
         }
 
         // ---- config ------------------------------------------------------
@@ -1327,6 +1417,8 @@ namespace NinjaTrader.NinjaScript.AddOns
                     c.PriceInstruments = ParseList(Get(m, "PriceInstruments"));
                 if (m.ContainsKey("AccountFilter"))
                     c.AccountFilter = ParseList(Get(m, "AccountFilter"));
+                if (m.ContainsKey("ParallelSubmit")) c.ParallelSubmit = Get(m, "ParallelSubmit").ToLowerInvariant() != "false";
+                if (m.ContainsKey("VerboseOutput")) c.VerboseOutput = Get(m, "VerboseOutput").ToLowerInvariant() == "true";
                 Info("Config cargada: " + ConfigPath);
             }
             catch (Exception ex) { Error("No se pudo leer config.json, usando defaults: " + ex.Message); }
@@ -1366,7 +1458,9 @@ namespace NinjaTrader.NinjaScript.AddOns
                 + "  \"PriceThrottleMs\": " + c.PriceThrottleMs + ",\n"
                 + "  \"HeartbeatMs\": " + c.HeartbeatMs + ",\n"
                 + "  \"PriceInstruments\": " + JsonList(c.PriceInstruments) + ",\n"
-                + "  \"AccountFilter\": " + JsonList(c.AccountFilter) + "\n"
+                + "  \"AccountFilter\": " + JsonList(c.AccountFilter) + ",\n"
+                + "  \"ParallelSubmit\": " + (c.ParallelSubmit ? "true" : "false") + ",\n"
+                + "  \"VerboseOutput\": " + (c.VerboseOutput ? "true" : "false") + "\n"
                 + "}\n";
         }
 

@@ -77,3 +77,14 @@ class BrokerBridge(ABC):
         stop_price: float = 0.0,
         entry: dict | None = None,
     ) -> str | None: ...
+
+    async def send_orders(self, orders: list[dict]) -> list:
+        """Varias órdenes de una vez (una por seguidora). Devuelve, en el mismo orden, la respuesta del addon o la
+        excepción de cada una. Por defecto las manda una a una; el puente ZMQ las agrupa en una sola petición."""
+        out: list = []
+        for o in orders:
+            try:
+                out.append(await self.send_order(**o))
+            except Exception as exc:
+                out.append(exc)
+        return out
