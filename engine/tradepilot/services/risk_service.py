@@ -25,8 +25,11 @@ class RiskService:
         raw = store.get_kv("schedule")
         self.schedule = Schedule.model_validate(json.loads(raw)) if raw else Schedule()
         self.session_closed_day: str = store.get_kv("session_closed_day", "") or ""
-        self.heartbeat_timeout = 30.0
+        self.heartbeat_timeout = 15.0   # el addon late cada 5 s
         self.addon_silent = False
+        self._silent_since: datetime | None = None
+        self._last_resubscribe: datetime | None = None
+        self.resubscribe_every = 30.0
         self._warned_80: set[tuple[str, str]] = set()   # (cuenta, día) avisadas al 80 %
         self.now = datetime.now                       # inyectable en pruebas
         bus.subscribe("risk.naked", self._on_naked)
@@ -86,16 +89,31 @@ class RiskService:
         if self.bridge is None or self.bridge.health.mode != "ninja":
             return
         hb = self.bridge.health.last_heartbeat
-        silent = hb is None or (datetime.now() - hb).total_seconds() > self.heartbeat_timeout
+        now = datetime.now()
+        silent = hb is None or (now - hb).total_seconds() > self.heartbeat_timeout
         if silent and not self.addon_silent:
             self.addon_silent = True
+            self._silent_since = now
             self.audit.log("ADDON_SILENT", f"Sin heartbeat del addon de NinjaTrader desde hace más de {int(self.heartbeat_timeout)} s: "
                            "no se están recibiendo operaciones de la maestra")
             self.bus.publish_nowait(TOPIC_RISK, self.state().model_dump(mode="json"))
         elif not silent and self.addon_silent:
             self.addon_silent = False
+            self._silent_since = None
             self.audit.log("ADDON_BACK", "Heartbeat del addon recuperado")
             self.bus.publish_nowait(TOPIC_RISK, self.state().model_dump(mode="json"))
+        if silent and (self._last_resubscribe is None or (now - self._last_resubscribe).total_seconds() >= self.resubscribe_every):
+            # Autocuración: si el addon responde a comandos pero no llegan eventos, reconectar el canal de eventos.
+            self._last_resubscribe = now
+            try:
+                alive = await self.bridge.ping()
+            except Exception:
+                alive = False
+            if alive:
+                await self.bridge.resubscribe()
+                self.audit.log("RESUBSCRIBE", "El addon responde a comandos pero no envía eventos: canal de eventos reconectado")
+            else:
+                self.audit.log("ADDON_DOWN", "El addon tampoco responde a comandos (PING): NinjaTrader cerrado o addon no cargado")
 
     async def _check_daily_loss(self) -> None:
         if not self.accounts:

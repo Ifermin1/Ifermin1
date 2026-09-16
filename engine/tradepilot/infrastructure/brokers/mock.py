@@ -74,6 +74,9 @@ class MockBridge(BrokerBridge):
         await self.bus.publish(TOPIC_MASTER_EVENT, event)
         return event
 
+    async def resubscribe(self) -> None:
+        self.resubscribes = getattr(self, "resubscribes", 0) + 1
+
     async def get_positions(self) -> list[BrokerPosition] | None:
         return [BrokerPosition(account_id=a, symbol=sym, quantity=q) for (a, sym), q in self.positions.items() if q]
 

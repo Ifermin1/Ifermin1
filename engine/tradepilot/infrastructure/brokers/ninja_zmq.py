@@ -107,6 +107,29 @@ class NinjaZmqBridge(BrokerBridge):
                 self._reset_req_socket()
                 return None
 
+    async def ping(self) -> bool:
+        return (await self.request("PING", timeout_ms=2000)) == "PONG"
+
+    async def resubscribe(self) -> None:
+        """Recrea el socket SUB y su tarea de escucha. Se usa cuando el addon responde a comandos
+        pero no llegan eventos (típico tras un reinicio de NinjaTrader o del addon)."""
+        self.stats_resubscribes = getattr(self, "stats_resubscribes", 0) + 1
+        if self._listen_task and not self._listen_task.done():
+            self._listen_task.cancel()
+            try:
+                await self._listen_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        try:
+            self.sub_socket.close(linger=0)
+        except Exception:
+            pass
+        self.sub_socket = self.context.socket(zmq.SUB)
+        self.sub_socket.connect(f"tcp://{settings.ZMQ_HOST}:{settings.ZMQ_MASTER_PORT}")
+        self.sub_socket.setsockopt_string(zmq.SUBSCRIBE, "")
+        self._listen_task = asyncio.create_task(self._listen_master())
+        logger.warning("Canal de eventos ZMQ (5555) reconectado")
+
     async def get_positions(self) -> list[BrokerPosition] | None:
         reply = await self.request("GET_POSITIONS")
         if reply is None or reply.startswith("ERROR|"):

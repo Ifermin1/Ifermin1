@@ -35,7 +35,7 @@ export function Dashboard() {
         <Card className="alert-card"><strong>Seguidoras desincronizadas:</strong> {accounts.filter((a) => a.desync).map((a) => a.account_id).join(", ")}. Ve a <i>Cuentas</i> para igualarlas o cerrarlas.</Card>
       )}
       {risk?.addon_silent && (
-        <Card className="alert-card"><strong>Sin heartbeat del addon</strong> desde hace más de 30 s: NinjaTrader no está enviando operaciones. Revisa que esté abierto y el addon cargado.</Card>
+        <Card className="alert-card"><strong>Sin heartbeat del addon</strong> desde hace más de 15 s: NinjaTrader no está enviando operaciones. Revisa que esté abierto y el addon cargado.</Card>
       )}
       {risk?.session_closed && (
         <Card className="alert-card"><strong>Sesión cerrada por horario</strong> ({risk.schedule.flatten_at}). No se copia nada hasta mañana; en <i>Riesgo</i> puedes reabrir.</Card>

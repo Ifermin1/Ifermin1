@@ -343,6 +343,9 @@ async def test_heartbeat_watchdog(container):
     await container.risk.check()
     assert container.risk.addon_silent is True
     assert any(a.event_type == "ADDON_SILENT" for a in container.audit.recent(3))
+    # autocuración: el addon responde a PING pero no manda eventos -> se reconecta el canal de eventos
+    assert getattr(container.bridge, "resubscribes", 0) == 1
+    assert any(a.event_type == "RESUBSCRIBE" for a in container.audit.recent(3))
     container.bridge.health.last_heartbeat = datetime.now()
     await container.risk.check()
     assert container.risk.addon_silent is False

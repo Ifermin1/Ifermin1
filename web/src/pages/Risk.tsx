@@ -73,7 +73,7 @@ export function Risk() {
       </Card>
 
       {risk?.addon_silent && (
-        <Card className="alert-card"><strong>Sin heartbeat del addon.</strong> NinjaTrader no está enviando nada desde hace más de 30 s: las operaciones de la maestra no se están copiando. Revisa que NinjaTrader esté abierto y el addon cargado.</Card>
+        <Card className="alert-card"><strong>Sin heartbeat del addon.</strong> NinjaTrader no está enviando nada desde hace más de 15 s: las operaciones de la maestra no se están copiando. Revisa que NinjaTrader esté abierto y el addon cargado.</Card>
       )}
       {risk?.session_closed && (
         <Card className="alert-card"><div className="kill">

@@ -37,6 +37,13 @@ class BrokerBridge(ABC):
     async def watch(self, account: str) -> None:
         """Pide al bróker que reporte órdenes/posiciones de esa cuenta (no-op si no aplica)."""
 
+    async def ping(self) -> bool:
+        """¿El bróker responde a consultas? (canal de comandos)"""
+        return True
+
+    async def resubscribe(self) -> None:
+        """Reconecta el canal de eventos (heartbeat/operaciones) sin tocar el de comandos."""
+
     async def set_master(self, account: str) -> str:
         """Cambia la cuenta maestra en el bróker. Devuelve el nombre aplicado o lanza RuntimeError."""
         raise RuntimeError("este puente no permite cambiar la maestra")

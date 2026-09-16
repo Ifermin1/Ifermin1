@@ -73,7 +73,11 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
     risk.replication = replication
     replication.sync = sync
     async def _after_sync() -> None:
-        await sync.check()
-        await risk.check()
+        # independientes: un fallo en una vigilancia no debe apagar la otra
+        for name, fn in (("sincronización", sync.check), ("riesgo", risk.check)):
+            try:
+                await fn()
+            except Exception as exc:
+                logger.exception(f"Error en vigilancia de {name}: {exc}")
     accounts.after_sync = _after_sync
     return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal)
