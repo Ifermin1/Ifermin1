@@ -351,3 +351,28 @@ async def test_rejected_change_is_not_a_naked_stop(container):
     await rep.process_master_event({**base, "state": "Rejected", "error": "OrderRejected", "native_error": "Insufficient margin"})
     await asyncio.sleep(0.05)
     assert b.flattened == ["Sim102"]
+
+
+async def test_partially_filled_entry_keeps_counting_the_unfilled_part(container):
+    """Entrada de 2 con 1 ejecutado (16/9 13:43 fue 4 con 2): el bróker dice +1 pero falta 1 por llenar, así que el stop
+    de 2 no debe recortarse a 1. Cuando el resto se llena y se refresca, ya no queda nada en vuelo (sin doble cuenta)."""
+    rep, b = await _setup(container, follower_pos=0)
+    b.fill_orders = False
+    sym = "NQ 12-26"
+    await rep.process_master_event(_event(action="BUY", quantity=2, symbol=sym, order_id="E1", execution_id="e1",
+                                          is_exit=False).model_dump(mode="json"))
+    assert rep.expected_position("Sim102", sym) == 2
+    await rep.process_master_event(_event(account="Sim102", action="BUY", quantity=1, symbol=sym, order_id="F1",
+                                          master_order_id="E1", execution_id="f1").model_dump(mode="json"))
+    b.positions[("Sim102", sym)] = 1
+    await container.accounts.sync_once()
+    assert container.accounts.position("Sim102", sym) == 1 and rep.expected_position("Sim102", sym) == 2
+    t = await rep.process_master_event(_event(msg_type="ORDER_PENDING", action="SELL", quantity=2, symbol=sym,
+                                              order_type="STOPMARKET", order_id="S1").model_dump(mode="json"))
+    assert len(t) == 1 and t[0].scaled_quantity == 2
+    assert all(a.event_type != "TRIMMED" for a in container.audit.recent(3))
+    await rep.process_master_event(_event(account="Sim102", action="BUY", quantity=1, symbol=sym, order_id="F2",
+                                          master_order_id="E1", execution_id="f2").model_dump(mode="json"))
+    b.positions[("Sim102", sym)] = 2
+    await container.accounts.sync_once()
+    assert rep.expected_position("Sim102", sym) == 2 and not rep._inflight

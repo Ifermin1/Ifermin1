@@ -377,7 +377,8 @@ class ReplicationService:
                 del self._inflight[k]
                 continue
             if k[0] == follower.lower() and e["root"] == root:
-                extra += e["signed"]
+                # Lo ya reflejado por el bróker (settled) está en tracked; el resto de la copia sigue en vuelo.
+                extra += e["signed"] - (1 if e["signed"] > 0 else -1) * e.get("settled", 0)
         return tracked + extra
 
     @staticmethod
@@ -392,7 +393,7 @@ class ReplicationService:
     def _note_sent(self, fl: str, root: str, event: MasterEvent, qty: int, exit_: bool) -> None:
         if event.msg_type == "EXECUTION":
             self._remember(self._inflight, (fl, event.order_id, event.execution_id),
-                           {"root": root, "signed": self._sign(event.action) * qty, "filled": False, "at": time.monotonic()})
+                           {"root": root, "signed": self._sign(event.action) * qty, "filled": 0, "settled": 0, "at": time.monotonic()})
         elif event.msg_type == "ORDER_PENDING" and exit_:
             self._live_exits.setdefault((fl, root), {})[event.order_id] = (self._kind(event.order_type), self._sign(event.action) * qty)
         elif event.msg_type == "ORDER_MODIFIED" and exit_:
@@ -413,9 +414,14 @@ class ReplicationService:
                 del ledger[master_order_id]
 
     def note_positions_refreshed(self, account: str | None) -> None:
-        """El bróker ya refleja las posiciones: las copias marcadas como ejecutadas dejan de contar como 'en vuelo'."""
-        for k in [k for k, e in self._inflight.items() if e["filled"] and (account is None or k[0] == account.lower())]:
-            del self._inflight[k]
+        """El bróker ya refleja las posiciones: lo ejecutado de cada copia deja de contar como 'en vuelo'. Lo que aún
+        no se llenó (entrada de 4 con 2 ejecutados: incidente 16/9 13:43, el stop se recortó a 2) sigue contando."""
+        for k, e in list(self._inflight.items()):
+            if not e["filled"] or (account is not None and k[0] != account.lower()):
+                continue
+            e["settled"] = e["filled"]
+            if e["settled"] >= abs(e["signed"]):
+                del self._inflight[k]
 
     def _desync_blocks(self, follower: str, event: MasterEvent) -> bool:
         """Con DESYNC solo pasan las copias que reducen la exposición actual de la seguidora."""
@@ -457,7 +463,7 @@ class ReplicationService:
         self._remember(self._follower_filled, key, self._follower_filled.get(key, 0) + event.quantity)
         for k, e in self._inflight.items():
             if k[0] == key[0] and k[1] == event.master_order_id:
-                e["filled"] = True
+                e["filled"] = min(abs(e["signed"]), e["filled"] + event.quantity)
         self._forget_exit(key[0], event.master_order_id, filled_qty=event.quantity)
         msg = f"{event.account}: {event.action} {event.quantity} {event.symbol} @ {event.price}"
         details: dict = {"master_order_id": event.master_order_id, "order_id": event.order_id}
