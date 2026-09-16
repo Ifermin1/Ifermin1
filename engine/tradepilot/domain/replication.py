@@ -23,6 +23,8 @@ class MasterEvent(DomainModel):
     stop_price: float = 0.0
     execution_id: str = ""
     master_order_id: str = ""      # si viene relleno, es el ACK/fill de un follower, no una orden del maestro
+    is_exit: Optional[bool] = None   # addon >= 2.0: el bróker dice si la ejecución cierra posición
+    is_entry: Optional[bool] = None
     timestamp: datetime = Field(default_factory=datetime.now)
 
     @field_validator("timestamp", mode="before")

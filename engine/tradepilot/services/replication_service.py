@@ -37,6 +37,13 @@ class ReplicationService:
         self.bus = bus
         self.accounts = accounts
         self.on_restart = None                # corrutina(detalle) a llamar cuando el addon se reinicia (la inyecta el contenedor)
+        # Libro de exposición por seguidora: copias de fills enviadas y aún no reflejadas en la posición del bróker
+        # ((seguidora, id maestro, id ejecución) -> {root, signed, filled, at}) y salidas pendientes vivas copiadas
+        # ((seguidora, root) -> {id maestro: (stop|limit, qty con signo)}). Con él, una salida (stop/TP) solo se copia
+        # hasta la posición que la seguidora tiene o va a tener, y un cierre del maestro nunca abre ni invierte posición.
+        self._inflight: OrderedDict[tuple, dict] = OrderedDict()
+        self._live_exits: dict[tuple, dict] = {}
+        self.inflight_ttl = 20.0
         self.journal = journal
         self.close_on_stop_reject = close_on_stop_reject
         self.sync = None                      # SyncService, lo inyecta el contenedor
@@ -203,31 +210,69 @@ class ReplicationService:
             matched += 1
             qty = rule.scale(event.quantity)
             symbol = rule.map_symbol(event.symbol)
-            key = (rule.follower_account.lower(), event.order_id)
+            follower = rule.follower_account
+            fl = follower.lower()
+            key = (fl, event.order_id)
             if event.msg_type == "EXECUTION" and key in self._sent_pending \
                     and self._follower_filled.get(key, 0) >= self._sent_pending[key]:
                 # El follower ya ejecutó su propia copia de esa orden (stop / TP): copiar el fill sería una salida doble.
-                self.audit.log("SKIPPED", f"Fill del maestro no copiado: {rule.follower_account} ya ejecutó su orden {event.order_id[:8]}",
-                               source=event.account, target=rule.follower_account)
+                self.audit.log("SKIPPED", f"Fill del maestro no copiado: {follower} ya ejecutó su orden {event.order_id[:8]}",
+                               source=event.account, target=follower)
                 continue
             if qty <= 0:
                 self.audit.log("SKIPPED", f"Regla {rule.id[:8]}: qty escalada {qty} <= 0",
-                               source=event.account, target=rule.follower_account)
+                               source=event.account, target=follower)
                 continue
-            ok, reason = self.risk.allows(rule.follower_account, qty, symbol, event.action)
-            if ok and self.accounts is not None and not self.accounts.is_enabled(rule.follower_account):
-                ok, reason = False, f"cuenta {rule.follower_account} desactivada en la consola"
-            if ok and self._desync_blocks(rule.follower_account, event):
-                ok, reason = False, f"{rule.follower_account} desincronizada: solo se copian salidas hasta igualarla"
-            if not ok:
-                self.stats["blocked"] += 1
-                self.audit.log("BLOCKED", f"Bloqueado por riesgo: {reason}", source=event.account,
-                               target=rule.follower_account)
-                continue
-            task = ReplicationTask(rule_id=rule.id, master_event=event, target_account=rule.follower_account,
+            # ---- libro de exposición: salidas solo hasta la posición (esperada) de la seguidora ----
+            root = self._root(symbol)
+            exp = self.expected_position(follower, symbol)
+            exit_ = self._is_exit(event, exp)
+            check_risk = True
+            if event.msg_type == "ORDER_CANCELLED":
+                check_risk = False          # cancelar una orden nunca aumenta el riesgo: pasa siempre
+            elif event.msg_type in ("ORDER_PENDING", "ORDER_MODIFIED") and exit_:
+                check_risk = False          # stop/TP de una posición existente: pasa, pero acotado a lo que hay que proteger
+                kind = self._kind(event.order_type)
+                ledger = self._live_exits.get((fl, root), {})
+                others = sum(abs(s) for oid, (k, s) in ledger.items() if k == kind and oid != event.order_id)
+                allowed = abs(exp) - others
+                if allowed <= 0:
+                    self.stats["blocked"] += 1
+                    self.audit.log("BLOCKED", f"Salida no copiada: {follower} no tiene posición que proteger con ella "
+                                   f"(posición esperada {exp:+d} {root}, {kind}s ya vivos {others}). "
+                                   "Suele ser el stop/TP de una entrada que se bloqueó", source=event.account, target=follower,
+                                   details={"expected": exp, "live": others, "kind": kind})
+                    continue
+                if qty > allowed:
+                    self.audit.log("TRIMMED", f"[{event.msg_type}] {event.action} {qty} {symbol} recortada a {allowed} para "
+                                   f"{follower}: es lo que queda por proteger (posición esperada {exp:+d}, {kind}s vivos {others})",
+                                   source=event.account, target=follower)
+                    qty = allowed
+            elif event.msg_type == "EXECUTION" and exit_:
+                if exp == 0:
+                    self.audit.log("SKIPPED", f"Cierre del maestro no copiado: {follower} no tiene posición en {root} "
+                                   "(no se abre una posición nueva con una salida)", source=event.account, target=follower)
+                    continue
+                if qty > abs(exp):
+                    self.audit.log("TRIMMED", f"[EXECUTION] {event.action} {qty} {symbol} recortada a {abs(exp)} para {follower}: "
+                                   "un cierre nunca invierte la posición", source=event.account, target=follower)
+                    qty = abs(exp)
+            if check_risk:
+                ok, reason = self.risk.allows(follower, qty, symbol, event.action)
+                if ok and self.accounts is not None and not self.accounts.is_enabled(follower):
+                    ok, reason = False, f"cuenta {follower} desactivada en la consola"
+                if ok and self._desync_blocks(follower, event):
+                    ok, reason = False, f"{follower} desincronizada: solo se copian salidas hasta igualarla"
+                if not ok:
+                    self.stats["blocked"] += 1
+                    self.audit.log("BLOCKED", f"Bloqueado por riesgo: {reason}", source=event.account, target=follower)
+                    continue
+            task = ReplicationTask(rule_id=rule.id, master_event=event, target_account=follower,
                                    scaled_quantity=qty, master_order_id=event.order_id)
             await self._execute(task, rule, symbol)
             tasks.append(task)
+            if task.status == "SENT":
+                self._note_sent(fl, root, event, qty, exit_)
         if matched == 0:
             self._explain_no_match(event)
         return tasks
@@ -285,6 +330,71 @@ class ReplicationService:
             self.audit.log("ERROR", f"Fallo replicando a {task.target_account}: {exc}",
                            source=ev.account, target=task.target_account)
 
+    # ---- libro de exposición ----
+    @staticmethod
+    def _root(symbol: str) -> str:
+        return symbol.split(" ")[0].upper()
+
+    @staticmethod
+    def _sign(action: str) -> int:
+        return -1 if action.upper().startswith("SELL") else 1
+
+    @staticmethod
+    def _kind(order_type: str) -> str:
+        return "stop" if "STOP" in (order_type or "").upper() else "limit"
+
+    def expected_position(self, follower: str, symbol: str) -> int:
+        """Posición de la seguidora en el root del símbolo contando las copias de fills ya enviadas y aún no
+        reflejadas por el bróker (la sincronización va 2 s por detrás; el stop de una entrada llega en el mismo segundo)."""
+        root = self._root(symbol)
+        tracked = self.accounts.position(follower, symbol) if self.accounts is not None else 0
+        now = time.monotonic()
+        extra = 0
+        for k, e in list(self._inflight.items()):
+            if now - e["at"] > self.inflight_ttl:
+                del self._inflight[k]
+                continue
+            if k[0] == follower.lower() and e["root"] == root:
+                extra += e["signed"]
+        return tracked + extra
+
+    @staticmethod
+    def _is_exit(event: MasterEvent, expected: int) -> bool:
+        """¿Esta orden/fill cierra posición de la seguidora? Con addon >= 2.0 lo dice el bróker (is_exit);
+        si no, por la acción: BUYTOCOVER siempre cierra; SELL cierra si hay largo; BUY cierra si hay corto."""
+        if event.msg_type == "EXECUTION" and event.is_exit is not None:
+            return event.is_exit
+        a = event.action.upper()
+        return a == "BUYTOCOVER" or (a.startswith("SELL") and expected > 0) or (a == "BUY" and expected < 0)
+
+    def _note_sent(self, fl: str, root: str, event: MasterEvent, qty: int, exit_: bool) -> None:
+        if event.msg_type == "EXECUTION":
+            self._remember(self._inflight, (fl, event.order_id, event.execution_id),
+                           {"root": root, "signed": self._sign(event.action) * qty, "filled": False, "at": time.monotonic()})
+        elif event.msg_type == "ORDER_PENDING" and exit_:
+            self._live_exits.setdefault((fl, root), {})[event.order_id] = (self._kind(event.order_type), self._sign(event.action) * qty)
+        elif event.msg_type == "ORDER_MODIFIED" and exit_:
+            ledger = self._live_exits.setdefault((fl, root), {})
+            kind = ledger[event.order_id][0] if event.order_id in ledger else self._kind(event.order_type)
+            ledger[event.order_id] = (kind, self._sign(event.action) * qty)
+        elif event.msg_type == "ORDER_CANCELLED":
+            self._forget_exit(fl, event.order_id)
+
+    def _forget_exit(self, fl: str, master_order_id: str, filled_qty: int = 0) -> None:
+        for (f, _root), ledger in self._live_exits.items():
+            if f != fl or master_order_id not in ledger:
+                continue
+            kind, signed = ledger[master_order_id]
+            if filled_qty and abs(signed) > filled_qty:
+                ledger[master_order_id] = (kind, signed - filled_qty * (1 if signed > 0 else -1))
+            else:
+                del ledger[master_order_id]
+
+    def note_positions_refreshed(self, account: str | None) -> None:
+        """El bróker ya refleja las posiciones: las copias marcadas como ejecutadas dejan de contar como 'en vuelo'."""
+        for k in [k for k, e in self._inflight.items() if e["filled"] and (account is None or k[0] == account.lower())]:
+            del self._inflight[k]
+
     def _desync_blocks(self, follower: str, event: MasterEvent) -> bool:
         """Con DESYNC solo pasan las copias que reducen la exposición actual de la seguidora."""
         snap = self.accounts.accounts.get(follower) if self.accounts else None
@@ -323,6 +433,10 @@ class ReplicationService:
         self.stats["fills"] += 1
         key = (event.account.lower(), event.master_order_id)
         self._remember(self._follower_filled, key, self._follower_filled.get(key, 0) + event.quantity)
+        for k, e in self._inflight.items():
+            if k[0] == key[0] and k[1] == event.master_order_id:
+                e["filled"] = True
+        self._forget_exit(key[0], event.master_order_id, filled_qty=event.quantity)
         msg = f"{event.account}: {event.action} {event.quantity} {event.symbol} @ {event.price}"
         details: dict = {"master_order_id": event.master_order_id, "order_id": event.order_id}
         ref = self._master_execs.get(event.master_order_id)
@@ -346,12 +460,24 @@ class ReplicationService:
         native = str(data.get("native_error") or "")
         desc = f"{data.get('action', '')} {data.get('quantity', '')} {data.get('symbol', '')} [{state}]"
         details = {"master_order_id": data.get("master_order_id"), "order_id": data.get("order_id"), "filled": data.get("filled")}
-        if state in REJECTED_STATES or error:
+        master_id = str(data.get("master_order_id") or "")
+        if state in ("FILLED", "CANCELLED", "REJECTED") and master_id:
+            self._forget_exit(account.lower(), master_id)
+            if state != "FILLED":
+                for k in [k for k in self._inflight if k[0] == account.lower() and k[1] == master_id]:
+                    del self._inflight[k]
+        if state in REJECTED_STATES:
             self.stats["rejected"] += 1
             self.audit.log("FOLLOWER_REJECTED", f"{account}: {desc} {error} {native}".strip(), target=account, details=details)
             order_type = str(data.get("order_type", "")).upper().replace("_", "")
             if order_type in STOP_TYPES and self.close_on_stop_reject:
                 self.bus.publish_nowait("risk.naked", {"account": account, "reason": f"stop rechazado: {error} {native}".strip()})
+        elif error:
+            # La orden sigue viva (p. ej. UnableToChangeOrder InvalidPrice): el bróker rechazó el cambio, no la orden.
+            # No es un stop desnudo; el stop se queda al precio anterior y se avisa.
+            self.stats["rejected"] += 1
+            self.audit.log("FOLLOWER_REJECTED", f"{account}: {desc} {error} {native} (la orden sigue viva al precio anterior)".strip(),
+                           target=account, details=details)
         else:
             self.audit.log("FOLLOWER_STATUS", f"{account}: {desc}", target=account, details=details)
 

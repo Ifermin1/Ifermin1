@@ -30,7 +30,7 @@ versión de escritorio).
    - `API_TOKEN=` un token largo tuyo (es la única llave de la consola).
 5. Instalar el addon en NinjaTrader: `scripts\update.ps1` copia `ninjatrader\TradePilotXBridge.cs` a la carpeta de AddOns.
    Después, en NinjaTrader: *New → NinjaScript Editor → F5* (compilar) y **reiniciar NinjaTrader**.
-   En *New → NinjaScript Output* debe aparecer `[TradePilotX] Bridge v1.9 online`.
+   En *New → NinjaScript Output* debe aparecer `[TradePilotX] Bridge v2.0 online`.
 6. Arrancar el engine: `powershell -ExecutionPolicy Bypass -File scripts\run_engine.ps1`. Imprime las URLs de la consola.
 7. (Recomendado) Arranque automático con Windows y reinicio si se cae, PowerShell **como administrador**, una vez:
    ```powershell
@@ -101,8 +101,8 @@ ese paso.
 
 ## 5. Operativa diaria
 
-1. Abrir NinjaTrader y conectar la cuenta maestra y las seguidoras. Comprobar en el Output `Bridge v1.9 online`.
-2. Arrancar el engine (`run_engine.ps1`) si no está corriendo. En *Inicio*: modo `NinjaTrader (ZMQ) · addon v1.9`, heartbeat
+1. Abrir NinjaTrader y conectar la cuenta maestra y las seguidoras. Comprobar en el Output `Bridge v2.0 online`.
+2. Arrancar el engine (`run_engine.ps1`) si no está corriendo. En *Inicio*: modo `NinjaTrader (ZMQ) · addon v2.0`, heartbeat
    actualizándose, sin avisos rojos.
 3. En *Cuentas*: las seguidoras que deben copiar con el interruptor encendido y el badge *copiando*.
 4. Operar solo en la cuenta maestra. Todo (entrada, stop, take profit, modificaciones, cancelaciones) se copia.
@@ -128,6 +128,9 @@ ese paso.
 | `RESUBSCRIBE` / `ADDON_RECOVERY` | El addon se reinició (recompilar, reconectar) o publicaba eventos que no llegaban; el engine reconectó el canal en unos segundos y volvió a registrar las seguidoras. Con addon v1.8 la detección tarda ~4 s; con uno anterior, 15 s. | Mirar *Cuentas*: si la maestra operó mientras tanto, la seguidora sale DESINCRONIZADA → *Igualar* o *Cerrar*. |
 | **Mensajes perdidos del addon** | Se perdieron eventos entre NinjaTrader y el engine. | Revisar *Cuentas*: si hay desincronización, igualar. Si se repite, avisar. |
 | `BLOCKED` | Copia bloqueada por kill switch, horario, pausa, límite de tamaño o desincronización. El mensaje dice cuál. | Es la protección actuando. Revisar el motivo. |
+| `BLOCKED` "Salida no copiada: no tiene posición que proteger" | La maestra puso un stop/TP de una entrada que la seguidora no tiene (p. ej. entrada bloqueada por tamaño). Copiarlo abriría posición contraria al saltar. | Nada: la seguidora conserva los stops de lo que sí tiene. Las cancelaciones se copian siempre. |
+| `TRIMMED` | Una salida se copió por menos contratos: lo que le quedaba por proteger o por cerrar a la seguidora. Un cierre nunca invierte la posición. | Nada. |
+| `SKIPPED` "Cierre del maestro no copiado" | La maestra cerró y la seguidora no tenía posición (ya estaba cerrada). Una salida nunca abre una posición nueva. | Nada. |
 | `NO_RULE` | Operación de la maestra sin regla que la copie. | Revisar el maestro de la regla o el filtro de símbolo. |
 | **Addon desactualizado** | El addon compilado es anterior al que exige el engine. | Paso 2 (actualizar y compilar). |
 | `ENTRY_MISSED` | Una entrada límite con tolerancia no se llenó en el plazo y estaba configurada para cancelar. La seguidora no tiene esa operación. | Decidir si entrar a mano o subir la tolerancia / usar "a mercado lo que falte". |

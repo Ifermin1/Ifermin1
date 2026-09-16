@@ -13,6 +13,7 @@
 //                                  "FLATTEN|Sim102"   -> "OK|Sim102|2"  (cancela órdenes y cierra posiciones)
 //                                  "WATCH|Sim102"     -> "OK|Sim102"  (escuchar órdenes/posiciones de un follower)
 //                                  "PING"             -> "PONG|<boot>|<seq>" (v1.8: arranque del addon y último seq publicado)
+//   v2.0: EXECUTION del master lleva is_exit / is_entry (Execution.IsExit / IsEntry del bróker).
 //                                  "ORDER|{json}"     -> "OK|tipo" / "IGNORED|motivo" / "ERROR|motivo" (v1.9: orden con confirmación;
 //                                                        mismo JSON que por 5556, que sigue aceptándose para engines antiguos)
 //   Todos los mensajes publicados llevan "seq" creciente para detectar pérdidas.
@@ -43,7 +44,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 {
     public class TradePilotXBridge : AddOnBase
     {
-        private const string BridgeVersion = "1.9";
+        private const string BridgeVersion = "2.0";
 
         // ---- configuración ------------------------------------------------
         private class BridgeConfig
@@ -91,6 +92,8 @@ namespace NinjaTrader.NinjaScript.AddOns
         private readonly ConcurrentDictionary<string, bool> pendingPublished = new ConcurrentDictionary<string, bool>();
         // Cantidad ya copiada a mercado para cubrir lo que la orden del follower NO ejecutó (rechazo/cancelación)
         private readonly ConcurrentDictionary<string, int> reconciledQty = new ConcurrentDictionary<string, int>();
+        // v2.0: fills del master pendientes de reconciliar mientras se cancela la copia viva del follower (clave -> qty)
+        private readonly ConcurrentDictionary<string, int> reconcileRequested = new ConcurrentDictionary<string, int>();
         // Claves (follower|master_order_id) cuya orden en el follower es copia de una orden PENDIENTE del master
         // (stop / take profit): sus fills los hace la propia orden del follower. Una entrada a mercado NO está aquí:
         // cada fill parcial del master se copia por separado.
@@ -180,7 +183,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                     foreach (string sym in cfg.PriceInstruments)
                         EnsurePriceFeed(sym);
 
-                    Info(string.Format("Bridge v{0} online. master={1} pub={2} sub={3} sync={4} (v1.9: órdenes con confirmación por 5557)",
+                    Info(string.Format("Bridge v{0} online. master={1} pub={2} sub={3} sync={4} (v2.0: is_exit en fills, copia viva se cancela y cierra a mercado)",
                         BridgeVersion, cfg.MasterAccount, cfg.MasterPort, cfg.FollowerPort, cfg.SyncPort));
                 }
                 catch (Exception ex)
@@ -337,6 +340,8 @@ namespace NinjaTrader.NinjaScript.AddOns
                     "state", "Filled",
                     "order_id", OrderKey(order),
                     "execution_id", e.Execution.ExecutionId ?? "",
+                    "is_exit", e.Execution.IsExit,
+                    "is_entry", e.Execution.IsEntry,
                     "timestamp", e.Time.ToString("o")));
             }
             catch (Exception ex) { Error("OnMasterExecution: " + ex.Message); }
@@ -537,7 +542,17 @@ namespace NinjaTrader.NinjaScript.AddOns
                         // Copia de una orden PENDIENTE del master (stop / TP): su fill lo hace la propia orden del follower.
                         // Da igual que llegue antes o después: si la orden del follower está viva o ya ejecutó, no se copia.
                         {
-                            if (IsLive(existing)) { Info("EXECUTION ignorada: el follower ya tiene orden viva para " + masterOrderId); return "IGNORED|el follower ya tiene orden viva"; }
+                            if (IsLive(existing))
+                            {
+                                // v2.0: el master ya ejecutó (su stop/TP saltó) pero la copia del follower sigue viva (otro precio,
+                                // cola, cambio rechazado...). Cancelamos la copia y, cuando el bróker confirme la cancelación,
+                                // cerramos a mercado lo que quedó sin ejecutar (ReconcileAfterCancel). Nunca antes: así no hay doble salida.
+                                reconcileRequested.AddOrUpdate(key, qty, (k, v) => v + qty);
+                                try { account.Cancel(new[] { existing }); }
+                                catch (Exception cx) { Warn("No se pudo cancelar la copia viva " + key + ": " + cx.Message); }
+                                Info("Fill del master en " + masterOrderId + " con la copia del follower aún viva: cancelando y cerrando a mercado lo pendiente");
+                                return "OK|EXECUTION_RECONCILE";
+                            }
                             int remaining = existing.Quantity - existing.Filled;
                             if (remaining <= 0) { Info("EXECUTION ignorada: la orden del follower ya se ejecutó (" + masterOrderId + ")"); return "IGNORED|la orden del follower ya se ejecutó"; }
                             // La orden del follower quedó sin ejecutar del todo (rechazada / cancelada): copiamos el fill del
@@ -726,6 +741,8 @@ namespace NinjaTrader.NinjaScript.AddOns
                 string line = string.Format("Follower {0}: {1} {2} {3} {4} -> {5}{6}", account, order.Name, order.OrderAction,
                     order.Quantity, order.Instrument.FullName, e.OrderState, string.IsNullOrEmpty(error) ? "" : " ERROR=" + error + " " + native);
                 if (e.OrderState == OrderState.Rejected) Error(line); else Info(line);
+                if (e.OrderState == OrderState.Cancelled || e.OrderState == OrderState.Rejected || e.OrderState == OrderState.Filled)
+                    ReconcileAfterCancel(order, account);
                 Publish(Json.Obj(
                     "msg_type", "ORDER_STATUS",
                     "account", account,
@@ -745,6 +762,26 @@ namespace NinjaTrader.NinjaScript.AddOns
                     "timestamp", e.Time.ToString("o")));
             }
             catch (Exception ex) { Error("OnFollowerOrder: " + ex.Message); }
+        }
+
+        /// <summary>v2.0: la copia viva se canceló porque el master ya ejecutó esa orden: cerrar a mercado lo que quedó
+        /// sin ejecutar, nunca más de lo pedido ni de lo que faltaba. Si la copia se ejecutó antes de cancelarse, nada.</summary>
+        private void ReconcileAfterCancel(Order order, string accountName)
+        {
+            string masterId = MasterIdFromName(order.Name);
+            string key = accountName + "|" + masterId;
+            int requested;
+            if (!reconcileRequested.TryRemove(key, out requested)) return;
+            if (order.OrderState == OrderState.Filled) { Info("Copia " + key + " se ejecutó antes de cancelarse: nada que reconciliar"); return; }
+            int remaining = order.Quantity - order.Filled;
+            int already = reconciledQty.GetOrAdd(key, 0);
+            int toSend = Math.Min(requested, remaining - already);
+            if (toSend <= 0) return;
+            reconciledQty[key] = already + toSend;
+            Warn(string.Format("Copia {0} cancelada con {1}/{2} ejecutados: cerrando {3} a mercado para seguir al master",
+                masterId, order.Filled, order.Quantity, toSend));
+            SubmitNew(order.Account, order.Instrument.FullName, ActionName(order.OrderAction), OrderType.Market, toSend, 0, 0,
+                key + "#recon" + already, masterId);
         }
 
         private void OnFollowerExecution(object sender, ExecutionEventArgs e)
@@ -800,6 +837,8 @@ namespace NinjaTrader.NinjaScript.AddOns
         /// <summary>Cierre de emergencia: cancela todas las órdenes vivas de la cuenta y cierra sus posiciones.</summary>
         private string Flatten(string accountName)
         {
+            // un cierre de emergencia manda: nada pendiente de reconciliar debe reabrir posición después
+            foreach (string k in reconcileRequested.Keys) { int d; if (k.StartsWith(accountName + "|")) reconcileRequested.TryRemove(k, out d); }
             Account account;
             lock (Account.All) account = Account.All.FirstOrDefault(a => a.Name == accountName);
             if (account == null) return "ERROR|cuenta desconocida: " + accountName;

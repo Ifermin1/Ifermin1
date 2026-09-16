@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime
 
 from tradepilot.domain.replication import MasterEvent, ReplicationRule
@@ -230,3 +231,123 @@ async def test_entry_missed_is_audited(container):
     await container.replication.process_master_event({"msg_type": "ENTRY_MISSED", "account": "Sim102", "action": "BUY",
                                                        "quantity": 2, "symbol": "MNQ DEC26", "master_order_id": "m1"})
     assert container.audit.recent(1)[0].event_type == "ENTRY_MISSED"
+
+
+# ---- libro de exposición (incidentes del 16/9: stops de entradas bloqueadas y cierre copiado como entrada) ----
+async def _setup(container, follower_pos: int = 0, max_size: int = 3):
+    rep = container.replication
+    b = container.bridge
+    b.health.master_account = "Sim101"
+    rep.add_rule("Sim101", "Sim102")
+    if follower_pos:
+        b.positions[("Sim102", "MNQ 12-26")] = follower_pos
+    await container.accounts.sync_once()
+    from tradepilot.domain.risk import RiskLimit
+    container.risk.upsert_limit(RiskLimit(account_id="Sim102", max_position_size=max_size))
+    return rep, b
+
+
+def _types(container, n=6):
+    return [a.event_type for a in container.audit.recent(n)]
+
+
+async def test_exits_of_a_blocked_entry_are_blocked_and_cancels_always_pass(container):
+    """16/9 12:11: la maestra añadió entradas que se bloquearon por tamaño; sus stops/TPs se copiaron y al saltar
+    dejaron a la seguidora +6. Ahora un stop/TP solo se copia hasta la posición esperada de la seguidora."""
+    rep, b = await _setup(container, follower_pos=-2)
+    sym = "MNQ 12-26"
+    # stop y TP de la posición real (-2): pasan
+    await rep.process_master_event(_event(msg_type="ORDER_PENDING", action="BUYTOCOVER", quantity=2, symbol=sym,
+                                          order_type="STOPMARKET", order_id="S1").model_dump(mode="json"))
+    await rep.process_master_event(_event(msg_type="ORDER_PENDING", action="BUYTOCOVER", quantity=2, symbol=sym,
+                                          order_type="LIMIT", order_id="T1").model_dump(mode="json"))
+    assert [o["master_order_id"] for o in b.sent_orders] == ["S1", "T1"]
+    # segunda entrada: bloqueada por tamaño (resultante 4 > 3)
+    b.fill_orders = False
+    t = await rep.process_master_event(_event(action="SELL", quantity=2, symbol=sym, order_id="E2", execution_id="e2",
+                                              is_exit=False).model_dump(mode="json"))
+    assert t == [] and "BLOCKED" in _types(container, 2)
+    # sus stop y TP NO se copian: la seguidora no tiene esa posición
+    for oid, typ in (("S2", "STOPMARKET"), ("T2", "LIMIT")):
+        t = await rep.process_master_event(_event(msg_type="ORDER_PENDING", action="BUYTOCOVER", quantity=2, symbol=sym,
+                                                  order_type=typ, order_id=oid).model_dump(mode="json"))
+        assert t == [], oid
+        last = container.audit.recent(1)[0]
+        assert last.event_type == "BLOCKED" and "no tiene posición que proteger" in last.message
+    assert [o["master_order_id"] for o in b.sent_orders] == ["S1", "T1"]
+    # una cancelación pasa siempre, aunque la seguidora esté fuera de límite (16/9: TPs sin cancelar con +6)
+    b.positions[("Sim102", sym)] = 6
+    await container.accounts.sync_once()
+    t = await rep.process_master_event(_event(msg_type="ORDER_CANCELLED", action="BUYTOCOVER", quantity=2, symbol=sym,
+                                              order_type="LIMIT", order_id="T1").model_dump(mode="json"))
+    assert len(t) == 1 and b.sent_orders[-1]["msg_type"] == "ORDER_CANCELLED"
+
+
+async def test_master_exit_never_opens_or_flips_the_follower(container):
+    """16/9 12:14: la seguidora estaba plana (cerrada por NAKED_CLOSE) y el stop de la maestra se copió como
+    una entrada nueva. Un cierre del maestro con la seguidora plana se salta; con menos posición, se recorta."""
+    rep, b = await _setup(container, follower_pos=0)
+    sym = "NQ 12-26"
+    # con is_exit del bróker
+    t = await rep.process_master_event(_event(action="BUYTOCOVER", quantity=2, symbol=sym, order_id="X1", execution_id="x1",
+                                              is_exit=True).model_dump(mode="json"))
+    assert t == [] and container.audit.recent(1)[0].event_type == "SKIPPED"
+    # sin el campo (addon antiguo): BUYTOCOVER siempre es cierre
+    t = await rep.process_master_event(_event(action="BUYTOCOVER", quantity=2, symbol=sym, order_id="X2", execution_id="x2")
+                                       .model_dump(mode="json"))
+    assert t == [] and "no tiene posición" in container.audit.recent(1)[0].message
+    assert b.sent_orders == []
+    # seguidora corta 1 (multiplicador distinto): el cierre de 2 de la maestra se recorta a 1 y nunca invierte
+    b.positions[("Sim102", sym)] = -1
+    await container.accounts.sync_once()
+    t = await rep.process_master_event(_event(action="BUYTOCOVER", quantity=2, symbol=sym, order_id="X3", execution_id="x3",
+                                              is_exit=True).model_dump(mode="json"))
+    assert len(t) == 1 and b.sent_orders[-1]["quantity"] == 1 and "TRIMMED" in _types(container, 3)
+    # el cierre ya enviado cuenta como en vuelo: un segundo fill parcial de la maestra no vuelve a cerrar
+    t = await rep.process_master_event(_event(action="BUYTOCOVER", quantity=1, symbol=sym, order_id="X3", execution_id="x4",
+                                              is_exit=True).model_dump(mode="json"))
+    assert t == [] and len(b.sent_orders) == 1
+
+
+async def test_inflight_entry_allows_its_stop_before_position_refresh(container):
+    """El stop de una entrada llega en el mismo segundo que el fill, antes de que el bróker refresque la posición."""
+    rep, b = await _setup(container, follower_pos=0)
+    sym = "NQ 12-26"
+    await rep.process_master_event(_event(action="BUY", quantity=1, symbol=sym, order_id="E1", execution_id="e1",
+                                          is_exit=False).model_dump(mode="json"))
+    assert container.accounts.position("Sim102", sym) == 0        # aún sin refrescar
+    assert rep.expected_position("Sim102", sym) == 1
+    t = await rep.process_master_event(_event(msg_type="ORDER_PENDING", action="SELL", quantity=1, symbol=sym,
+                                              order_type="STOPMARKET", order_id="S1").model_dump(mode="json"))
+    assert len(t) == 1
+    # el fill de la seguidora + el refresco de posiciones dejan de contar la copia como en vuelo (sin doble cuenta)
+    await rep.process_master_event(_event(account="Sim102", action="BUY", quantity=1, symbol=sym, order_id="F1",
+                                          master_order_id="E1", execution_id="f1").model_dump(mode="json"))
+    await container.accounts.sync_once()
+    assert container.accounts.position("Sim102", sym) == 1 and rep.expected_position("Sim102", sym) == 1
+    # un segundo stop del mismo tipo para la misma posición ya no cabe
+    t = await rep.process_master_event(_event(msg_type="ORDER_PENDING", action="SELL", quantity=1, symbol=sym,
+                                              order_type="STOPMARKET", order_id="S2").model_dump(mode="json"))
+    assert t == [] and container.audit.recent(1)[0].event_type == "BLOCKED"
+    # pero si el primero se cancela, el siguiente sí
+    await rep.process_master_event(_event(msg_type="ORDER_CANCELLED", action="SELL", quantity=1, symbol=sym,
+                                          order_type="STOPMARKET", order_id="S1").model_dump(mode="json"))
+    t = await rep.process_master_event(_event(msg_type="ORDER_PENDING", action="SELL", quantity=1, symbol=sym,
+                                              order_type="STOPMARKET", order_id="S3").model_dump(mode="json"))
+    assert len(t) == 1
+
+
+async def test_rejected_change_is_not_a_naked_stop(container):
+    """16/9 12:14:44: UnableToChangeOrder InvalidPrice con la orden aún WORKING no es un stop desnudo."""
+    rep, b = await _setup(container, follower_pos=-2)
+    base = {"msg_type": "ORDER_STATUS", "account": "Sim102", "action": "BUYTOCOVER", "symbol": "NQ 12-26", "quantity": 2,
+            "order_type": "STOPMARKET", "order_id": "f1", "master_order_id": "S1", "filled": 0, "price": 0}
+    await rep.process_master_event({**base, "state": "Working", "error": "UnableToChangeOrder", "native_error": "InvalidPrice"})
+    await asyncio.sleep(0.05)
+    assert b.flattened == []
+    last = container.audit.recent(1)[0]
+    assert last.event_type == "FOLLOWER_REJECTED" and "sigue viva" in last.message
+    # un rechazo de verdad (la orden muere) sí cierra por seguridad
+    await rep.process_master_event({**base, "state": "Rejected", "error": "OrderRejected", "native_error": "Insufficient margin"})
+    await asyncio.sleep(0.05)
+    assert b.flattened == ["Sim102"]

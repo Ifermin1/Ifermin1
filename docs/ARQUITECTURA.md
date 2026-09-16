@@ -132,6 +132,10 @@ el canal de comandos (`PING` → `PONG|boot|seq`) que detecta en ~4 s un reinici
 se vuelve a pedir `WATCH` de cada seguidora (`ADDON_RECOVERY`). Desde el addon v1.9 las órdenes van por el canal de
 comandos con confirmación (`ORDER|json` → `OK/IGNORED/ERROR`): una orden que el addon no confirma se reintenta una vez y,
 si sigue sin respuesta, queda como `ERROR` en la auditoría en vez de darse por enviada.
+Libro de exposición (addon v2.0): el engine cuenta las copias de fills en vuelo y las salidas vivas copiadas por seguidora;
+un stop/TP solo se copia hasta la posición esperada (`BLOCKED`/`TRIMMED`), las cancelaciones pasan siempre, y un cierre
+del maestro (`is_exit`) nunca abre ni invierte posición (`SKIPPED`/`TRIMMED`). Un cambio de orden rechazado ya no cuenta
+como stop desnudo. En el addon, el fill del master con la copia aún viva se resuelve cancelando y cerrando a mercado.
 Pendiente: avisos por Telegram.
 
 ## 7. Próximos pasos sugeridos

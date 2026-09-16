@@ -12,7 +12,7 @@ funciona también con el addon anterior (solo verá las conectadas y lo avisará
 2. En NinjaTrader: *New → NinjaScript Editor*, carpeta *AddOns*, abre `TradePilotXBridge` (o crea uno con ese nombre).
 3. Sustituye todo el contenido por el de `TradePilotXBridge.cs` y pulsa **F5** (compilar). Debe compilar sin errores.
 4. Reinicia NinjaTrader (o desactiva y activa el addon). En *Tools → Output* debe aparecer
-   `[TradePilotX] Bridge v1.9 online. master=... (v1.9: órdenes con confirmación por 5557)`.
+   `[TradePilotX] Bridge v2.0 online. master=... (v2.0: is_exit en fills, copia viva se cancela y cierra a mercado)`.
 
 ## Protocolo (puerto 5557, REQ/REP)
 
@@ -32,6 +32,11 @@ El campo de estado es el `ConnectionStatus` de NinjaTrader (`Connected`, `Discon
 La cuenta maestra inicial se lee de `Documents\NinjaTrader 8\TradePilotX\config.json` (`MasterAccount`) y se puede cambiar desde la consola (v1.2+).
 
 ## Historial
+
+- **2.0**: el `EXECUTION` del master lleva `is_exit` / `is_entry` (lo dice el bróker) para que el engine nunca copie un
+  cierre como una entrada. Si el master ejecuta una orden cuya copia sigue viva en el follower (stop movido a otro precio,
+  cambio rechazado, cola), el addon cancela la copia y, al confirmarse la cancelación, cierra a mercado lo que quedó sin
+  ejecutar (antes se ignoraba y el follower quedaba con un stop distinto al del master).
 
 - **1.9**: las órdenes del engine llegan como `ORDER|{json}` por el canal de comandos (5557) y el addon las confirma
   (`OK|tipo`, `IGNORED|motivo`, `ERROR|motivo`). Antes iban por 5556 (PUB/SUB) sin confirmación y, tras un reinicio del

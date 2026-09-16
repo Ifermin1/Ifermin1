@@ -19,6 +19,7 @@ class AccountService:
         self.store = store
         self.interval = interval
         self.after_sync = None                 # corrutina a llamar tras cada sincronización (SyncService.check)
+        self.on_positions_refreshed = None     # callable(cuenta | None) tras actualizar posiciones (libro de exposición)
         self._watched: set[str] = set()
         self.accounts: dict[str, AccountSnapshot] = {}
         # Cuentas recordadas de sesiones anteriores: aparecen aunque el bróker aún no las reporte
@@ -115,6 +116,8 @@ class AccountService:
             if [(x.symbol, x.quantity) for x in snap.open_positions] != [(x.symbol, x.quantity) for x in new]:
                 snap.open_positions = new
                 snap.updated_at = now
+        if self.on_positions_refreshed:
+            self.on_positions_refreshed(None)
 
     def position(self, account_id: str, symbol: str) -> int:
         snap = self.accounts.get(account_id)
@@ -190,6 +193,8 @@ class AccountService:
             positions.append(PositionSnapshot(account_id=account_id, symbol=symbol, quantity=signed, avg_price=avg_price))
         snap.open_positions = positions
         snap.updated_at = now
+        if self.on_positions_refreshed:
+            self.on_positions_refreshed(account_id)
         await self.bus.publish(TOPIC_ACCOUNTS, [a.model_dump(mode="json") for a in self.accounts.values()])
 
     def all(self) -> list[AccountSnapshot]:
