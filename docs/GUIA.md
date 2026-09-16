@@ -152,8 +152,11 @@ ese paso.
 ## 8. Ante un incidente: qué recopilar
 
 1. La captura de *Inicio* y de *Cuentas* de la consola.
-2. El *NinjaScript Output* completo desde la última línea `Bridge vX.Y online`.
-3. El archivo `engine\data\journal\AAAA-MM-DD.jsonl` del día: contiene cada mensaje recibido y cada orden enviada con hora
+2. La *Auditoría* como texto: en esa pestaña, filtra el tipo si quieres y pulsa **⧉ Copiar** (portapapeles) o **⤓ .txt**
+   (archivo). Sale en orden cronológico con hora, tipo, origen → destino y mensaje. El icono ⧉ de cada fila copia solo
+   esa línea.
+3. El *NinjaScript Output* completo desde la última línea `Bridge vX.Y online`.
+4. El archivo `engine\data\journal\AAAA-MM-DD.jsonl` del día: contiene cada mensaje recibido y cada orden enviada con hora
    exacta. Con él se reproduce lo ocurrido y se convierte en una prueba automática para que no vuelva a pasar.
 
 ---
