@@ -61,8 +61,14 @@ class ReplicationService:
         # ((seguidora, root) -> {id maestro: (stop|limit, qty con signo)}). Con él, una salida (stop/TP) solo se copia
         # hasta la posición que la seguidora tiene o va a tener, y un cierre del maestro nunca abre ni invierte posición.
         self._inflight: OrderedDict[tuple, dict] = OrderedDict()
-        self._live_exits: dict[tuple, dict] = {}
+        self._live_exits: dict[tuple, dict] = {}       # (seguidora, root) -> {id maestro: (stop|limit, qty con signo, monotonic)}
         self.inflight_ttl = 20.0
+        self.ledger_grace = 2.0        # s que una salida copiada puede no aparecer aún en GET_ORDERS antes de darla por muerta
+        self.settle_margin = 0.25      # un fill recibido menos de esto antes de pedir la foto no se da por reflejado en ella
+        # id maestro -> contratos ejecutados acumulados de esa orden (fills parciales del maestro)
+        self._master_filled: OrderedDict[str, int] = OrderedDict()
+        # (seguidora, id maestro) -> (ms del engine hasta enviar, ms de ida y vuelta al addon) para el desglose de tiempos
+        self._timing: OrderedDict[tuple, tuple] = OrderedDict()
         self.journal = journal
         self.close_on_stop_reject = close_on_stop_reject
         self.audit_lifecycle = False          # auditar también los estados intermedios (AUDIT_ORDER_LIFECYCLE)
@@ -219,6 +225,7 @@ class ReplicationService:
     # ---- maestro ----
     async def _replicate(self, event: MasterEvent) -> list[ReplicationTask]:
         self.stats["events_in"] += 1
+        self._recv_at = time.monotonic()
         at = (f"@ {event.price}" if event.price else
               f"stop @ {event.stop_price}" if getattr(event, "stop_price", 0) else
               f"límite @ {event.limit_price}" if getattr(event, "limit_price", 0) else "")
@@ -227,6 +234,7 @@ class ReplicationService:
 
         if event.msg_type == "EXECUTION":
             self._remember(self._master_execs, event.order_id, (event.price, time.monotonic(), event.action, event.timestamp))
+            self._remember(self._master_filled, event.order_id, self._master_filled.get(event.order_id, 0) + event.quantity)
         elif event.msg_type in ("ORDER_PENDING", "ORDER_MODIFIED"):
             self._remember(self._master_pending, event.order_id, self._kind(event.order_type))
 
@@ -249,12 +257,20 @@ class ReplicationService:
             follower = rule.follower_account
             fl = follower.lower()
             key = (fl, event.order_id)
-            if event.msg_type == "EXECUTION" and key in self._sent_pending \
-                    and self._follower_filled.get(key, 0) >= self._sent_pending[key]:
-                # El follower ya ejecutó su propia copia de esa orden (stop / TP): copiar el fill sería una salida doble.
-                self.audit.log("SKIPPED", f"Fill del maestro no copiado: {follower} ya ejecutó su orden {event.order_id[:8]}",
-                               source=event.account, target=follower)
-                continue
+            if event.msg_type == "EXECUTION" and key in self._sent_pending and self._follower_filled.get(key, 0) > 0:
+                # El follower ya ejecutó (parte de) su propia copia de esa orden (stop / TP): copiar el fill entero sería
+                # una salida doble. Pero si el maestro lleva más ejecutado de esa orden que la seguidora (16/9 16:34: el
+                # stop se copió por 1, el maestro salió de 2 y las 5 seguidoras quedaron cortas 1), se copia lo que falte.
+                owed = rule.scale(self._master_filled.get(event.order_id, event.quantity)) - self._follower_filled.get(key, 0)
+                if owed <= 0:
+                    self.audit.log("SKIPPED", f"Fill del maestro no copiado: {follower} ya ejecutó su orden {event.order_id[:8]}",
+                                   source=event.account, target=follower)
+                    continue
+                if owed < qty:
+                    self.audit.log("TRIMMED", f"[EXECUTION] {event.action} {qty} {symbol} recortada a {owed} para {follower}: "
+                                   f"ya ejecutó {self._follower_filled.get(key, 0)} con su propia copia de la orden {event.order_id[:8]}",
+                                   source=event.account, target=follower)
+                    qty = owed
             if qty <= 0:
                 self.audit.log("SKIPPED", f"Regla {rule.id[:8]}: qty escalada {qty} <= 0",
                                source=event.account, target=follower)
@@ -269,8 +285,7 @@ class ReplicationService:
             elif event.msg_type in ("ORDER_PENDING", "ORDER_MODIFIED") and exit_:
                 check_risk = False          # stop/TP de una posición existente: pasa, pero acotado a lo que hay que proteger
                 kind = self._kind(event.order_type)
-                ledger = self._live_exits.get((fl, root), {})
-                others = sum(abs(s) for oid, (k, s) in ledger.items() if k == kind and oid != event.order_id)
+                others = self._live_exit_qty(fl, follower, root, kind, self._sign(event.action), exclude=event.order_id)
                 allowed = abs(exp) - others
                 if allowed <= 0:
                     self.stats["blocked"] += 1
@@ -297,8 +312,7 @@ class ReplicationService:
                     # el stop mismo se bloqueó por no tener qué proteger). Lo que la seguidora sí tiene ya está cubierto
                     # por sus propias copias: solo se cierra lo que quede sin cobertura. (16/9 14:14: 173 quedó corta 3
                     # al copiar el stop de una entrada bloqueada justo cuando su propio stop la dejaba plana)
-                    ledger = self._live_exits.get((fl, root), {})
-                    covered = max([0] + [sum(abs(s) for k_, s in ledger.values() if k_ == kk) for kk in ("stop", "limit")])
+                    covered = max(self._live_exit_qty(fl, follower, root, kk, self._sign(event.action)) for kk in ("stop", "limit"))
                     allowed = abs(exp) - covered
                     if allowed <= 0:
                         self.audit.log("SKIPPED", f"Cierre del maestro no copiado: es el {kind} de una entrada que {follower} "
@@ -386,8 +400,10 @@ class ReplicationService:
         except Exception as exc:
             replies = [exc for _ in prepared]
         dispatch_ms = round((time.monotonic() - t0) * 1000)
+        engine_ms = round((t0 - getattr(self, "_recv_at", t0)) * 1000)
         self.stats["fanout_ms_last"] = dispatch_ms
         for (task, rule, symbol, kw, entry), reply in zip(prepared, replies):
+            self._remember(self._timing, (task.target_account.lower(), task.master_order_id), (engine_ms, dispatch_ms))
             self._after_reply(task, symbol, entry, reply, dispatch_ms)
 
     def _after_reply(self, task: ReplicationTask, symbol: str, entry: dict | None, reply, dispatch_ms: int) -> None:
@@ -420,7 +436,7 @@ class ReplicationService:
         self.audit.log("REPLICATED", f"[{ev.msg_type}] {ev.action} {task.scaled_quantity} {symbol}{how} -> {task.target_account}{note}",
                        source=ev.account, target=task.target_account,
                        details={"rule_id": task.rule_id, "master_order_id": task.master_order_id, "reply": reply,
-                                "dispatch_ms": dispatch_ms})
+                                "dispatch_ms": dispatch_ms, "engine_ms": self._timing.get((task.target_account.lower(), task.master_order_id), (0, 0))[0]})
 
     # ---- libro de exposición ----
     @staticmethod
@@ -460,17 +476,46 @@ class ReplicationService:
         a = event.action.upper()
         return a == "BUYTOCOVER" or (a.startswith("SELL") and expected > 0) or (a == "BUY" and expected < 0)
 
+    def _live_exit_qty(self, fl: str, follower: str, root: str, kind: str, sign: int, exclude: str | None = None) -> int:
+        """Contratos de salidas (stop|limit) copiadas y vivas en la seguidora que cierran en la dirección `sign`.
+        El libro en memoria se contrasta con las órdenes reales del bróker (GET_ORDERS, addon >= 2.2): una entrada que
+        lleva más de `ledger_grace` s y el bróker ya no tiene viva (ejecutada o cancelada sin que llegara el estado) se
+        purga. 16/9 16:32-16:36: un stop de 1 fantasma en el libro recortó cada stop nuevo a 1 y bloqueó el de la larga;
+        las seguidoras quedaron con 1 contrato sin stop tres veces seguidas."""
+        ledger = self._live_exits.get((fl, root), {})
+        if not ledger:
+            return 0
+        broker_ids: set[str] | None = None
+        as_of = 0.0
+        if self.accounts is not None:
+            snap = self.accounts.find(follower)
+            as_of = getattr(self.accounts, "orders_as_of", 0.0)
+            if snap is not None and snap.reported and as_of:
+                broker_ids = {o.master_order_id for o in snap.working_orders
+                              if o.master_order_id and self._root(o.symbol) == root and o.quantity - o.filled > 0}
+        total = 0
+        for oid, (k, signed, at) in list(ledger.items()):
+            if broker_ids is not None and at < as_of - self.ledger_grace and oid not in broker_ids:
+                del ledger[oid]
+                logger.info(f"Libro de salidas: {follower} {root} {k} {signed:+d} (maestro {oid[:8]}) ya no está viva en el bróker: purgada")
+                continue
+            if oid == exclude or k != kind or (sign and signed * sign < 0):
+                continue
+            total += abs(signed)
+        return total
+
     def _note_sent(self, fl: str, root: str, event: MasterEvent, qty: int, exit_: bool) -> None:
         self.last_copy_activity[(fl, root)] = time.monotonic()
         if event.msg_type == "EXECUTION":
             self._remember(self._inflight, (fl, event.order_id, event.execution_id),
                            {"root": root, "signed": self._sign(event.action) * qty, "filled": 0, "settled": 0, "at": time.monotonic()})
         elif event.msg_type == "ORDER_PENDING" and exit_:
-            self._live_exits.setdefault((fl, root), {})[event.order_id] = (self._kind(event.order_type), self._sign(event.action) * qty)
+            self._live_exits.setdefault((fl, root), {})[event.order_id] = (self._kind(event.order_type), self._sign(event.action) * qty,
+                                                                          time.monotonic())
         elif event.msg_type == "ORDER_MODIFIED" and exit_:
             ledger = self._live_exits.setdefault((fl, root), {})
             kind = ledger[event.order_id][0] if event.order_id in ledger else self._kind(event.order_type)
-            ledger[event.order_id] = (kind, self._sign(event.action) * qty)
+            ledger[event.order_id] = (kind, self._sign(event.action) * qty, time.monotonic())
         elif event.msg_type == "ORDER_CANCELLED":
             self._forget_exit(fl, event.order_id)
 
@@ -478,17 +523,23 @@ class ReplicationService:
         for (f, _root), ledger in self._live_exits.items():
             if f != fl or master_order_id not in ledger:
                 continue
-            kind, signed = ledger[master_order_id]
+            kind, signed, at = ledger[master_order_id]
             if filled_qty and abs(signed) > filled_qty:
-                ledger[master_order_id] = (kind, signed - filled_qty * (1 if signed > 0 else -1))
+                ledger[master_order_id] = (kind, signed - filled_qty * (1 if signed > 0 else -1), at)
             else:
                 del ledger[master_order_id]
 
-    def note_positions_refreshed(self, account: str | None) -> None:
+    def note_positions_refreshed(self, account: str | None, as_of: float | None = None) -> None:
         """El bróker ya refleja las posiciones: lo ejecutado de cada copia deja de contar como 'en vuelo'. Lo que aún
-        no se llenó (entrada de 4 con 2 ejecutados: incidente 16/9 13:43, el stop se recortó a 2) sigue contando."""
+        no se llenó (entrada de 4 con 2 ejecutados: incidente 16/9 13:43, el stop se recortó a 2) sigue contando.
+        Solo se asientan los fills recibidos al menos `settle_margin` s antes de pedir la foto: la foto puede ir por
+        detrás del fill (16/9 16:34: se asentó un fill que el bróker aún no reflejaba y la posición esperada de 191
+        quedó en -1 con 2 contratos reales; su stop se bloqueó)."""
+        cutoff = (as_of if as_of is not None else time.monotonic()) - self.settle_margin
         for k, e in list(self._inflight.items()):
             if not e["filled"] or (account is not None and k[0] != account.lower()):
+                continue
+            if e["at"] > cutoff:
                 continue
             e["settled"] = e["filled"]
             if e["settled"] >= abs(e["signed"]):
@@ -598,8 +649,16 @@ class ReplicationService:
             if broker_ms is not None and -1000 <= broker_ms <= 600_000:
                 details["broker_ms"] = broker_ms
                 self.stats["broker_ms_last"] = broker_ms
+            timing = self._timing.get(key)
+            breakdown = ""
+            if timing and broker_ms is not None:
+                # de lo que tardó el bróker en llenar la copia: lo que puso el engine (decidir), el addon (enviar y confirmar)
+                # y el resto es el propio bróker (ida y vuelta de la orden)
+                engine_ms, dispatch_ms = timing
+                details.update({"engine_ms": engine_ms, "dispatch_ms": dispatch_ms})
+                breakdown = f": engine {engine_ms} + addon {dispatch_ms} + bróker {max(0, broker_ms - engine_ms - dispatch_ms)}"
             msg += (f" (maestro {m_price}, {'+' if slip >= 0 else ''}{slip}, {latency_ms} ms"
-                    + (f"; en bróker {broker_ms} ms" if broker_ms is not None else "") + ")")
+                    + (f"; en bróker {broker_ms} ms{breakdown}" if broker_ms is not None else "") + ")")
             self.stats["latency_ms_last"], self.stats["slippage_last"] = latency_ms, slip
             self.stats["latency_ms_avg"] = round(_ema(self.stats["latency_ms_avg"], latency_ms))
             self.stats["slippage_avg"] = round(_ema(self.stats["slippage_avg"], slip), 4)

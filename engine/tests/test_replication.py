@@ -244,6 +244,7 @@ async def _setup(container, follower_pos: int = 0, max_size: int = 3):
     await container.accounts.sync_once()
     from tradepilot.domain.risk import RiskLimit
     container.risk.upsert_limit(RiskLimit(account_id="Sim102", max_position_size=max_size))
+    rep.settle_margin = 0.0      # en las pruebas el bróker simulado refleja el fill al instante
     return rep, b
 
 
@@ -470,3 +471,86 @@ async def test_out_of_order_seq_is_neither_restart_nor_gap(container):
     # seq que vuelve a empezar: reinicio
     await rep.process_master_event({"msg_type": "HEARTBEAT", "account": "Sim101", "seq": 3})
     assert rep.stats["addon_restarts"] == 1 and rep.last_seq == 3
+
+
+async def test_stale_live_exit_is_purged_and_opposite_side_exits_do_not_count(container):
+    """16/9 16:32-16:36: un stop de 1 fantasma en el libro de salidas recortó cada stop nuevo a 1 (las 5 seguidoras
+    quedaron cortas 1 sin stop, tres veces) y bloqueó el stop de la larga siguiente. El libro se contrasta con las
+    órdenes reales del bróker y una salida del lado contrario nunca cuenta."""
+    import time
+    rep, b = await _setup(container, follower_pos=-2)
+    sym = "MNQ 12-26"
+    # entrada vieja en el libro que el bróker ya no tiene (ejecutada/cancelada sin que llegara el estado)
+    rep._live_exits.setdefault(("sim102", "MNQ"), {})["OLD"] = ("stop", 1, time.monotonic() - 30)
+    await container.accounts.sync_once()          # GET_ORDERS del bróker: sin órdenes vivas
+    await rep.process_master_event(_event(msg_type="ORDER_PENDING", action="BUYTOCOVER", quantity=2, symbol=sym,
+                                          order_type="STOPMARKET", order_id="S1").model_dump(mode="json"))
+    assert b.sent_orders[-1]["quantity"] == 2 and "TRIMMED" not in _types(container, 3)
+    assert "OLD" not in rep._live_exits[("sim102", "MNQ")] and "S1" in rep._live_exits[("sim102", "MNQ")]
+    # la copia recién enviada aún no sale en GET_ORDERS (foto de hace un instante): no se purga
+    await container.accounts.sync_once()
+    assert "S1" in rep._live_exits[("sim102", "MNQ")]
+    # y cuando el bróker la reporta viva, se mantiene aunque pase el plazo
+    from tradepilot.domain.accounts import WorkingOrder
+    b.working_orders = [("Sim102", WorkingOrder(order_id="f1", master_order_id="S1", action="BUYTOCOVER", symbol=sym, quantity=2,
+                                                order_type="STOPMARKET", stop_price=20100.0))]
+    rep._live_exits[("sim102", "MNQ")]["S1"] = ("stop", 2, time.monotonic() - 30)
+    await container.accounts.sync_once()
+    await rep.process_master_event(_event(msg_type="ORDER_PENDING", action="BUYTOCOVER", quantity=2, symbol=sym,
+                                          order_type="STOPMARKET", order_id="S2").model_dump(mode="json"))
+    assert "BLOCKED" in _types(container, 2) and "S1" in rep._live_exits[("sim102", "MNQ")]
+    # la seguidora pasa a larga 1: el stop BUYTOCOVER que sigue vivo en el libro no cuenta contra un stop SELL
+    b.working_orders = []
+    b.positions[("Sim102", sym)] = 1
+    rep._inflight.clear()
+    await container.accounts.sync_once()
+    rep._live_exits[("sim102", "MNQ")]["S1"] = ("stop", 2, time.monotonic())
+    await rep.process_master_event(_event(msg_type="ORDER_PENDING", action="SELL", quantity=1, symbol=sym,
+                                          order_type="STOPMARKET", order_id="S3").model_dump(mode="json"))
+    assert b.sent_orders[-1]["master_order_id"] == "S3" and b.sent_orders[-1]["quantity"] == 1
+
+
+async def test_master_partial_exit_copies_what_the_follower_still_owes(container):
+    """16/9 16:34: el stop se copió por 1, el maestro salió de 2 en dos fills parciales y el engine los saltó ("ya
+    ejecutó su orden"): las seguidoras quedaron cortas 1. Ahora se copia lo que falte respecto a lo ejecutado del maestro."""
+    rep, b = await _setup(container, follower_pos=-2)
+    sym = "MNQ 12-26"
+    await rep.process_master_event(_event(msg_type="ORDER_PENDING", action="BUYTOCOVER", quantity=2, symbol=sym,
+                                          order_type="STOPMARKET", order_id="S1").model_dump(mode="json"))
+    rep._sent_pending[("sim102", "S1")] = 1        # como si la copia hubiera salido recortada a 1
+    # la copia (1) de la seguidora se ejecuta
+    await rep.process_master_event(_event(account="Sim102", action="BUYTOCOVER", quantity=1, symbol=sym, order_id="F1",
+                                          master_order_id="S1", execution_id="f1", price=20100.0).model_dump(mode="json"))
+    b.sent_orders.clear()
+    # primer fill parcial del maestro (1 de 2): la seguidora ya ejecutó 1 -> nada que copiar
+    t = await rep.process_master_event(_event(action="BUYTOCOVER", quantity=1, symbol=sym, order_id="S1", execution_id="m1",
+                                              is_exit=True, price=20100.0).model_dump(mode="json"))
+    assert t == [] and "SKIPPED" in _types(container, 1) and not b.sent_orders
+    # segundo fill parcial (2 de 2): a la seguidora le falta 1 -> se copia 1 y queda plana
+    t = await rep.process_master_event(_event(action="BUYTOCOVER", quantity=1, symbol=sym, order_id="S1", execution_id="m2",
+                                              is_exit=True, price=20100.25).model_dump(mode="json"))
+    assert len(t) == 1 and b.sent_orders[-1]["quantity"] == 1 and b.sent_orders[-1]["action"] == "BUYTOCOVER"
+    assert rep.expected_position("Sim102", sym) == 0
+
+
+async def test_recent_fills_are_not_settled_against_a_lagging_snapshot(container):
+    """16/9 16:34: la foto de posiciones (2 s por detrás) no reflejaba aún el fill y el engine lo dio por asentado: la
+    posición esperada de 191 quedó en -1 con 2 reales y su stop se bloqueó. Un fill recién recibido sigue en vuelo."""
+    rep, b = await _setup(container)
+    rep.settle_margin = 1.0
+    sym = "MNQ 12-26"
+    await rep.process_master_event(_event(action="SELL", quantity=2, symbol=sym, order_id="E1", execution_id="e1").model_dump(mode="json"))
+    await rep.process_master_event(_event(account="Sim102", action="SELL", quantity=2, symbol=sym, order_id="F1",
+                                          master_order_id="E1", execution_id="f1").model_dump(mode="json"))
+    assert rep.expected_position("Sim102", sym) == -2
+    b.positions[("Sim102", sym)] = 0               # el simulador ya aplicó el fill: dejarlo como un bróker que va por detrás
+    await container.accounts.sync_once()           # el bróker aún dice plana: el fill no se asienta todavía
+    assert rep.expected_position("Sim102", sym) == -2
+    await rep.process_master_event(_event(msg_type="ORDER_PENDING", action="BUYTOCOVER", quantity=2, symbol=sym,
+                                          order_type="STOPMARKET", order_id="S1").model_dump(mode="json"))
+    assert b.sent_orders[-1]["quantity"] == 2 and "BLOCKED" not in _types(container, 2)
+    # pasado el margen, con el bróker ya al día, se asienta y no se cuenta dos veces
+    b.positions[("Sim102", sym)] = -2
+    rep.settle_margin = 0.0
+    await container.accounts.sync_once()
+    assert rep.expected_position("Sim102", sym) == -2 and not rep._inflight

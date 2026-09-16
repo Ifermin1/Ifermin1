@@ -74,12 +74,16 @@ class AccountService:
             self._track_drawdown(snap, now)
         if new_hidden:
             logger.info(f"{new_hidden} cuentas nuevas sin conexión quedan ocultas (se activan solas al conectarse)")
+        import time as _t
+        asked = _t.monotonic()
         positions = await self.bridge.get_positions()
         if positions is not None:
-            self.apply_positions(positions, now)
+            self.apply_positions(positions, now, as_of=asked)
+        asked = _t.monotonic()
         orders = await self.bridge.get_orders()
         if orders is not None:
             self.apply_orders(orders)
+            self.orders_as_of = asked
         self._sample_pnl(now)
         for acc in list(self._watch_pending):
             await self.watch(acc)
@@ -122,9 +126,19 @@ class AccountService:
             self._watch_pending.add(account_id)
 
     _last_signature: tuple | None = None
+    orders_as_of: float = 0.0        # monotonic en que se pidió la última foto de órdenes vivas (GET_ORDERS)
 
-    def apply_positions(self, positions: list, now: datetime) -> None:
-        """Snapshot completo de posiciones del bróker (GET_POSITIONS): sustituye lo que teníamos."""
+    def find(self, account_id: str):
+        """Snapshot por nombre, sin distinguir mayúsculas (el libro del replicador trabaja en minúsculas)."""
+        snap = self.accounts.get(account_id)
+        if snap is None:
+            low = account_id.lower()
+            snap = next((s for k, s in self.accounts.items() if k.lower() == low), None)
+        return snap
+
+    def apply_positions(self, positions: list, now: datetime, as_of: float | None = None) -> None:
+        """Snapshot completo de posiciones del bróker (GET_POSITIONS): sustituye lo que teníamos. `as_of` es el monotonic
+        en que se pidió la foto: un fill posterior a ese instante no está reflejado en ella."""
         by_acc: dict[str, list[PositionSnapshot]] = {}
         for p in positions:
             by_acc.setdefault(p.account_id, []).append(
@@ -135,7 +149,7 @@ class AccountService:
                 snap.open_positions = new
                 snap.updated_at = now
         if self.on_positions_refreshed:
-            self.on_positions_refreshed(None)
+            self.on_positions_refreshed(None, as_of)
 
     audit = None                 # AuditService, lo inyecta el contenedor
     _phantoms_seen: set = set()  # (cuenta, id de orden) ya avisadas

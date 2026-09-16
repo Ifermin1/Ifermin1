@@ -145,6 +145,11 @@ Libro de exposición (addon v2.0): el engine cuenta las copias de fills en vuelo
 un stop/TP solo se copia hasta la posición esperada (`BLOCKED`/`TRIMMED`), las cancelaciones pasan siempre, y un cierre
 del maestro (`is_exit`) nunca abre ni invierte posición (`SKIPPED`/`TRIMMED`). Un cambio de orden rechazado ya no cuenta
 como stop desnudo. En el addon, el fill del master con la copia aún viva se resuelve cancelando y cerrando a mercado.
+El libro de salidas vivas se contrasta con las órdenes reales del bróker (`GET_ORDERS`): una salida copiada que lleva más
+de 2 s y el bróker ya no tiene viva se purga, y una salida del lado contrario nunca cuenta (16/9 16:32-16:36: un stop de 1
+fantasma recortó cada stop nuevo a 1 y las seguidoras quedaron cortas 1 tres veces). Un fill en vuelo solo se asienta
+contra una foto de posiciones pedida después de recibirlo, y los fills parciales del maestro copian lo que la seguidora
+aún deba (`_master_filled`) en vez de saltarse por "ya ejecutó su orden".
 Pendiente: avisos por Telegram.
 
 ## 7. Próximos pasos sugeridos
