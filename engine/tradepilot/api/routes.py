@@ -124,7 +124,7 @@ def risk(request: Request):
 
 @router.post("/risk/kill-switch")
 async def kill_switch(body: KillSwitchRequest, request: Request):
-    return await _c(request).risk.kill(body.active, body.reason, body.flatten)
+    return await _c(request).risk.kill(body.active, body.reason, body.flatten, body.flatten_master)
 
 
 @router.post("/risk/flatten-all")

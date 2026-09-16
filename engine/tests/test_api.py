@@ -165,8 +165,11 @@ async def test_flatten_and_kill_with_flatten(client: AsyncClient, container):
     types = [a.event_type for a in container.audit.recent(4)]
     assert "FLATTEN" in types and "FLATTENED" in types
     b.positions[("Sim102", "NQ 12-26")] = 1
+    b.positions[("Sim101", "NQ 12-26")] = 2
     r = await client.post("/api/risk/kill-switch", json={"active": True, "reason": "pánico", "flatten": True})
-    assert r.json()["kill_switch"] is True and b.flattened == ["Sim102", "Sim102"]
+    assert r.json()["kill_switch"] is True and sorted(b.flattened) == ["Sim101", "Sim102", "Sim102"]   # maestra incluida
+    assert b.positions[("Sim101", "NQ 12-26")] == 0
+    await client.post("/api/risk/kill-switch", json={"active": False})
     r = await client.post("/api/risk/flatten-all", json={"include_master": True})
     assert r.status_code == 200 and "Sim101" in r.json()["results"]
 

@@ -60,8 +60,8 @@ export function makeClient(s: Session) {
       req<void>(`/api/accounts/${encodeURIComponent(follower)}/link?master_account=${encodeURIComponent(master)}`, { method: "DELETE" }),
     audit: (limit = 100, type?: string) => req<AuditEvent[]>(`/api/audit?limit=${limit}${type ? `&event_type=${type}` : ""}`),
     risk: () => req<RiskState>("/api/risk"),
-    killSwitch: (active: boolean, reason?: string, flatten = false) =>
-      req<RiskState>("/api/risk/kill-switch", { method: "POST", body: JSON.stringify({ active, reason, flatten }) }),
+    killSwitch: (active: boolean, reason?: string, flatten = false, flatten_master = true) =>
+      req<RiskState>("/api/risk/kill-switch", { method: "POST", body: JSON.stringify({ active, reason, flatten, flatten_master }) }),
     flattenAll: (include_master: boolean, reason?: string) =>
       req<{ results: Record<string, string> }>("/api/risk/flatten-all", { method: "POST", body: JSON.stringify({ include_master, reason }) }),
     flatten: (id: string, reason?: string) =>

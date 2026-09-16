@@ -28,10 +28,11 @@ class RiskService:
         return RiskState(kill_switch=self.kill_switch, kill_switch_reason=self.kill_switch_reason,
                          kill_switch_at=self.kill_switch_at, limits=list(self.limits.values()))
 
-    async def kill(self, active: bool, reason: str | None = None, flatten: bool = False) -> RiskState:
+    async def kill(self, active: bool, reason: str | None = None, flatten: bool = False,
+                   flatten_master: bool = True) -> RiskState:
         state = self.set_kill_switch(active, reason)
         if active and flatten:
-            await self.flatten_all(include_master=False, reason="kill switch")
+            await self.flatten_all(include_master=flatten_master, reason="kill switch")
         return state
 
     def set_kill_switch(self, active: bool, reason: str | None = None) -> RiskState:

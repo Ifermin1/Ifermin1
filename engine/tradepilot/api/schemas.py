@@ -22,7 +22,8 @@ class RuleUpdate(BaseModel):
 class KillSwitchRequest(BaseModel):
     active: bool
     reason: Optional[str] = None
-    flatten: bool = False          # además de bloquear, cerrar posiciones de las seguidoras
+    flatten: bool = False          # además de bloquear, cerrar posiciones
+    flatten_master: bool = True    # ... incluida la maestra
 
 
 class FlattenRequest(BaseModel):

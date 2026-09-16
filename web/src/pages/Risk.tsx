@@ -12,16 +12,17 @@ export function Risk() {
   if (!client) return null;
 
   const [flattenOnKill, setFlattenOnKill] = useState(true);
+  const [flattenMaster, setFlattenMaster] = useState(true);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   async function toggleKill() {
     const active = !risk?.kill_switch;
     if (active && !confirm(flattenOnKill
-      ? "¿KILL SWITCH? Se bloquean todas las réplicas Y SE CIERRAN las posiciones de las seguidoras a mercado."
+      ? `¿KILL SWITCH? Se bloquean todas las réplicas Y SE CIERRAN a mercado las posiciones de las seguidoras${flattenMaster ? " y de la maestra" : ""}.`
       : "¿KILL SWITCH? Se bloquean todas las réplicas (las posiciones abiertas se quedan).")) return;
     const reason = active ? prompt("Motivo (opcional)") ?? undefined : undefined;
     setBusy(true);
-    try { setRisk(await client!.killSwitch(active, reason, active && flattenOnKill)); } finally { setBusy(false); }
+    try { setRisk(await client!.killSwitch(active, reason, active && flattenOnKill, flattenMaster)); } finally { setBusy(false); }
   }
   async function flattenAll(includeMaster: boolean) {
     if (!confirm(includeMaster ? "¿CERRAR TODO, incluida la maestra? Cancela órdenes y cierra posiciones a mercado en todas las cuentas."
@@ -49,7 +50,10 @@ export function Risk() {
             <p className="muted">{risk?.kill_switch ? `Activo desde ${time(risk.kill_switch_at)}${risk.kill_switch_reason ? ` · ${risk.kill_switch_reason}` : ""}` : "Inactivo. Las reglas replican con normalidad."}</p>
           </div>
           <div className="kill-actions">
-            {!risk?.kill_switch && <label className="inline small"><input type="checkbox" checked={flattenOnKill} onChange={(e) => setFlattenOnKill(e.target.checked)} /> y cerrar posiciones de seguidoras</label>}
+            {!risk?.kill_switch && <>
+              <label className="inline small"><input type="checkbox" checked={flattenOnKill} onChange={(e) => setFlattenOnKill(e.target.checked)} /> y cerrar posiciones</label>
+              <label className="inline small"><input type="checkbox" checked={flattenMaster} disabled={!flattenOnKill} onChange={(e) => setFlattenMaster(e.target.checked)} /> incluida la maestra</label>
+            </>}
             <button className={risk?.kill_switch ? "primary" : "danger-solid"} disabled={busy} onClick={toggleKill}>
               {risk?.kill_switch ? "Reanudar replicación" : "DETENER TODO"}
             </button>

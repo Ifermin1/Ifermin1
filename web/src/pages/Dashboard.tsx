@@ -28,8 +28,8 @@ export function Dashboard() {
         <Card className="alert-card"><strong>Addon de NinjaTrader desactualizado</strong> ({health.bridge.addon_version ? `v${health.bridge.addon_version}` : "sin versión"}; se requiere v{health.min_addon_version}).
           Las protecciones (cierre de emergencia, posiciones, detección de pérdidas) no funcionan hasta recompilarlo.</Card>
       )}
-      {(health?.stats.seq_gaps || health?.stats.addon_restarts) ? (
-        <Card className="alert-card"><strong>Mensajes perdidos del addon:</strong> {health?.stats.seq_gaps ?? 0} huecos, {health?.stats.addon_restarts ?? 0} reinicios en esta sesión. Revisa la sincronización de las seguidoras en <i>Cuentas</i>.</Card>
+      {health?.stats.seq_gaps ? (
+        <Card className="alert-card"><strong>Mensajes perdidos del addon:</strong> {health.stats.seq_gaps} en esta sesión. Revisa la sincronización de las seguidoras en <i>Cuentas</i>.</Card>
       ) : null}
       {accounts.some((a) => a.desync) && (
         <Card className="alert-card"><strong>Seguidoras desincronizadas:</strong> {accounts.filter((a) => a.desync).map((a) => a.account_id).join(", ")}. Ve a <i>Cuentas</i> para igualarlas o cerrarlas.</Card>
@@ -51,6 +51,7 @@ export function Dashboard() {
             <div><span>Último evento IN</span><b>{time(b.last_msg_in)} <i className="muted">{ago(b.last_msg_in)}</i></b></div>
             <div><span>Última orden OUT</span><b>{time(b.last_msg_out)} <i className="muted">{ago(b.last_msg_out)}</i></b></div>
             <div><span>Errores del puente</span><b className={b.error_count ? "bad" : "ok"}>{b.error_count}</b></div>
+            <div><span>Reinicios del addon (sesión)</span><b className="muted">{health?.stats.addon_restarts ?? 0}</b></div>
           </div>
         ) : <Empty>Esperando estado del engine…</Empty>}
       </Card>

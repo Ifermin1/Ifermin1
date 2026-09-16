@@ -40,7 +40,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 {
     public class TradePilotXBridge : AddOnBase
     {
-        private const string BridgeVersion = "1.5";
+        private const string BridgeVersion = "1.6";
 
         // ---- configuración ------------------------------------------------
         private class BridgeConfig
@@ -88,6 +88,10 @@ namespace NinjaTrader.NinjaScript.AddOns
         private readonly ConcurrentDictionary<string, bool> pendingPublished = new ConcurrentDictionary<string, bool>();
         // Cantidad ya copiada a mercado para cubrir lo que la orden del follower NO ejecutó (rechazo/cancelación)
         private readonly ConcurrentDictionary<string, int> reconciledQty = new ConcurrentDictionary<string, int>();
+        // Claves (follower|master_order_id) cuya orden en el follower es copia de una orden PENDIENTE del master
+        // (stop / take profit): sus fills los hace la propia orden del follower. Una entrada a mercado NO está aquí:
+        // cada fill parcial del master se copia por separado.
+        private readonly ConcurrentDictionary<string, bool> pendingCopies = new ConcurrentDictionary<string, bool>();
         // Cuentas follower cuyas órdenes/ejecuciones ya escuchamos (ACK de vuelta a TradePilot)
         private readonly ConcurrentDictionary<string, Account> followers = new ConcurrentDictionary<string, Account>();
         private readonly object lifecycleLock = new object();
@@ -166,7 +170,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                     foreach (string sym in cfg.PriceInstruments)
                         EnsurePriceFeed(sym);
 
-                    Info(string.Format("Bridge v{0} online. master={1} pub={2} sub={3} sync={4} (v1.5: FLATTEN, GET_POSITIONS, seq)",
+                    Info(string.Format("Bridge v{0} online. master={1} pub={2} sub={3} sync={4} (v1.6)",
                         BridgeVersion, cfg.MasterAccount, cfg.MasterPort, cfg.FollowerPort, cfg.SyncPort));
                 }
                 catch (Exception ex)
@@ -278,7 +282,9 @@ namespace NinjaTrader.NinjaScript.AddOns
                         }
                         else if ((o.Name ?? "").StartsWith("TPX "))
                         {
-                            followerOrders[a.Name + "|" + MasterIdFromName(o.Name)] = o;
+                            string k = a.Name + "|" + MasterIdFromName(o.Name);
+                            followerOrders[k] = o;
+                            if (o.OrderType != OrderType.Market) pendingCopies[k] = true;
                             AttachFollower(a);
                             recovered++;
                         }
@@ -499,9 +505,15 @@ namespace NinjaTrader.NinjaScript.AddOns
                 switch (msgType)
                 {
                     case "EXECUTION":
-                        // Si ya replicamos esa orden del master (ORDER_PENDING), su fill lo hace la propia orden del follower.
+                        // Entrada a mercado del master: cada fill (parcial) llega como EXECUTION distinta y se copia tal cual.
+                        if (existing == null || !pendingCopies.ContainsKey(key))
+                        {
+                            SubmitNew(account, symbol, Get(m, "action"), OrderType.Market, qty, 0, 0,
+                                key + "#" + Get(m, "execution_id"), masterOrderId);
+                            return;
+                        }
+                        // Copia de una orden PENDIENTE del master (stop / TP): su fill lo hace la propia orden del follower.
                         // Da igual que llegue antes o después: si la orden del follower está viva o ya ejecutó, no se copia.
-                        if (existing != null)
                         {
                             if (IsLive(existing)) { Info("EXECUTION ignorada: el follower ya tiene orden viva para " + masterOrderId); return; }
                             int remaining = existing.Quantity - existing.Filled;
@@ -517,8 +529,6 @@ namespace NinjaTrader.NinjaScript.AddOns
                             SubmitNew(account, symbol, Get(m, "action"), OrderType.Market, toSend, 0, 0, key + "#recon" + already, masterOrderId);
                             return;
                         }
-                        SubmitNew(account, symbol, Get(m, "action"), OrderType.Market, qty, 0, 0, key, masterOrderId);
-                        break;
 
                     case "ORDER_PENDING":
                         if (existing != null && IsLive(existing)) { Info("ORDER_PENDING duplicada ignorada para " + key); return; }
@@ -527,6 +537,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                             double limit = NumOr(m, "limit_price", type == OrderType.Limit || type == OrderType.StopLimit ? price : 0);
                             double stop = NumOr(m, "stop_price", type == OrderType.StopMarket || type == OrderType.StopLimit ? price : 0);
                             if (type == OrderType.Market) type = OrderType.Limit;
+                            pendingCopies[key] = true;
                             SubmitNew(account, symbol, Get(m, "action"), type, qty, limit, stop, key, masterOrderId);
                         }
                         break;
