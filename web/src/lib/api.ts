@@ -14,7 +14,9 @@ export type Account = { account_id: string; balance: number; net_liquidity: numb
                         enabled: boolean; enabled_source: "auto" | "user"; alias: string; connected: boolean | null; connection: string; reported: boolean;
                         realized_pnl: number; unrealized_pnl: number; desync: boolean; desync_detail: string };
 export type Rule = { id: string; master_account: string; follower_account: string; multiplier: number;
-                     symbol_filter: string | null; enabled: boolean };
+                     symbol_filter: string | null; enabled: boolean; target_root: string | null;
+                     entry_mode: "market" | "limit"; tolerance_ticks: number; entry_timeout_s: number; entry_fallback: "market" | "cancel" };
+export type ExecOptions = { target_root?: string | null; entry_mode?: "market" | "limit"; tolerance_ticks?: number; entry_timeout_s?: number; entry_fallback?: "market" | "cancel" };
 export type AuditEvent = { id: number | null; timestamp: string; event_type: string; source_account: string | null;
                            target_account: string | null; message: string; details: Record<string, unknown> | null };
 export type RiskLimit = { account_id: string; max_daily_loss: number; max_position_size: number; trading_halted: boolean; halted_reason: string; halted_at: string | null };
@@ -49,15 +51,15 @@ export function makeClient(s: Session) {
     health: () => req<Health>("/api/health"),
     accounts: () => req<Account[]>("/api/accounts"),
     rules: () => req<Rule[]>("/api/rules"),
-    createRule: (b: Omit<Rule, "id">) => req<Rule>("/api/rules", { method: "POST", body: JSON.stringify(b) }),
+    createRule: (b: Pick<Rule, "master_account" | "follower_account" | "multiplier" | "symbol_filter" | "enabled">) => req<Rule>("/api/rules", { method: "POST", body: JSON.stringify(b) }),
     updateRule: (id: string, b: Partial<Rule>) => req<Rule>(`/api/rules/${id}`, { method: "PATCH", body: JSON.stringify(b) }),
     deleteRule: (id: string) => req<void>(`/api/rules/${id}`, { method: "DELETE" }),
     setAccount: (id: string, body: { enabled?: boolean; alias?: string; auto?: boolean }) =>
       req<Account>(`/api/accounts/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) }),
     forgetAccount: (id: string) => req<void>(`/api/accounts/${encodeURIComponent(id)}`, { method: "DELETE" }),
     setMaster: (account: string) => req<{ master_account: string }>("/api/master", { method: "POST", body: JSON.stringify({ account }) }),
-    link: (follower: string, master_account: string, multiplier: number, enabled: boolean) =>
-      req<Rule>(`/api/accounts/${encodeURIComponent(follower)}/link`, { method: "PUT", body: JSON.stringify({ master_account, multiplier, enabled }) }),
+    link: (follower: string, master_account: string, multiplier: number, enabled: boolean, opts: ExecOptions = {}) =>
+      req<Rule>(`/api/accounts/${encodeURIComponent(follower)}/link`, { method: "PUT", body: JSON.stringify({ master_account, multiplier, enabled, ...opts }) }),
     unlink: (follower: string, master: string) =>
       req<void>(`/api/accounts/${encodeURIComponent(follower)}/link?master_account=${encodeURIComponent(master)}`, { method: "DELETE" }),
     audit: (limit = 100, type?: string) => req<AuditEvent[]>(`/api/audit?limit=${limit}${type ? `&event_type=${type}` : ""}`),

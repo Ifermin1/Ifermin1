@@ -56,6 +56,11 @@ class SQLiteStore:
                 self._conn.execute("ALTER TABLE accounts ADD COLUMN enabled_source TEXT DEFAULT 'auto'")
             if "last_connected" not in cols:
                 self._conn.execute("ALTER TABLE accounts ADD COLUMN last_connected TEXT")
+            rule_cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(replication_rules)").fetchall()}
+            for col, ddl in (("target_root", "TEXT"), ("entry_mode", "TEXT DEFAULT 'market'"), ("tolerance_ticks", "INTEGER DEFAULT 2"),
+                             ("entry_timeout_s", "INTEGER DEFAULT 5"), ("entry_fallback", "TEXT DEFAULT 'market'")):
+                if col not in rule_cols:
+                    self._conn.execute(f"ALTER TABLE replication_rules ADD COLUMN {col} {ddl}")
             rcols = {r["name"] for r in self._conn.execute("PRAGMA table_info(risk_limits)").fetchall()}
             if "halted_reason" not in rcols:
                 self._conn.execute("ALTER TABLE risk_limits ADD COLUMN halted_reason TEXT DEFAULT ''")
@@ -67,13 +72,19 @@ class SQLiteStore:
             rows = self._conn.execute("SELECT * FROM replication_rules").fetchall()
         return [ReplicationRule(id=r["id"], master_account=r["master_account"],
                                 follower_account=r["follower_account"], multiplier=r["multiplier"],
-                                symbol_filter=r["symbol_filter"] or None, enabled=bool(r["enabled"])) for r in rows]
+                                symbol_filter=r["symbol_filter"] or None, enabled=bool(r["enabled"]),
+                                target_root=r["target_root"] or None, entry_mode=r["entry_mode"] or "market",
+                                tolerance_ticks=r["tolerance_ticks"] if r["tolerance_ticks"] is not None else 2,
+                                entry_timeout_s=r["entry_timeout_s"] if r["entry_timeout_s"] is not None else 5,
+                                entry_fallback=r["entry_fallback"] or "market") for r in rows]
 
     def save_rule(self, rule: ReplicationRule) -> None:
         with self._lock, self._conn:
             self._conn.execute(
-                "INSERT OR REPLACE INTO replication_rules VALUES (?, ?, ?, ?, ?, ?)",
-                (rule.id, rule.master_account, rule.follower_account, rule.multiplier, rule.symbol_filter, rule.enabled),
+                "INSERT OR REPLACE INTO replication_rules (id, master_account, follower_account, multiplier, symbol_filter, enabled, "
+                "target_root, entry_mode, tolerance_ticks, entry_timeout_s, entry_fallback) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (rule.id, rule.master_account, rule.follower_account, rule.multiplier, rule.symbol_filter, rule.enabled,
+                 rule.target_root, rule.entry_mode, rule.tolerance_ticks, rule.entry_timeout_s, rule.entry_fallback),
             )
 
     def delete_rule(self, rule_id: str) -> None:

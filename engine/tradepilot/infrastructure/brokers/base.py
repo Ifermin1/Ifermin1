@@ -65,4 +65,5 @@ class BrokerBridge(ABC):
         price: float = 0.0,
         limit_price: float = 0.0,
         stop_price: float = 0.0,
+        entry: dict | None = None,
     ) -> None: ...

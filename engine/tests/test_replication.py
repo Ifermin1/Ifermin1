@@ -188,3 +188,45 @@ async def test_latency_and_slippage_measured(container):
     assert fill.event_type == "FOLLOWER_FILL" and fill.details["slippage"] == 0.5 and fill.details["latency_ms"] >= 0
     assert rep.stats["slippage_avg"] == 0.5 and rep.stats["latency_ms_avg"] is not None
     assert "maestro 20000.0" in fill.message
+
+
+def test_symbol_mapping():
+    rule = ReplicationRule(id="r", master_account="Sim101", follower_account="Sim102", target_root=" mnq ")
+    assert rule.target_root == "MNQ" and rule.map_symbol("NQ DEC26") == "MNQ DEC26" and rule.map_root("NQ") == "MNQ"
+    assert ReplicationRule(id="r", master_account="A", follower_account="B", target_root="").target_root is None
+
+
+async def test_limit_entry_only_for_exposure_increasing_copies(container):
+    rep = container.replication
+    b = container.bridge
+    container.bridge.health.master_account = "Sim101"
+    rep.add_rule("Sim101", "Sim102", entry_mode="limit", tolerance_ticks=3, entry_timeout_s=4, entry_fallback="cancel",
+                 target_root="MNQ")
+    # entrada (seguidora plana): límite con tolerancia y símbolo mapeado
+    await rep.process_master_event(_event(order_id="e1", execution_id="x1", symbol="NQ DEC26").model_dump(mode="json"))
+    sent = b.sent_orders[-1]
+    assert sent["symbol"] == "MNQ DEC26" and sent["entry_mode"] == "limit" and sent["tolerance_ticks"] == 3 \
+        and sent["entry_timeout_s"] == 4 and sent["entry_fallback"] == "cancel"
+    # la seguidora ya está larga 2 en MNQ (mock aplica el fill): la salida va a mercado, sin entry_mode
+    assert b.positions[("Sim102", "MNQ DEC26")] == 2
+    await container.accounts.sync_once()
+    await rep.process_master_event(_event(order_id="e2", execution_id="x2", action="SELL", symbol="NQ DEC26").model_dump(mode="json"))
+    assert "entry_mode" not in b.sent_orders[-1]
+    assert "límite ±3 ticks" in [a.message for a in container.audit.recent(6) if a.event_type == "REPLICATED"][-1]
+
+
+async def test_sync_expected_uses_mapped_root(container):
+    rep = container.replication
+    b = container.bridge
+    b.health.master_account = "Sim101"
+    rep.add_rule("Sim101", "Sim102", multiplier=10, target_root="MNQ")
+    b.positions[("Sim101", "NQ DEC26")] = 1
+    b.positions[("Sim102", "MNQ DEC26")] = 10
+    await container.accounts.sync_once()
+    assert container.sync.expected_positions("Sim102") == {"MNQ": 10} and container.sync.diff("Sim102") == {}
+
+
+async def test_entry_missed_is_audited(container):
+    await container.replication.process_master_event({"msg_type": "ENTRY_MISSED", "account": "Sim102", "action": "BUY",
+                                                       "quantity": 2, "symbol": "MNQ DEC26", "master_order_id": "m1"})
+    assert container.audit.recent(1)[0].event_type == "ENTRY_MISSED"

@@ -66,6 +66,46 @@ class ReplicationRule(DomainModel):
     multiplier: float = 1.0
     symbol_filter: Optional[str] = None
     enabled: bool = True
+    # Nivel 3: ejecución
+    target_root: Optional[str] = None      # p. ej. "MNQ": la seguidora opera el micro del símbolo de la maestra
+    entry_mode: str = "market"             # "market" | "limit" (límite al precio del maestro +/- tolerancia)
+    tolerance_ticks: int = 2
+    entry_timeout_s: int = 5               # si la límite no se llena en este tiempo...
+    entry_fallback: str = "market"         # ... "market" (a mercado lo que falte) | "cancel"
+
+    @field_validator("target_root", mode="before")
+    @classmethod
+    def _root(cls, v):
+        if isinstance(v, str):
+            v = v.strip().upper().split(" ")[0]
+            return v or None
+        return v
+
+    @field_validator("entry_mode")
+    @classmethod
+    def _mode(cls, v: str) -> str:
+        v = (v or "market").lower()
+        if v not in ("market", "limit"):
+            raise ValueError("entry_mode debe ser market o limit")
+        return v
+
+    @field_validator("entry_fallback")
+    @classmethod
+    def _fallback(cls, v: str) -> str:
+        v = (v or "market").lower()
+        if v not in ("market", "cancel"):
+            raise ValueError("entry_fallback debe ser market o cancel")
+        return v
+
+    def map_symbol(self, symbol: str) -> str:
+        """'NQ DEC26' -> 'MNQ DEC26' si la regla tiene target_root."""
+        if not self.target_root:
+            return symbol
+        parts = symbol.strip().split(" ", 1)
+        return self.target_root + (" " + parts[1] if len(parts) > 1 else "")
+
+    def map_root(self, root: str) -> str:
+        return self.target_root or root.upper()
 
     @field_validator("multiplier")
     @classmethod

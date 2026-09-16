@@ -71,7 +71,8 @@ async def link_account(follower: str, body: LinkRequest, request: Request):
     """Vincular (o actualizar) una cuenta seguidora al maestro con un clic."""
     c = _c(request)
     try:
-        rule = c.replication.link(body.master_account, follower, body.multiplier, body.enabled)
+        opts = body.model_dump(exclude_unset=True, exclude={"master_account", "multiplier", "enabled"})
+        rule = c.replication.link(body.master_account, follower, body.multiplier, body.enabled, **opts)
     except ValueError as exc:
         raise HTTPException(422, str(exc))
     await c.accounts.watch(follower)
@@ -92,8 +93,9 @@ def list_rules(request: Request):
 @router.post("/rules", status_code=201)
 def create_rule(body: RuleCreate, request: Request):
     try:
+        opts = body.model_dump(exclude_unset=True, exclude={"master_account", "follower_account", "multiplier", "symbol_filter", "enabled"})
         return _c(request).replication.add_rule(body.master_account, body.follower_account, body.multiplier,
-                                                body.symbol_filter, body.enabled)
+                                                body.symbol_filter, body.enabled, **opts)
     except ValueError as exc:
         raise HTTPException(422, str(exc))
 

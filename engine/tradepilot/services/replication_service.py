@@ -58,9 +58,10 @@ class ReplicationService:
 
     # ---- CRUD de reglas ----
     def add_rule(self, master: str, follower: str, multiplier: float = 1.0, symbol_filter: str | None = None,
-                 enabled: bool = True) -> ReplicationRule:
+                 enabled: bool = True, **extra) -> ReplicationRule:
         rule = ReplicationRule(id=str(uuid.uuid4()), master_account=master.strip(), follower_account=follower.strip(),
-                               multiplier=multiplier, symbol_filter=symbol_filter, enabled=enabled)
+                               multiplier=multiplier, symbol_filter=symbol_filter, enabled=enabled,
+                               **{k: v for k, v in extra.items() if v is not None})
         self.rules.append(rule)
         self.store.save_rule(rule)
         self.audit.log("RULE_ADDED", f"Nueva regla: {rule.master_account} -> {rule.follower_account} (x{rule.multiplier})",
@@ -74,14 +75,14 @@ class ReplicationService:
                 return r
         return None
 
-    def link(self, master: str, follower: str, multiplier: float = 1.0, enabled: bool = True) -> ReplicationRule:
+    def link(self, master: str, follower: str, multiplier: float = 1.0, enabled: bool = True, **extra) -> ReplicationRule:
         """Vincula follower al master de un clic: crea la regla o actualiza la existente."""
         if master.strip().lower() == follower.strip().lower():
             raise ValueError("una cuenta no puede copiarse a sí misma")
         existing = self.find_link(master, follower)
         if existing is None:
-            return self.add_rule(master, follower, multiplier, None, enabled)
-        return self.update_rule(existing.id, multiplier=multiplier, enabled=enabled)  # type: ignore[return-value]
+            return self.add_rule(master, follower, multiplier, None, enabled, **extra)
+        return self.update_rule(existing.id, multiplier=multiplier, enabled=enabled, **extra)  # type: ignore[return-value]
 
     def unlink(self, master: str, follower: str) -> bool:
         existing = self.find_link(master, follower)
@@ -90,7 +91,7 @@ class ReplicationService:
     def update_rule(self, rule_id: str, **changes) -> ReplicationRule | None:
         for i, r in enumerate(self.rules):
             if r.id == rule_id:
-                updated = r.model_copy(update={k: v for k, v in changes.items() if v is not None})
+                updated = r.model_copy(update={k: v for k, v in changes.items() if v is not None or k == "target_root"})
                 updated = ReplicationRule.model_validate(updated.model_dump())
                 self.rules[i] = updated
                 self.store.save_rule(updated)
@@ -115,6 +116,11 @@ class ReplicationService:
             self.journal.write("in", data)
         self._check_seq(data)
 
+        if msg_type == "ENTRY_MISSED":
+            self.audit.log("ENTRY_MISSED", f"{data.get('account')}: entrada límite {data.get('action')} {data.get('quantity')} "
+                           f"{data.get('symbol')} cancelada sin llenarse; la seguidora NO tiene esa entrada",
+                           target=str(data.get("account", "")), details={"master_order_id": data.get("master_order_id")})
+            return []
         if msg_type == "FLATTENED":
             self.stats["flattens"] += 1
             self.audit.log("FLATTENED", f"{data.get('account')}: {data.get('orders_cancelled', 0)} órdenes canceladas, "
@@ -188,6 +194,7 @@ class ReplicationService:
                 continue
             matched += 1
             qty = rule.scale(event.quantity)
+            symbol = rule.map_symbol(event.symbol)
             key = (rule.follower_account.lower(), event.order_id)
             if event.msg_type == "EXECUTION" and key in self._sent_pending \
                     and self._follower_filled.get(key, 0) >= self._sent_pending[key]:
@@ -199,7 +206,7 @@ class ReplicationService:
                 self.audit.log("SKIPPED", f"Regla {rule.id[:8]}: qty escalada {qty} <= 0",
                                source=event.account, target=rule.follower_account)
                 continue
-            ok, reason = self.risk.allows(rule.follower_account, qty, event.symbol, event.action)
+            ok, reason = self.risk.allows(rule.follower_account, qty, symbol, event.action)
             if ok and self.accounts is not None and not self.accounts.is_enabled(rule.follower_account):
                 ok, reason = False, f"cuenta {rule.follower_account} desactivada en la consola"
             if ok and self._desync_blocks(rule.follower_account, event):
@@ -211,7 +218,7 @@ class ReplicationService:
                 continue
             task = ReplicationTask(rule_id=rule.id, master_event=event, target_account=rule.follower_account,
                                    scaled_quantity=qty, master_order_id=event.order_id)
-            await self._execute(task)
+            await self._execute(task, rule, symbol)
             tasks.append(task)
         if matched == 0:
             self._explain_no_match(event)
@@ -230,22 +237,38 @@ class ReplicationService:
             reason = f"el símbolo '{event.symbol}' no pasa el filtro ({', '.join(filters)})"
         self.audit.log("NO_RULE", f"No replicado: {reason}", source=event.account)
 
-    async def _execute(self, task: ReplicationTask) -> None:
+    def _entry_params(self, rule: ReplicationRule, ev: MasterEvent, symbol: str) -> dict | None:
+        """Entrada a mercado del maestro: si la regla usa límite con tolerancia y la copia AUMENTA la
+        exposición de la seguidora, se manda como límite. Las salidas van siempre a mercado."""
+        if ev.msg_type != "EXECUTION" or rule.entry_mode != "limit" or self.accounts is None:
+            return None
+        pos = self.accounts.position(rule.follower_account, symbol)
+        buying = ev.action.upper().startswith("BUY")
+        reduces = (pos > 0 and not buying) or (pos < 0 and buying)
+        if reduces:
+            return None
+        return {"entry_mode": "limit", "tolerance_ticks": rule.tolerance_ticks,
+                "entry_timeout_s": rule.entry_timeout_s, "entry_fallback": rule.entry_fallback}
+
+    async def _execute(self, task: ReplicationTask, rule: ReplicationRule | None = None, symbol: str | None = None) -> None:
         ev = task.master_event
+        symbol = symbol or ev.symbol
+        entry = self._entry_params(rule, ev, symbol) if rule else None
         try:
-            await self.bridge.send_order(target_account=task.target_account, action=ev.action, symbol=ev.symbol,
+            await self.bridge.send_order(target_account=task.target_account, action=ev.action, symbol=symbol,
                                          quantity=task.scaled_quantity, order_type=ev.order_type,
                                          master_order_id=task.master_order_id, msg_type=ev.msg_type, price=ev.price,
-                                         limit_price=ev.limit_price, stop_price=ev.stop_price)
+                                         limit_price=ev.limit_price, stop_price=ev.stop_price, entry=entry)
             if self.journal:
                 self.journal.write("out", {"msg_type": ev.msg_type, "account": task.target_account, "action": ev.action,
-                                           "symbol": ev.symbol, "quantity": task.scaled_quantity, "order_type": ev.order_type,
-                                           "master_order_id": task.master_order_id, "rule_id": task.rule_id})
+                                           "symbol": symbol, "quantity": task.scaled_quantity, "order_type": ev.order_type,
+                                           "master_order_id": task.master_order_id, "rule_id": task.rule_id, **(entry or {})})
             task.status = "SENT"
             self.stats["orders_out"] += 1
             if ev.msg_type == "ORDER_PENDING":
                 self._remember(self._sent_pending, (task.target_account.lower(), task.master_order_id), task.scaled_quantity)
-            self.audit.log("REPLICATED", f"[{ev.msg_type}] {ev.action} {task.scaled_quantity} {ev.symbol} -> {task.target_account}",
+            how = f" (límite ±{entry['tolerance_ticks']} ticks)" if entry else ""
+            self.audit.log("REPLICATED", f"[{ev.msg_type}] {ev.action} {task.scaled_quantity} {symbol}{how} -> {task.target_account}",
                            source=ev.account, target=task.target_account,
                            details={"rule_id": task.rule_id, "master_order_id": task.master_order_id})
         except Exception as exc:

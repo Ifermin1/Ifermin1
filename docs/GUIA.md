@@ -30,8 +30,16 @@ versión de escritorio).
    - `API_TOKEN=` un token largo tuyo (es la única llave de la consola).
 5. Instalar el addon en NinjaTrader: `scripts\update.ps1` copia `ninjatrader\TradePilotXBridge.cs` a la carpeta de AddOns.
    Después, en NinjaTrader: *New → NinjaScript Editor → F5* (compilar) y **reiniciar NinjaTrader**.
-   En *New → NinjaScript Output* debe aparecer `[TradePilotX] Bridge v1.6 online`.
+   En *New → NinjaScript Output* debe aparecer `[TradePilotX] Bridge v1.7 online`.
 6. Arrancar el engine: `powershell -ExecutionPolicy Bypass -File scripts\run_engine.ps1`. Imprime las URLs de la consola.
+7. (Recomendado) Arranque automático con Windows y reinicio si se cae, PowerShell **como administrador**, una vez:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File scripts\install_autostart.ps1
+   ```
+   A partir de ahí el engine arranca solo al iniciar sesión (minimizado; los logs quedan en `engine\logs\`). Para arrancarlo o
+   pararlo a mano: `Start-ScheduledTask -TaskName 'TradePilotX Engine'` / `Stop-ScheduledTask -TaskName 'TradePilotX Engine'`.
+   Con la tarea instalada, para actualizar: `Stop-ScheduledTask`, `update.ps1` (arranca una copia en la ventana; ciérrala con
+   Ctrl+C al terminar) y `Start-ScheduledTask`.
 
 ---
 
@@ -77,14 +85,21 @@ ese paso.
 5. **Riesgo → Horario** (recomendado para prop firms): *Copiar desde* (por ejemplo 09:30) y *Cerrar todo a las* (por ejemplo
    15:55, hora local del PC). A esa hora se cancela todo, se cierra todo y no se copia hasta el día siguiente. "Incluir la
    maestra" marcado.
-6. **Copiar** (pestaña): solo para reglas finas con filtro de símbolo (por ejemplo copiar únicamente `NQ`).
+6. **Opciones de ejecución por seguidora** (⚙ en su tarjeta de *Cuentas*):
+   - *Símbolo destino*: vacío = el mismo contrato que la maestra. `MNQ` = la seguidora opera el micro; combínalo con el
+     multiplicador (maestra 1 NQ → seguidora 10 MNQ con ×10). La detección de desincronización ya lo tiene en cuenta.
+   - *Entrada*: "A mercado" copia al instante (más deslizamiento en mercados rápidos). "Límite al precio del maestro ± ticks"
+     manda la entrada como límite al precio de fill del maestro más la tolerancia; si no se llena en la *Espera*, "A mercado
+     lo que falte" o "Cancelar (no entrar)". Con "Cancelar", la seguidora puede quedarse fuera de una operación (aparece
+     `ENTRY_MISSED`). Las salidas van siempre a mercado o con su propia orden. Requiere addon v1.7.
+7. **Copiar** (pestaña): solo para reglas finas con filtro de símbolo (por ejemplo copiar únicamente `NQ`).
 
 ---
 
 ## 5. Operativa diaria
 
-1. Abrir NinjaTrader y conectar la cuenta maestra y las seguidoras. Comprobar en el Output `Bridge v1.6 online`.
-2. Arrancar el engine (`run_engine.ps1`) si no está corriendo. En *Inicio*: modo `NinjaTrader (ZMQ) · addon v1.6`, heartbeat
+1. Abrir NinjaTrader y conectar la cuenta maestra y las seguidoras. Comprobar en el Output `Bridge v1.7 online`.
+2. Arrancar el engine (`run_engine.ps1`) si no está corriendo. En *Inicio*: modo `NinjaTrader (ZMQ) · addon v1.7`, heartbeat
    actualizándose, sin avisos rojos.
 3. En *Cuentas*: las seguidoras que deben copiar con el interruptor encendido y el badge *copiando*.
 4. Operar solo en la cuenta maestra. Todo (entrada, stop, take profit, modificaciones, cancelaciones) se copia.
@@ -109,6 +124,8 @@ ese paso.
 | `BLOCKED` | Copia bloqueada por kill switch, horario, pausa, límite de tamaño o desincronización. El mensaje dice cuál. | Es la protección actuando. Revisar el motivo. |
 | `NO_RULE` | Operación de la maestra sin regla que la copie. | Revisar el maestro de la regla o el filtro de símbolo. |
 | **Addon desactualizado** | El addon compilado es anterior al que exige el engine. | Paso 2 (actualizar y compilar). |
+| `ENTRY_MISSED` | Una entrada límite con tolerancia no se llenó en el plazo y estaba configurada para cancelar. La seguidora no tiene esa operación. | Decidir si entrar a mano o subir la tolerancia / usar "a mercado lo que falte". |
+| `SKIPPED` "cierre de emergencia de la maestra" | Durante 20 s tras cerrar la maestra por emergencia, sus fills no se copian. | Nada; es la protección contra salidas dobles. |
 
 ---
 

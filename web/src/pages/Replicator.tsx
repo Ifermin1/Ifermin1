@@ -30,7 +30,7 @@ export function Replicator() {
   }
 
   const ids = accounts.map((a) => a.account_id);
-  const feed = audit.filter((a) => ["MASTER_RECEIVED", "REPLICATED", "BLOCKED", "SKIPPED", "ERROR", "FOLLOWER_FILL", "FOLLOWER_REJECTED", "NO_RULE", "ACCOUNT_FILL", "DESYNC", "RESYNC", "SYNC_ORDER", "FLATTEN", "FLATTENED", "NAKED_CLOSE", "GAP", "ADDON_RESTART", "DAILY_LOSS_LIMIT", "DAILY_LOSS_WARNING", "SCHEDULED_FLATTEN", "ADDON_SILENT"].includes(a.event_type)).slice(0, 25);
+  const feed = audit.filter((a) => ["MASTER_RECEIVED", "REPLICATED", "BLOCKED", "SKIPPED", "ERROR", "FOLLOWER_FILL", "FOLLOWER_REJECTED", "NO_RULE", "ACCOUNT_FILL", "DESYNC", "RESYNC", "SYNC_ORDER", "FLATTEN", "FLATTENED", "NAKED_CLOSE", "GAP", "ADDON_RESTART", "DAILY_LOSS_LIMIT", "DAILY_LOSS_WARNING", "SCHEDULED_FLATTEN", "ADDON_SILENT", "ENTRY_MISSED"].includes(a.event_type)).slice(0, 25);
 
   return (
     <div className="grid">

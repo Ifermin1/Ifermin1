@@ -124,6 +124,9 @@ Documentación interactiva en `/docs` (Swagger) cuando el engine está arrancado
 Nivel 2 (hecho): pérdida diaria máxima con el P&L real del addon (`DAILY_LOSS_WARNING` al 80 %, `DAILY_LOSS_LIMIT` pausa y
 cierra; no se reanuda mientras el P&L siga por debajo), ventana horaria con cierre programado (`SCHEDULED_FLATTEN`, bloqueo
 hasta el día siguiente, `reopen` manual), tamaño máximo de posición resultante, y vigilancia del heartbeat (`ADDON_SILENT`).
+Nivel 3 (hecho): CI en GitHub (pytest, build y escenarios contra el addon simulado), arranque automático del engine
+(tarea programada con reinicio), mapeo de símbolo por seguidora (`target_root`), entradas límite con tolerancia y plazo
+(`entry_mode`, addon v1.7), autocuración del canal de eventos (`RESUBSCRIBE`).
 Pendiente: avisos por Telegram.
 
 ## 7. Próximos pasos sugeridos

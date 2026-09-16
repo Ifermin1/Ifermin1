@@ -349,3 +349,17 @@ async def test_heartbeat_watchdog(container):
     container.bridge.health.last_heartbeat = datetime.now()
     await container.risk.check()
     assert container.risk.addon_silent is False
+
+
+async def test_link_with_execution_options_and_persistence(client: AsyncClient, container):
+    r = await client.put("/api/accounts/Sim102/link", json={"master_account": "Sim101", "multiplier": 10, "target_root": "mnq",
+                                                             "entry_mode": "limit", "tolerance_ticks": 2})
+    assert r.status_code == 200 and r.json()["target_root"] == "MNQ" and r.json()["entry_mode"] == "limit"
+    # quitar el mapeo explícitamente
+    r = await client.put("/api/accounts/Sim102/link", json={"master_account": "Sim101", "multiplier": 10, "target_root": ""})
+    assert r.json()["target_root"] is None and r.json()["entry_mode"] == "limit"
+    r = await client.put("/api/accounts/Sim102/link", json={"master_account": "Sim101", "entry_mode": "nope"})
+    assert r.status_code == 422
+    from tradepilot.infrastructure.persistence.sqlite_store import SQLiteStore
+    rules = container.store.get_all_rules()
+    assert rules[0].entry_mode == "limit" and rules[0].tolerance_ticks == 2

@@ -3,7 +3,15 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 
-class RuleCreate(BaseModel):
+class ExecutionOptions(BaseModel):
+    target_root: Optional[str] = None                      # "MNQ" para operar el micro
+    entry_mode: Optional[str] = Field(default=None, pattern="^(market|limit)$")
+    tolerance_ticks: Optional[int] = Field(default=None, ge=0, le=50)
+    entry_timeout_s: Optional[int] = Field(default=None, ge=1, le=120)
+    entry_fallback: Optional[str] = Field(default=None, pattern="^(market|cancel)$")
+
+
+class RuleCreate(ExecutionOptions):
     master_account: str = Field(min_length=1)
     follower_account: str = Field(min_length=1)
     multiplier: float = Field(default=1.0, gt=0)
@@ -11,7 +19,7 @@ class RuleCreate(BaseModel):
     enabled: bool = True
 
 
-class RuleUpdate(BaseModel):
+class RuleUpdate(ExecutionOptions):
     master_account: Optional[str] = None
     follower_account: Optional[str] = None
     multiplier: Optional[float] = Field(default=None, gt=0)
@@ -50,7 +58,7 @@ class MockEventRequest(BaseModel):
     price: Optional[float] = None
 
 
-class LinkRequest(BaseModel):
+class LinkRequest(ExecutionOptions):
     master_account: str = Field(min_length=1)
     multiplier: float = Field(default=1.0, gt=0)
     enabled: bool = True

@@ -40,7 +40,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 {
     public class TradePilotXBridge : AddOnBase
     {
-        private const string BridgeVersion = "1.6";
+        private const string BridgeVersion = "1.7";
 
         // ---- configuración ------------------------------------------------
         private class BridgeConfig
@@ -92,6 +92,9 @@ namespace NinjaTrader.NinjaScript.AddOns
         // (stop / take profit): sus fills los hace la propia orden del follower. Una entrada a mercado NO está aquí:
         // cada fill parcial del master se copia por separado.
         private readonly ConcurrentDictionary<string, bool> pendingCopies = new ConcurrentDictionary<string, bool>();
+        // Entradas límite con tolerancia: si no se llenan a tiempo, a mercado lo que falte (o cancelar)
+        private class EntryWatch { public Order Order; public DateTime Deadline; public string Fallback; public Account Account; public string Symbol; public string Action; public string Key; public string MasterId; }
+        private readonly ConcurrentDictionary<string, EntryWatch> entryWatches = new ConcurrentDictionary<string, EntryWatch>();
         // Cuentas follower cuyas órdenes/ejecuciones ya escuchamos (ACK de vuelta a TradePilot)
         private readonly ConcurrentDictionary<string, Account> followers = new ConcurrentDictionary<string, Account>();
         private readonly object lifecycleLock = new object();
@@ -152,7 +155,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                     };
 
                     priceTimer = new NetMQTimer(TimeSpan.FromMilliseconds(Math.Max(50, cfg.PriceThrottleMs)));
-                    priceTimer.Elapsed += (s, e) => FlushPrices();
+                    priceTimer.Elapsed += (s, e) => { FlushPrices(); CheckEntryTimeouts(); };
                     heartbeatTimer = new NetMQTimer(TimeSpan.FromMilliseconds(Math.Max(1000, cfg.HeartbeatMs)));
                     heartbeatTimer.Elapsed += (s, e) =>
                     {
@@ -170,7 +173,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                     foreach (string sym in cfg.PriceInstruments)
                         EnsurePriceFeed(sym);
 
-                    Info(string.Format("Bridge v{0} online. master={1} pub={2} sub={3} sync={4} (v1.6)",
+                    Info(string.Format("Bridge v{0} online. master={1} pub={2} sub={3} sync={4} (v1.7: entradas límite con tolerancia)",
                         BridgeVersion, cfg.MasterAccount, cfg.MasterPort, cfg.FollowerPort, cfg.SyncPort));
                 }
                 catch (Exception ex)
@@ -508,8 +511,12 @@ namespace NinjaTrader.NinjaScript.AddOns
                         // Entrada a mercado del master: cada fill (parcial) llega como EXECUTION distinta y se copia tal cual.
                         if (existing == null || !pendingCopies.ContainsKey(key))
                         {
-                            SubmitNew(account, symbol, Get(m, "action"), OrderType.Market, qty, 0, 0,
-                                key + "#" + Get(m, "execution_id"), masterOrderId);
+                            string entryKey = key + "#" + Get(m, "execution_id");
+                            if (Get(m, "entry_mode").ToLowerInvariant() == "limit" && price > 0)
+                                SubmitLimitEntry(account, symbol, Get(m, "action"), qty, price, (int)Num(m, "tolerance_ticks"),
+                                    (int)NumOr(m, "entry_timeout_s", 5), Get(m, "entry_fallback"), entryKey, masterOrderId);
+                            else
+                                SubmitNew(account, symbol, Get(m, "action"), OrderType.Market, qty, 0, 0, entryKey, masterOrderId);
                             return;
                         }
                         // Copia de una orden PENDIENTE del master (stop / TP): su fill lo hace la propia orden del follower.
@@ -580,6 +587,64 @@ namespace NinjaTrader.NinjaScript.AddOns
             followerOrders[key] = order;
             account.Submit(new[] { order });
             Info(string.Format("Enviada a {0}: {1} {2} {3} {4} (master #{5})", account.Name, action, qty, symbol, type, masterOrderId));
+        }
+
+        /// <summary>Entrada como límite al precio del master +/- tolerancia (en ticks del instrumento del follower).
+        /// Si no se llena en entry_timeout_s: fallback "market" manda a mercado lo que falte; "cancel" la cancela.</summary>
+        private void SubmitLimitEntry(Account account, string symbol, string action, int qty, double refPrice, int ticks,
+            int timeoutS, string fallback, string key, string masterOrderId)
+        {
+            Instrument instrument = Instrument.GetInstrument(symbol);
+            if (instrument == null) { Warn("Instrumento desconocido: " + symbol); return; }
+            if (qty <= 0) { Warn("Cantidad inválida para " + key); return; }
+            OrderAction oa = ParseAction(action);
+            bool buying = oa == OrderAction.Buy || oa == OrderAction.BuyToCover;
+            double tick = instrument.MasterInstrument.TickSize;
+            double limit = instrument.MasterInstrument.RoundToTickSize(refPrice + (buying ? 1 : -1) * ticks * tick);
+            AttachFollower(account);
+            Order order = account.CreateOrder(instrument, oa, OrderType.Limit, OrderEntry.Manual, TimeInForce.Day,
+                qty, limit, 0, string.Empty, "TPX " + masterOrderId, Core.Globals.MaxDate, null);
+            followerOrders[key] = order;
+            account.Submit(new[] { order });
+            entryWatches[key] = new EntryWatch { Order = order, Deadline = DateTime.Now.AddSeconds(Math.Max(1, timeoutS)),
+                Fallback = (fallback ?? "market").ToLowerInvariant(), Account = account, Symbol = symbol, Action = action, Key = key, MasterId = masterOrderId };
+            Info(string.Format("Entrada límite a {0}: {1} {2} {3} @ {4} (master {5} ±{6} ticks, {7} s, luego {8})",
+                account.Name, action, qty, symbol, limit, refPrice, ticks, timeoutS, fallback));
+        }
+
+        private void CheckEntryTimeouts()
+        {
+            if (entryWatches.IsEmpty) return;
+            DateTime now = DateTime.Now;
+            foreach (var kv in entryWatches.ToList())
+            {
+                EntryWatch w = kv.Value;
+                Order o = w.Order;
+                if (!IsLive(o) || o.OrderState == OrderState.Filled)
+                {
+                    EntryWatch dummy; entryWatches.TryRemove(kv.Key, out dummy);
+                    continue;
+                }
+                if (now < w.Deadline) continue;
+                EntryWatch gone; entryWatches.TryRemove(kv.Key, out gone);
+                int remaining = o.Quantity - o.Filled;
+                try
+                {
+                    if (IsWorking(o)) w.Account.Cancel(new[] { o });
+                    if (w.Fallback == "market" && remaining > 0)
+                    {
+                        Info(string.Format("Entrada límite {0} sin llenar ({1}/{2}) tras el plazo: {3} a mercado", w.Key, o.Filled, o.Quantity, remaining));
+                        SubmitNew(w.Account, w.Symbol, w.Action, OrderType.Market, remaining, 0, 0, w.Key + "#mkt", w.MasterId);
+                    }
+                    else
+                    {
+                        Warn(string.Format("Entrada límite {0} cancelada sin llenar ({1}/{2}): la seguidora NO tiene esa entrada", w.Key, o.Filled, o.Quantity));
+                        Publish(Json.Obj("msg_type", "ENTRY_MISSED", "account", w.Account.Name, "symbol", w.Symbol, "action", w.Action,
+                            "quantity", remaining, "master_order_id", w.MasterId, "timestamp", Now()));
+                    }
+                }
+                catch (Exception ex) { Error("CheckEntryTimeouts: " + ex.Message); }
+            }
         }
 
         /// <summary>Con AccountFilter vacío: la master y las cuentas cuya conexión está activa.</summary>

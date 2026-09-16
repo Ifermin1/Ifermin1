@@ -11,6 +11,7 @@ Uso:  python scripts/fake_ninja.py            (una operación del maestro cada 5
       python scripts/fake_ninja.py --reject   (los followers rechazan las órdenes)
       python scripts/fake_ninja.py --old-addon (imita un addon sin GET_ACCOUNTS_ALL)
       python scripts/fake_ninja.py --manual   (no opera solo; petición "EMIT|BUY|1" por 5557 dispara una operación)
+      python scripts/fake_ninja.py --no-fill-limits (las entradas límite quedan trabajando: prueba el fallback del addon)
 """
 import json
 import random
@@ -48,6 +49,7 @@ poller = zmq.Poller(); poller.register(rep, zmq.POLLIN); poller.register(sub, zm
 print("fake NinjaTrader escuchando en 5555/5556/5557 (Ctrl+C para salir)")
 
 once, reject, manual = "--once" in sys.argv, "--reject" in sys.argv, "--manual" in sys.argv
+no_fill_limits = "--no-fill-limits" in sys.argv
 price = 20000.0
 next_emit, next_hb, next_price, emitted = time.time() + 2, time.time() + 5, time.time() + 0.25, 0
 
@@ -112,9 +114,15 @@ while True:
             fid = "F" + uuid.uuid4().hex[:6]
             base = {"account": o["account"], "action": o["action"], "symbol": o["symbol"], "quantity": o["quantity"],
                     "order_type": o["order_type"], "order_id": fid, "master_order_id": o["master_order_id"], "timestamp": now()}
+            is_limit_entry = o.get("entry_mode") == "limit"
+            if is_limit_entry:
+                print(f"  entrada límite: tolerancia {o.get('tolerance_ticks')} ticks, {o.get('entry_timeout_s')} s, luego {o.get('entry_fallback')}")
             if reject:
                 send({**base, "msg_type": "ORDER_STATUS", "filled": 0, "price": 0, "limit_price": 0, "stop_price": 0,
                       "state": "Rejected", "error": "OrderRejected", "native_error": "Insufficient margin"})
+            elif is_limit_entry and no_fill_limits:
+                send({**base, "msg_type": "ORDER_STATUS", "filled": 0, "price": 0, "limit_price": o.get("price", 0), "stop_price": 0,
+                      "state": "Working", "error": "", "native_error": ""})
             else:
                 send({**base, "msg_type": "ORDER_STATUS", "filled": o["quantity"], "price": price, "limit_price": 0,
                       "stop_price": 0, "state": "Filled", "error": "", "native_error": ""})

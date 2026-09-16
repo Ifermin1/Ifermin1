@@ -153,3 +153,6 @@ button.link.tiny { padding: 0; color: var(--warn); }
 .acct-last.bad { color: var(--bad); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .kill-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 label.inline.small { font-size: 12px; }
+
+.exec-opts { flex-basis: 100%; display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; padding: 10px 0 0; border-top: 1px dashed var(--line); margin-top: 6px; }
+.exec-opts p { grid-column: 1 / -1; margin: 0; }

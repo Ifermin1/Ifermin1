@@ -35,12 +35,12 @@ class SyncService:
                  and r.follower_account.lower() == follower.lower() and not r.symbol_filter]
         if not rules:
             return None
-        mult = rules[0].multiplier
+        rule = rules[0]
         msnap = self.accounts.accounts.get(master)
         expected: dict[str, int] = {}
         for p in (msnap.open_positions if msnap else []):
-            root = p.symbol.split(" ")[0].upper()
-            expected[root] = expected.get(root, 0) + int(round(p.quantity * mult))
+            root = rule.map_root(p.symbol.split(" ")[0])
+            expected[root] = expected.get(root, 0) + int(round(p.quantity * rule.multiplier))
         return expected
 
     def actual_positions(self, follower: str) -> dict[str, int]:

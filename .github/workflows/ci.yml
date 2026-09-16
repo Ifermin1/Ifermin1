@@ -1,0 +1,44 @@
+name: CI
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  engine:
+    name: Engine (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -e "engine[dev]"
+      - run: cd engine && python -m pytest -q -p no:cacheprovider
+
+  web:
+    name: Consola (tsc + vite build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22", cache: npm, cache-dependency-path: web/package-lock.json }
+      - run: cd web && npm ci --no-audit --no-fund && npm run build
+
+  scenarios:
+    name: Escenarios contra NinjaTrader simulado
+    runs-on: ubuntu-latest
+    needs: [engine, web]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -e "engine[dev]" pyzmq
+      - name: Engine ninja + fake addon + escenarios de protección
+        run: |
+          python scripts/fake_ninja.py --manual > fake.log 2>&1 &
+          sleep 1
+          (cd engine && ENGINE_MODE=ninja API_TOKEN=ci API_PORT=8000 DB_PATH=/tmp/ci.db JOURNAL_DIR= WEB_DIST=/none DESYNC_GRACE_SECONDS=3 python -m tradepilot.main > engine.log 2>&1 &)
+          sleep 4
+          python scripts/ci_scenarios.py
+      - if: failure()
+        run: tail -50 engine.log fake.log

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useStore } from "../lib/store";
 import { ago, money, time } from "../lib/format";
 import { Card, Empty } from "../components/ui";
-import type { Account, Rule } from "../lib/api";
+import type { Account, ExecOptions, Rule } from "../lib/api";
 
 const posText = (a: Account) => a.open_positions.length ? a.open_positions.map((p) => `${p.quantity > 0 ? "L" : "S"}${Math.abs(p.quantity)} ${p.symbol}`).join(", ") : "plana";
 const label = (a: Account) => a.alias ? `${a.alias} · ${a.account_id}` : a.account_id;
@@ -20,6 +20,7 @@ export function Accounts() {
   const detected = health?.bridge.master_account ?? null;
   const [master, setMaster] = useState<string>(detected ?? "");
   const [manage, setManage] = useState(false);
+  const [openOpts, setOpenOpts] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<"connected" | "enabled" | "all">("connected");
   const [busy, setBusy] = useState<string | null>(null);
@@ -37,8 +38,8 @@ export function Accounts() {
     setBusy(acc); setErr(null);
     try { await fn(); } catch (ex) { setErr(ex instanceof Error ? ex.message : String(ex)); } finally { setBusy(null); }
   }
-  const apply = (acc: string, enabled: boolean, multiplier: number) => guard(acc, async () => {
-    const r = await client!.link(acc, master, multiplier, enabled); setRules([...rules.filter((x) => x.id !== r.id), r]);
+  const apply = (acc: string, enabled: boolean, multiplier: number, opts: ExecOptions = {}) => guard(acc, async () => {
+    const r = await client!.link(acc, master, multiplier, enabled, opts); setRules([...rules.filter((x) => x.id !== r.id), r]);
   });
   const remove = (acc: string) => guard(acc, async () => { const id = linkOf(acc)?.id; await client!.unlink(acc, master); setRules(rules.filter((r) => r.id !== id)); });
   const setEnabled = (acc: string, enabled: boolean) => guard(acc, async () => { await client!.setAccount(acc, { enabled }); });
@@ -103,6 +104,7 @@ export function Accounts() {
                   <div className="acct-main">
                     <div className="acct-name"><b>{a.alias || a.account_id}</b>{a.alias && <span className="muted small">{a.account_id}</span>}
                       <ConnBadge a={a} />{l?.trading_halted && <span className="badge bad">pausada</span>}{on && <span className="badge ok">copiando</span>}
+                      {link?.target_root && <span className="chip">→ {link.target_root}</span>}{link?.entry_mode === "limit" && <span className="chip">límite ±{link.tolerance_ticks}</span>}
                     </div>
                     <div className="acct-meta"><span>{money(a.balance)}</span>
                       <span className={a.daily_pnl < 0 ? "bad" : a.daily_pnl > 0 ? "ok" : "muted"}>P&L {money(a.daily_pnl)}</span>
@@ -128,7 +130,25 @@ export function Accounts() {
                     </label>
                     {link && <button className="ghost danger" disabled={busy === a.account_id} onClick={() => void remove(a.account_id)} title="Quitar vínculo">✕</button>}
                     {a.open_positions.length > 0 && <button className="danger-solid small-btn" disabled={busy === a.account_id} onClick={() => void flatten(a.account_id)} title="Cancelar órdenes y cerrar posición">Cerrar</button>}
+                    <button className="ghost small-btn" title="Opciones de ejecución" onClick={() => setOpenOpts(openOpts === a.account_id ? null : a.account_id)}>⚙</button>
                   </div>
+                  {openOpts === a.account_id && (
+                    <div className="exec-opts">
+                      <label>Símbolo destino<input placeholder="igual que la maestra · ej. MNQ" defaultValue={link?.target_root ?? ""}
+                        onBlur={(e) => void apply(a.account_id, link?.enabled ?? false, link?.multiplier ?? 1, { target_root: e.target.value.trim() })} /></label>
+                      <label>Entrada<select value={link?.entry_mode ?? "market"} onChange={(e) => void apply(a.account_id, link?.enabled ?? false, link?.multiplier ?? 1, { entry_mode: e.target.value as "market" | "limit" })}>
+                        <option value="market">A mercado (copia inmediata)</option><option value="limit">Límite al precio del maestro ± ticks</option></select></label>
+                      {(link?.entry_mode ?? "market") === "limit" && <>
+                        <label>Tolerancia (ticks)<input type="number" min="0" max="50" defaultValue={link?.tolerance_ticks ?? 2}
+                          onBlur={(e) => void apply(a.account_id, link?.enabled ?? false, link?.multiplier ?? 1, { tolerance_ticks: Number(e.target.value) })} /></label>
+                        <label>Espera (s)<input type="number" min="1" max="120" defaultValue={link?.entry_timeout_s ?? 5}
+                          onBlur={(e) => void apply(a.account_id, link?.enabled ?? false, link?.multiplier ?? 1, { entry_timeout_s: Number(e.target.value) })} /></label>
+                        <label>Si no se llena<select value={link?.entry_fallback ?? "market"} onChange={(e) => void apply(a.account_id, link?.enabled ?? false, link?.multiplier ?? 1, { entry_fallback: e.target.value as "market" | "cancel" })}>
+                          <option value="market">A mercado lo que falte</option><option value="cancel">Cancelar (no entrar)</option></select></label>
+                      </>}
+                      <p className="muted small">Las salidas (stops, take profits y cierres) van siempre a mercado o con su propia orden. Símbolo destino: la seguidora opera ese contrato (p. ej. maestra NQ, seguidora MNQ con multiplicador ×10). Requiere addon v1.7 para entradas límite.</p>
+                    </div>
+                  )}
                 </li>
               );
             })}

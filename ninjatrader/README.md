@@ -12,7 +12,7 @@ funciona también con el addon anterior (solo verá las conectadas y lo avisará
 2. En NinjaTrader: *New → NinjaScript Editor*, carpeta *AddOns*, abre `TradePilotXBridge` (o crea uno con ese nombre).
 3. Sustituye todo el contenido por el de `TradePilotXBridge.cs` y pulsa **F5** (compilar). Debe compilar sin errores.
 4. Reinicia NinjaTrader (o desactiva y activa el addon). En *Tools → Output* debe aparecer
-   `[TradePilotX] Bridge v1.6 online. master=... (GET_ACCOUNTS_ALL, SET_MASTER disponibles)`.
+   `[TradePilotX] Bridge v1.7 online. master=... (GET_ACCOUNTS_ALL, SET_MASTER disponibles)`.
 
 ## Protocolo (puerto 5557, REQ/REP)
 
@@ -31,6 +31,10 @@ El campo de estado es el `ConnectionStatus` de NinjaTrader (`Connected`, `Discon
 La cuenta maestra inicial se lee de `Documents\NinjaTrader 8\TradePilotX\config.json` (`MasterAccount`) y se puede cambiar desde la consola (v1.2+).
 
 ## Historial
+
+- **1.7**: entradas con tolerancia: si la orden del engine trae `entry_mode=limit`, la copia se manda como límite al precio
+  del master ± `tolerance_ticks` (ticks del instrumento de la seguidora); si no se llena en `entry_timeout_s`, `entry_fallback`
+  "market" manda a mercado lo que falte y "cancel" la cancela (publica `ENTRY_MISSED`). Las salidas siguen a mercado.
 
 - **1.6**: una entrada a mercado del master que se ejecuta en varios fills parciales se copia fill a fill (antes el
   segundo parcial se ignoraba y el follower quedaba corto de contratos). La protección contra salidas dobles se aplica

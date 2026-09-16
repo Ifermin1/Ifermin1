@@ -90,6 +90,11 @@ class RiskService:
             return
         hb = self.bridge.health.last_heartbeat
         now = datetime.now()
+        if hb is None:
+            # al arrancar, dar al addon el tiempo de un heartbeat antes de declararlo mudo
+            self._started_at = getattr(self, "_started_at", now)
+            if (now - self._started_at).total_seconds() < self.heartbeat_timeout:
+                return
         silent = hb is None or (now - hb).total_seconds() > self.heartbeat_timeout
         if silent and not self.addon_silent:
             self.addon_silent = True

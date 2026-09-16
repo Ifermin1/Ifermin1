@@ -279,7 +279,7 @@ class NinjaZmqBridge(BrokerBridge):
             logger.error(f"No se pudo recrear el socket REQ: {exc}")
 
     async def send_order(self, target_account, action, symbol, quantity, order_type, master_order_id,
-                         msg_type="EXECUTION", price=0.0, limit_price=0.0, stop_price=0.0) -> None:
+                         msg_type="EXECUTION", price=0.0, limit_price=0.0, stop_price=0.0, entry=None) -> None:
         if not self._running:
             raise RuntimeError("Puente ZMQ no iniciado")
         payload = {
@@ -287,6 +287,8 @@ class NinjaZmqBridge(BrokerBridge):
             "quantity": quantity, "price": price, "order_type": order_type, "master_order_id": master_order_id,
             "limit_price": limit_price, "stop_price": stop_price,
         }
+        if entry:
+            payload.update(entry)   # entry_mode / tolerance_ticks / entry_timeout_s / entry_fallback
         try:
             await self.pub_socket.send_string(json.dumps(payload))
             self.health.last_msg_out = datetime.now()
