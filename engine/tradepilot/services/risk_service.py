@@ -30,7 +30,7 @@ class RiskService:
         self._silent_since: datetime | None = None
         self._last_resubscribe: datetime | None = None
         self.resubscribe_every = 30.0
-        self._warned_80: set[tuple[str, str]] = set()   # (cuenta, día) avisadas al 80 %
+        self._warned_80: set[tuple[str, str, str]] = set()   # (cuenta, día, loss|profit) avisadas al 80 %
         self.now = datetime.now                       # inyectable en pruebas
         bus.subscribe("risk.naked", self._on_naked)
         self.limits: dict[str, RiskLimit] = {l.account_id: l for l in store.get_risk_limits()}
@@ -82,7 +82,7 @@ class RiskService:
     async def check(self) -> None:
         """Se ejecuta tras cada sincronización de cuentas: heartbeat, pérdida diaria, cierre programado."""
         await self._check_heartbeat()
-        await self._check_daily_loss()
+        await self._check_daily_limits()
         await self._check_schedule()
 
     async def _check_heartbeat(self) -> None:
@@ -120,32 +120,47 @@ class RiskService:
             else:
                 self.audit.log("ADDON_DOWN", "El addon tampoco responde a comandos (PING): NinjaTrader cerrado o addon no cargado")
 
-    async def _check_daily_loss(self) -> None:
+    async def _check_daily_limits(self) -> None:
+        """Pérdida máxima y objetivo de ganancia del día por cuenta (P&L realizado + flotante del addon)."""
         if not self.accounts:
             return
         today = self._today()
         for acc, limit in list(self.limits.items()):
-            if limit.max_daily_loss <= 0:
+            if limit.max_daily_loss <= 0 and limit.max_daily_profit <= 0:
                 continue
             snap = self.accounts.accounts.get(acc)
-            if snap is None:
+            if snap is None or limit.trading_halted:
                 continue
             pnl = snap.daily_pnl
-            if pnl <= -limit.max_daily_loss and not limit.trading_halted:
-                limit.trading_halted, limit.halted_reason, limit.halted_at = True, "daily_loss", datetime.now()
-                self.store.save_risk_limit(limit)
-                self.audit.log("DAILY_LOSS_LIMIT", f"{acc}: P&L del día {pnl:,.2f} alcanzó el límite de -{limit.max_daily_loss:,.2f}. "
-                               "Cuenta pausada y cerrada.", target=acc, details={"pnl": pnl, "limit": limit.max_daily_loss})
-                self.bus.publish_nowait(TOPIC_RISK, self.state().model_dump(mode="json"))
-                if snap.open_positions:
-                    try:
-                        await self.flatten(acc, "límite de pérdida diaria")
-                    except Exception as exc:
-                        self.audit.log("ERROR", f"No se pudo cerrar {acc} tras el límite diario: {exc}. ¡Revisa la cuenta a mano!", target=acc)
-            elif pnl <= -0.8 * limit.max_daily_loss and (acc, today) not in self._warned_80 and not limit.trading_halted:
-                self._warned_80.add((acc, today))
+            if limit.max_daily_loss > 0 and pnl <= -limit.max_daily_loss:
+                await self._halt_daily(limit, snap, "daily_loss", "DAILY_LOSS_LIMIT",
+                                       f"{acc}: P&L del día {pnl:,.2f} alcanzó el límite de -{limit.max_daily_loss:,.2f}. "
+                                       "Cuenta pausada y cerrada.", "límite de pérdida diaria", limit.max_daily_loss)
+            elif limit.max_daily_profit > 0 and pnl >= limit.max_daily_profit:
+                await self._halt_daily(limit, snap, "daily_profit", "DAILY_PROFIT_TARGET",
+                                       f"{acc}: P&L del día {pnl:,.2f} alcanzó el objetivo de +{limit.max_daily_profit:,.2f}. "
+                                       "Cuenta pausada y cerrada para asegurar la ganancia.", "objetivo de ganancia diaria",
+                                       limit.max_daily_profit)
+            elif limit.max_daily_loss > 0 and pnl <= -0.8 * limit.max_daily_loss and (acc, today, "loss") not in self._warned_80:
+                self._warned_80.add((acc, today, "loss"))
                 self.audit.log("DAILY_LOSS_WARNING", f"{acc}: P&L del día {pnl:,.2f}, al 80 % del límite de -{limit.max_daily_loss:,.2f}",
                                target=acc)
+            elif limit.max_daily_profit > 0 and pnl >= 0.8 * limit.max_daily_profit and (acc, today, "profit") not in self._warned_80:
+                self._warned_80.add((acc, today, "profit"))
+                self.audit.log("DAILY_PROFIT_WARNING", f"{acc}: P&L del día {pnl:,.2f}, al 80 % del objetivo de +{limit.max_daily_profit:,.2f}",
+                               target=acc)
+
+    async def _halt_daily(self, limit: RiskLimit, snap, reason: str, event: str, message: str, why: str, value: float) -> None:
+        acc = limit.account_id
+        limit.trading_halted, limit.halted_reason, limit.halted_at = True, reason, datetime.now()
+        self.store.save_risk_limit(limit)
+        self.audit.log(event, message, target=acc, details={"pnl": snap.daily_pnl, "limit": value})
+        self.bus.publish_nowait(TOPIC_RISK, self.state().model_dump(mode="json"))
+        if snap.open_positions:
+            try:
+                await self.flatten(acc, why)
+            except Exception as exc:
+                self.audit.log("ERROR", f"No se pudo cerrar {acc} tras el {why}: {exc}. ¡Revisa la cuenta a mano!", target=acc)
 
     async def _check_schedule(self) -> None:
         s = self.schedule
@@ -237,12 +252,14 @@ class RiskService:
 
     def upsert_limit(self, limit: RiskLimit) -> RiskLimit:
         prev = self.limits.get(limit.account_id)
-        if prev and prev.trading_halted and prev.halted_reason == "daily_loss" and not limit.trading_halted \
-                and limit.max_daily_loss > 0 and self.accounts:
-            snap = self.accounts.accounts.get(limit.account_id)
-            if snap and snap.daily_pnl <= -limit.max_daily_loss:
+        snap = self.accounts.accounts.get(limit.account_id) if self.accounts else None
+        if prev and prev.trading_halted and not limit.trading_halted and snap:
+            if prev.halted_reason == "daily_loss" and limit.max_daily_loss > 0 and snap.daily_pnl <= -limit.max_daily_loss:
                 raise ValueError(f"{limit.account_id} sigue con P&L {snap.daily_pnl:,.2f}, por debajo del límite de "
                                  f"-{limit.max_daily_loss:,.2f}: no se reanuda hoy (sube el límite si de verdad quieres seguir)")
+            if prev.halted_reason == "daily_profit" and limit.max_daily_profit > 0 and snap.daily_pnl >= limit.max_daily_profit:
+                raise ValueError(f"{limit.account_id} sigue con P&L {snap.daily_pnl:,.2f}, por encima del objetivo de "
+                                 f"+{limit.max_daily_profit:,.2f}: no se reanuda hoy (sube el objetivo o quítalo si de verdad quieres seguir)")
         if limit.trading_halted and not limit.halted_reason:
             prev = self.limits.get(limit.account_id)
             if prev and prev.trading_halted:
@@ -254,7 +271,8 @@ class RiskService:
         self.limits[limit.account_id] = limit
         self.store.save_risk_limit(limit)
         self.audit.log("RISK_LIMIT_SET", f"Límites {limit.account_id}: pérdida diaria máx {limit.max_daily_loss}, "
-                       f"tamaño máx {limit.max_position_size}, halted={limit.trading_halted}", target=limit.account_id)
+                       f"objetivo de ganancia {limit.max_daily_profit}, tamaño máx {limit.max_position_size}, "
+                       f"halted={limit.trading_halted}", target=limit.account_id)
         self.bus.publish_nowait(TOPIC_RISK, self.state().model_dump(mode="json"))
         return limit
 
@@ -269,7 +287,8 @@ class RiskService:
         if limit is None:
             return True, None
         if limit.trading_halted:
-            why = {"daily_loss": "límite de pérdida diaria"}.get(limit.halted_reason, "pausa manual")
+            why = {"daily_loss": "límite de pérdida diaria",
+                   "daily_profit": "objetivo de ganancia diaria alcanzado"}.get(limit.halted_reason, "pausa manual")
             return False, f"cuenta {account_id} en pausa ({why})"
         if limit.max_position_size:
             if quantity > limit.max_position_size:

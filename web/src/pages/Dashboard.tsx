@@ -43,6 +43,9 @@ export function Dashboard() {
       {risk?.limits.some((l) => l.trading_halted && l.halted_reason === "daily_loss") && (
         <Card className="alert-card"><strong>Límite de pérdida diaria alcanzado:</strong> {risk.limits.filter((l) => l.halted_reason === "daily_loss").map((l) => l.account_id).join(", ")}. Cuenta pausada y cerrada; se reanuda a mano en <i>Riesgo</i>.</Card>
       )}
+      {risk?.limits.some((l) => l.trading_halted && l.halted_reason === "daily_profit") && (
+        <Card className="alert-card"><strong>Objetivo de ganancia diaria alcanzado:</strong> {risk.limits.filter((l) => l.halted_reason === "daily_profit").map((l) => l.account_id).join(", ")}. Cuenta pausada y cerrada para asegurar la ganancia; se reanuda a mano en <i>Riesgo</i>.</Card>
+      )}
       {risk?.kill_switch && (
         <Card className="alert-card">
           <strong>Kill switch activo.</strong> No se está replicando ninguna orden. {risk.kill_switch_reason && <>Motivo: {risk.kill_switch_reason}.</>}

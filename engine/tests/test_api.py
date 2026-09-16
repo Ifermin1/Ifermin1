@@ -289,6 +289,34 @@ async def test_daily_loss_limit_halts_and_flattens(client: AsyncClient, containe
     assert container.risk.allows("Sim102", 1, "NQ 12-26", "BUY")[0]
 
 
+async def test_daily_profit_target_halts_and_flattens(client: AsyncClient, container):
+    b = container.bridge
+    b.positions[("Sim102", "NQ 12-26")] = 1
+    await client.put("/api/accounts/Sim102/link", json={"master_account": "Sim101"})
+    r = await client.put("/api/risk/limits", json={"account_id": "Sim102", "max_daily_loss": 500, "max_daily_profit": 1000})
+    assert r.status_code == 200 and r.json()["max_daily_profit"] == 1000
+    # 80 % -> aviso; objetivo -> pausa + cierre para asegurar la ganancia
+    b.pnl = {"Sim102": 850.0}
+    await container.accounts.sync_once()
+    assert any(a.event_type == "DAILY_PROFIT_WARNING" for a in container.audit.recent(5))
+    assert container.risk.limits["Sim102"].trading_halted is False
+    b.pnl = {"Sim102": 1020.0}
+    await container.accounts.sync_once()
+    lim = container.risk.limits["Sim102"]
+    assert lim.trading_halted and lim.halted_reason == "daily_profit" and b.flattened == ["Sim102"]
+    assert any(a.event_type == "DAILY_PROFIT_TARGET" for a in container.audit.recent(6))
+    ok, reason = container.risk.allows("Sim102", 1, "NQ 12-26", "BUY")
+    assert not ok and "objetivo de ganancia" in reason
+    # con el P&L aún por encima del objetivo no se reanuda; subiendo el objetivo sí
+    r = await client.put("/api/risk/limits", json={"account_id": "Sim102", "max_daily_profit": 1000, "trading_halted": False})
+    assert r.status_code == 409 and "por encima del objetivo" in r.json()["detail"]
+    r = await client.put("/api/risk/limits", json={"account_id": "Sim102", "max_daily_profit": 2000, "trading_halted": False})
+    assert r.status_code == 200 and r.json()["trading_halted"] is False and r.json()["halted_reason"] == ""
+    assert container.risk.allows("Sim102", 1, "NQ 12-26", "BUY")[0]
+    # el límite persiste en SQLite
+    assert next(l for l in container.store.get_risk_limits() if l.account_id == "Sim102").max_daily_profit == 2000
+
+
 async def test_schedule_window_and_scheduled_flatten(client: AsyncClient, container):
     from datetime import datetime
     b = container.bridge

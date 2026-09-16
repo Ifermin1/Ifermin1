@@ -10,9 +10,10 @@ from tradepilot.domain import DomainModel
 class RiskLimit(DomainModel):
     account_id: str
     max_daily_loss: float = 0.0       # 0 = sin límite (USD, P&L del día realizado + flotante)
+    max_daily_profit: float = 0.0     # 0 = sin objetivo (USD): al alcanzarlo se pausa y cierra para asegurar la ganancia
     max_position_size: int = 0        # 0 = sin límite (contratos por orden y de posición resultante)
     trading_halted: bool = False
-    halted_reason: str = ""           # "" manual; "daily_loss" cuando lo pausó el engine
+    halted_reason: str = ""           # "" manual; "daily_loss" / "daily_profit" cuando lo pausó el engine
     halted_at: Optional[datetime] = None
 
 

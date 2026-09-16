@@ -46,6 +46,7 @@ class FlattenAllRequest(BaseModel):
 class RiskLimitUpsert(BaseModel):
     account_id: str = Field(min_length=1)
     max_daily_loss: float = Field(default=0.0, ge=0)
+    max_daily_profit: float = Field(default=0.0, ge=0)
     max_position_size: int = Field(default=0, ge=0)
     trading_halted: bool = False
 

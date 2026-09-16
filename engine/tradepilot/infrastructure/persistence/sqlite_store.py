@@ -65,6 +65,8 @@ class SQLiteStore:
             if "halted_reason" not in rcols:
                 self._conn.execute("ALTER TABLE risk_limits ADD COLUMN halted_reason TEXT DEFAULT ''")
                 self._conn.execute("ALTER TABLE risk_limits ADD COLUMN halted_at TEXT")
+            if "max_daily_profit" not in rcols:
+                self._conn.execute("ALTER TABLE risk_limits ADD COLUMN max_daily_profit REAL DEFAULT 0")
 
     # ---- reglas ----
     def get_all_rules(self) -> list[ReplicationRule]:
@@ -121,6 +123,7 @@ class SQLiteStore:
         with self._lock:
             rows = self._conn.execute("SELECT * FROM risk_limits").fetchall()
         return [RiskLimit(account_id=r["account_id"], max_daily_loss=r["max_daily_loss"] or 0.0,
+                          max_daily_profit=r["max_daily_profit"] or 0.0,
                           max_position_size=r["max_position_size"] or 0, trading_halted=bool(r["trading_halted"]),
                           halted_reason=r["halted_reason"] or "",
                           halted_at=datetime.fromisoformat(r["halted_at"]) if r["halted_at"] else None)
@@ -129,9 +132,9 @@ class SQLiteStore:
     def save_risk_limit(self, limit: RiskLimit) -> None:
         with self._lock, self._conn:
             self._conn.execute(
-                "INSERT OR REPLACE INTO risk_limits (account_id, max_daily_loss, max_position_size, trading_halted, halted_reason, halted_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (limit.account_id, limit.max_daily_loss, limit.max_position_size, limit.trading_halted,
+                "INSERT OR REPLACE INTO risk_limits (account_id, max_daily_loss, max_daily_profit, max_position_size, trading_halted, "
+                "halted_reason, halted_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (limit.account_id, limit.max_daily_loss, limit.max_daily_profit, limit.max_position_size, limit.trading_halted,
                  limit.halted_reason, limit.halted_at.isoformat() if limit.halted_at else None))
 
     # ---- cuentas conocidas ----

@@ -82,6 +82,9 @@ ese paso.
      firm (MFF: 3 en NQ).
    - *Pérdida diaria máx. ($)*: al llegar, la cuenta se pausa y se cierra sola. Ponlo **por debajo** del límite de la
      evaluación (si la eval permite -1.000, pon 800).
+   - *Ganancia diaria máx. ($)*: al llegar, la cuenta se pausa y se cierra sola para **asegurar la ganancia** (útil para
+     reglas de consistencia del prop firm o para no devolver lo ganado). 0 = sin objetivo. Avisa al 80 % y, como con la
+     pérdida, no se reanuda mientras el P&L del día siga por encima del objetivo (súbelo o quítalo si de verdad quieres seguir).
 5. **Riesgo → Horario** (recomendado para prop firms): *Copiar desde* (por ejemplo 09:30) y *Cerrar todo a las* (por ejemplo
    15:55, hora local del PC). A esa hora se cancela todo, se cierra todo y no se copia hasta el día siguiente. "Incluir la
    maestra" marcado.
@@ -118,6 +121,7 @@ ese paso.
 | `FOLLOWER_REJECTED` | El bróker rechazó una orden copiada; el mensaje trae el motivo (límite de contratos, margen…). | Revisa límites del prop firm y el *Tamaño máx.* en *Riesgo*. Si era un stop, el engine ya cerró la cuenta (`NAKED_CLOSE`). |
 | `NAKED_CLOSE` | Un stop copiado fue rechazado y el engine cerró esa cuenta para no dejarla sin protección. | Comprobar en NinjaTrader que quedó plana. |
 | **Límite de pérdida diaria alcanzado** | La cuenta se pausó y se cerró. | Nada hasta mañana. *Reanudar* solo funciona si el P&L ya no está por debajo del límite. |
+| **Objetivo de ganancia diaria alcanzado** | La cuenta se pausó y se cerró con la ganancia asegurada. | Nada hasta mañana. *Reanudar* solo funciona si subes o quitas el objetivo. |
 | **Sesión cerrada por horario** | Se ejecutó el cierre programado. | Nada. Si de verdad hay que seguir hoy, *Reabrir hoy* en *Riesgo*. |
 | **Sin heartbeat del addon** | NinjaTrader no envía eventos desde hace más de 15 s. No se copia. El engine reconecta solo el canal de eventos (`RESUBSCRIBE`); si tampoco responde a comandos aparece `ADDON_DOWN`. | Si no se recupera en un minuto: comprobar NinjaTrader abierto, conectado y el addon cargado (Output). |
 | **Mensajes perdidos del addon** | Se perdieron eventos entre NinjaTrader y el engine. | Revisar *Cuentas*: si hay desincronización, igualar. Si se repite, avisar. |
