@@ -30,7 +30,11 @@ versión de escritorio).
    - `API_TOKEN=` un token largo tuyo (es la única llave de la consola).
 5. Instalar el addon en NinjaTrader: `scripts\update.ps1` copia `ninjatrader\TradePilotXBridge.cs` a la carpeta de AddOns.
    Después, en NinjaTrader: *New → NinjaScript Editor → F5* (compilar) y **reiniciar NinjaTrader**.
-   En *New → NinjaScript Output* debe aparecer `[TradePilotX] Bridge v2.4 online`.
+   En *New → NinjaScript Output* debe aparecer `[TradePilotX] Bridge v2.5 online`.
+   **Quitar los avisos de voz de NinjaTrader**: por defecto reproduce "order filled", "order cancelled"… por cada orden de
+   cada cuenta; con varias seguidoras son decenas de avisos por operación y frenan a NinjaTrader. En *Tools → Options →
+   General*, apartado *Sounds*, desmarca todos los sonidos de órdenes (order filled, order cancelled, order pending, order
+   rejected, position closed…). Deja si quieres el de *connection lost*.
 6. Arrancar el engine: `powershell -ExecutionPolicy Bypass -File scripts\run_engine.ps1`. Imprime las URLs de la consola.
 7. (Recomendado) Arranque automático con Windows y reinicio si se cae, PowerShell **como administrador**, una vez:
    ```powershell
