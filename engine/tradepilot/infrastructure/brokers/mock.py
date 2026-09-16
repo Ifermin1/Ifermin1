@@ -30,6 +30,8 @@ class MockBridge(BrokerBridge):
         self.flattened: list[str] = []
         self.fill_orders = True   # las órdenes enviadas actualizan la posición del simulador
         self.pnl: dict[str, float] = {}   # P&L del día por cuenta (pruebas)
+        self.unrealized: dict[str, float] = {}   # flotante por cuenta (pruebas)
+        self.noise = 25.0                 # ruido del balance para que el dashboard se mueva (0 en pruebas)
         self.sent_orders: list[dict] = []
         self.watched: list[str] = []      # cuentas por las que el engine pidió WATCH
         self.working_orders: list[tuple[str, WorkingOrder]] = []   # (cuenta, orden) que reporta GET_ORDERS (pruebas)
@@ -119,9 +121,9 @@ class MockBridge(BrokerBridge):
     async def get_accounts(self) -> list[BrokerAccount]:
         self.health.last_sync = datetime.now()
         # pequeño ruido para que el dashboard se mueva
-        return [BrokerAccount(account_id=k, balance=round(v + random.uniform(-25, 25), 2),
+        return [BrokerAccount(account_id=k, balance=round(v + random.uniform(-self.noise, self.noise), 2),
                               connected=k not in self.disconnected, connection="Simulación",
-                              realized_pnl=self.pnl.get(k, 0.0))
+                              realized_pnl=self.pnl.get(k, 0.0), unrealized_pnl=self.unrealized.get(k, 0.0))
                 for k, v in self.accounts.items()]
 
     async def send_orders(self, orders: list[dict]) -> list:

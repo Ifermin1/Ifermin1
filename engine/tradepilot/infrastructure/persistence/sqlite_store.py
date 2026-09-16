@@ -50,6 +50,10 @@ class SQLiteStore:
                     account_id TEXT PRIMARY KEY, enabled BOOLEAN DEFAULT 1, alias TEXT DEFAULT '',
                     first_seen TEXT, last_seen TEXT, last_balance REAL DEFAULT 0
                 );
+                CREATE TABLE IF NOT EXISTS account_peaks (
+                    account_id TEXT PRIMARY KEY, peak_equity REAL, peak_equity_at TEXT,
+                    peak_balance REAL, peak_balance_at TEXT
+                );
                 """
             )
             # migraciones ligeras
@@ -69,6 +73,11 @@ class SQLiteStore:
                 self._conn.execute("ALTER TABLE risk_limits ADD COLUMN halted_at TEXT")
             if "max_daily_profit" not in rcols:
                 self._conn.execute("ALTER TABLE risk_limits ADD COLUMN max_daily_profit REAL DEFAULT 0")
+            if "max_trailing_drawdown" not in rcols:
+                self._conn.execute("ALTER TABLE risk_limits ADD COLUMN max_trailing_drawdown REAL DEFAULT 0")
+                self._conn.execute("ALTER TABLE risk_limits ADD COLUMN drawdown_mode TEXT DEFAULT 'intraday'")
+                self._conn.execute("ALTER TABLE risk_limits ADD COLUMN drawdown_floor_cap REAL DEFAULT 0")
+                self._conn.execute("ALTER TABLE risk_limits ADD COLUMN drawdown_buffer REAL DEFAULT 0")
 
     # ---- reglas ----
     def get_all_rules(self) -> list[ReplicationRule]:
@@ -127,6 +136,8 @@ class SQLiteStore:
         return [RiskLimit(account_id=r["account_id"], max_daily_loss=r["max_daily_loss"] or 0.0,
                           max_daily_profit=r["max_daily_profit"] or 0.0,
                           max_position_size=r["max_position_size"] or 0, trading_halted=bool(r["trading_halted"]),
+                          max_trailing_drawdown=r["max_trailing_drawdown"] or 0.0, drawdown_mode=r["drawdown_mode"] or "intraday",
+                          drawdown_floor_cap=r["drawdown_floor_cap"] or 0.0, drawdown_buffer=r["drawdown_buffer"] or 0.0,
                           halted_reason=r["halted_reason"] or "",
                           halted_at=datetime.fromisoformat(r["halted_at"]) if r["halted_at"] else None)
                 for r in rows]
@@ -135,9 +146,11 @@ class SQLiteStore:
         with self._lock, self._conn:
             self._conn.execute(
                 "INSERT OR REPLACE INTO risk_limits (account_id, max_daily_loss, max_daily_profit, max_position_size, trading_halted, "
-                "halted_reason, halted_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "halted_reason, halted_at, max_trailing_drawdown, drawdown_mode, drawdown_floor_cap, drawdown_buffer) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (limit.account_id, limit.max_daily_loss, limit.max_daily_profit, limit.max_position_size, limit.trading_halted,
-                 limit.halted_reason, limit.halted_at.isoformat() if limit.halted_at else None))
+                 limit.halted_reason, limit.halted_at.isoformat() if limit.halted_at else None,
+                 limit.max_trailing_drawdown, limit.drawdown_mode, limit.drawdown_floor_cap, limit.drawdown_buffer))
 
     def delete_risk_limit(self, account_id: str) -> bool:
         with self._lock, self._conn:
@@ -175,6 +188,23 @@ class SQLiteStore:
     def delete_account(self, account_id: str) -> None:
         with self._lock, self._conn:
             self._conn.execute("DELETE FROM accounts WHERE account_id = ?", (account_id,))
+
+    # ---- máximos (marca de agua) para el drawdown dinámico ----
+    def get_peaks(self) -> dict[str, dict]:
+        with self._lock:
+            rows = self._conn.execute("SELECT * FROM account_peaks").fetchall()
+        return {r["account_id"]: dict(r) for r in rows}
+
+    def save_peak(self, account_id: str, peak_equity: float, peak_equity_at: str | None,
+                  peak_balance: float, peak_balance_at: str | None) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO account_peaks (account_id, peak_equity, peak_equity_at, peak_balance, peak_balance_at) "
+                "VALUES (?, ?, ?, ?, ?)", (account_id, peak_equity, peak_equity_at, peak_balance, peak_balance_at))
+
+    def delete_peak(self, account_id: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM account_peaks WHERE account_id = ?", (account_id,))
 
     # ---- curva de P&L ----
     def add_pnl_samples(self, rows: list[tuple[str, str, float]]) -> None:

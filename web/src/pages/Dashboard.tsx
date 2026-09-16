@@ -50,6 +50,12 @@ export function Dashboard() {
       {risk?.limits.some((l) => l.trading_halted && l.halted_reason === "daily_profit") && (
         <Card className="alert-card"><strong>Objetivo de ganancia diaria alcanzado:</strong> {risk.limits.filter((l) => l.halted_reason === "daily_profit").map((l) => l.account_id).join(", ")}. Cuenta pausada y cerrada para asegurar la ganancia; se reanuda a mano en <i>Riesgo</i>.</Card>
       )}
+      {risk?.limits.some((l) => l.trading_halted && l.halted_reason === "drawdown") && (
+        <Card className="alert-card"><strong>Límite de drawdown alcanzado:</strong> {risk.limits.filter((l) => l.halted_reason === "drawdown").map((l) => l.account_id).join(", ")}. Cuenta pausada y cerrada antes de tocar el suelo del prop firm; se reanuda a mano en <i>Riesgo</i> (solo si vuelve a tener margen).</Card>
+      )}
+      {accounts.some((a) => a.enabled && a.drawdown.pct !== null && a.drawdown.pct >= 80 && !limits.get(a.account_id)?.trading_halted) && (
+        <Card className="alert-card"><strong>Drawdown al límite:</strong> {accounts.filter((a) => a.enabled && a.drawdown.pct !== null && a.drawdown.pct >= 80 && !limits.get(a.account_id)?.trading_halted).map((a) => `${a.alias || a.account_id} (${a.drawdown.pct!.toFixed(0)} %, quedan ${Math.round(a.drawdown.room ?? 0)} $)`).join(", ")}. Cerca del suelo del prop firm: reduce o cierra antes de que el engine lo haga por ti.</Card>
+      )}
       {risk?.kill_switch && (
         <Card className="alert-card">
           <strong>Kill switch activo.</strong> No se está replicando ninguna orden. {risk.kill_switch_reason && <>Motivo: {risk.kill_switch_reason}.</>}

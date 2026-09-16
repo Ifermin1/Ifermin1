@@ -126,11 +126,13 @@ Documentación interactiva en `/docs` (Swagger) cuando el engine está arrancado
 | Diagnóstico de incidentes | Diario JSONL (`data/journal/AAAA-MM-DD.jsonl`) con cada mensaje recibido y cada orden enviada | `journal.py` |
 | Addon desactualizado sin saberlo | `MIN_ADDON_VERSION`; aviso rojo en *Inicio* | `/api/health.addon_outdated` |
 | No ver qué stops tiene realmente cada seguidora | `GET_ORDERS` cada 2 s (addon v2.2) → `AccountSnapshot.working_orders`; el panel por cuenta muestra stop/TP con distancia al último tick (`market.price`) | `account_service.apply_orders`, *Inicio* / *Cuentas* |
+| El prop firm cierra la cuenta por drawdown dinámico | Marca de agua por cuenta (`account_peaks`: máximo con flotante y solo cerrado, persistente); `AccountSnapshot.drawdown` (máximo, suelo, margen, % consumido) en `/api/accounts` y WS; `RiskLimit.max_trailing_drawdown` + modo + tope del suelo + colchón: `DRAWDOWN_WARNING` al 80 %, `DRAWDOWN_LIMIT` pausa y cierra al llegar al colchón; `PUT /api/accounts/{id}/peak` fija/reinicia el máximo | `account_service._track_drawdown`, `risk_service._check_drawdown`, *Riesgo* |
 | Cómo va el día sin abrir NinjaTrader | Muestra de P&L por cuenta cada 15 s en SQLite (`pnl_samples`, 3 días) y `GET /api/pnl?hours=` para el gráfico | `account_service._sample_pnl`, `PnlChart` |
 
 Nivel 2 (hecho): pérdida diaria máxima con el P&L real del addon (`DAILY_LOSS_WARNING` al 80 %, `DAILY_LOSS_LIMIT` pausa y
 cierra; no se reanuda mientras el P&L siga por debajo), objetivo de ganancia diaria (`DAILY_PROFIT_WARNING` al 80 %,
-`DAILY_PROFIT_TARGET` pausa y cierra para asegurar la ganancia; misma regla de reanudación), ventana horaria con cierre programado (`SCHEDULED_FLATTEN`, bloqueo
+`DAILY_PROFIT_TARGET` pausa y cierra para asegurar la ganancia; misma regla de reanudación), drawdown dinámico del prop firm
+(`DRAWDOWN_WARNING` al 80 %, `DRAWDOWN_LIMIT` pausa y cierra antes del suelo; máximo persistente y ajustable), ventana horaria con cierre programado (`SCHEDULED_FLATTEN`, bloqueo
 hasta el día siguiente, `reopen` manual), tamaño máximo de posición resultante, y vigilancia del heartbeat (`ADDON_SILENT`).
 Nivel 3 (hecho): CI en GitHub (pytest, build y escenarios contra el addon simulado), arranque automático del engine
 (tarea programada con reinicio), mapeo de símbolo por seguidora (`target_root`), entradas límite con tolerancia y plazo

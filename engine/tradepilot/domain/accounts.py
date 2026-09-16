@@ -65,11 +65,28 @@ class BrokerPosition(DomainModel):
     avg_price: float = 0.0
 
 
+class DrawdownSnapshot(DomainModel):
+    """Drawdown dinámico (trailing) de la cuenta, como lo mide un prop firm: la distancia entre el máximo que llegó a
+    valer la cuenta (marca de agua) y lo que vale ahora. `equity` = balance + flotante."""
+    equity: float = 0.0
+    mode: str = "intraday"                  # "intraday": el máximo cuenta el flotante; "closed": solo el balance (cerrado)
+    peak: float = 0.0                       # máximo alcanzado según el modo
+    peak_at: Optional[datetime] = None
+    drawdown: float = 0.0                   # peak - valor actual (>= 0)
+    limit: float = 0.0                      # drawdown máximo configurado (0 = solo se observa)
+    floor: Optional[float] = None           # nivel al que el prop firm cierra la cuenta (peak - limit, con tope si lo hay)
+    room: Optional[float] = None            # cuánto puede perder aún antes de tocar el suelo
+    pct: Optional[float] = None             # % del drawdown permitido ya consumido
+    buffer: float = 0.0                     # colchón: el engine cierra cuando room <= buffer
+    locked: bool = False                    # el suelo ya no sube (llegó al tope configurado)
+
+
 class AccountSnapshot(DomainModel):
     account_id: str
     balance: float = 0.0
     net_liquidity: float = 0.0
     daily_pnl: float = 0.0
+    drawdown: DrawdownSnapshot = DrawdownSnapshot()
     open_positions: list[PositionSnapshot] = []
     working_orders: list[WorkingOrder] = []
     updated_at: datetime

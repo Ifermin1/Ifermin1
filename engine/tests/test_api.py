@@ -700,3 +700,108 @@ async def test_zmq_bridge_batches_orders_and_falls_back_on_old_addon(monkeypatch
     assert sent[0].startswith("ORDERS|") and all(m.startswith("ORDER|") for m in sent[1:]) and len(sent) == 4
     assert out == ["OK|EXECUTION"] * 3 and br._orders_batch is False
     await br.stop()          # cierra los sockets: un contexto ZMQ con sockets abiertos bloquea la salida del proceso
+
+
+async def test_trailing_drawdown_tracks_peak_warns_and_halts(client: AsyncClient, container):
+    """El drawdown dinámico se mide desde el máximo que llegó a valer la cuenta (balance + flotante); el engine avisa al
+    80 % y pausa/cierra cuando faltan `drawdown_buffer` USD para el suelo, antes de que el prop firm cierre la cuenta."""
+    b = container.bridge
+    b.noise = 0.0
+    b.accounts["Sim102"] = 25_000.0
+    b.positions[("Sim102", "NQ 12-26")] = 2
+    await container.accounts.sync_once()
+    await container.accounts.set_peak("Sim102", None)   # el arranque sincronizó con ruido: evaluación nueva
+    await client.put("/api/accounts/Sim102/link", json={"master_account": "Sim101"})
+    r = await client.put("/api/risk/limits", json={"account_id": "Sim102", "max_trailing_drawdown": 1000, "drawdown_buffer": 100})
+    assert r.status_code == 200 and r.json()["max_trailing_drawdown"] == 1000 and r.json()["drawdown_mode"] == "intraday"
+    await container.accounts.sync_once()
+    dd = container.accounts.accounts["Sim102"].drawdown
+    assert dd.peak == 25_000 and dd.floor == 24_000 and dd.room == 1000 and dd.pct == 0
+    # la cuenta sube: el máximo y el suelo suben con ella (trailing)
+    b.accounts["Sim102"] = 26_000.0
+    await container.accounts.sync_once()
+    dd = container.accounts.accounts["Sim102"].drawdown
+    assert dd.peak == 26_000 and dd.floor == 25_000 and dd.equity == 26_000
+    # flotante en contra: el máximo no baja, el drawdown crece
+    b.unrealized = {"Sim102": -700.0}
+    await container.accounts.sync_once()
+    dd = container.accounts.accounts["Sim102"].drawdown
+    assert dd.peak == 26_000 and dd.drawdown == 700 and dd.room == 300 and dd.pct == 70
+    assert not any(a.event_type == "DRAWDOWN_WARNING" for a in container.audit.recent(10))
+    b.unrealized = {"Sim102": -850.0}
+    await container.accounts.sync_once()
+    assert any(a.event_type == "DRAWDOWN_WARNING" for a in container.audit.recent(5))
+    assert container.risk.limits["Sim102"].trading_halted is False
+    # a 90 del suelo (colchón 100): pausa y cierre
+    b.unrealized = {"Sim102": -910.0}
+    await container.accounts.sync_once()
+    lim = container.risk.limits["Sim102"]
+    assert lim.trading_halted and lim.halted_reason == "drawdown" and b.flattened == ["Sim102"]
+    ev = next(a for a in container.audit.recent(6) if a.event_type == "DRAWDOWN_LIMIT")
+    assert ev.details["floor"] == 25_000 and ev.details["room"] == 90
+    assert "límite de drawdown" in container.risk.allows("Sim102", 1, "NQ 12-26", "BUY")[1]
+    # sigue pegada al suelo: no se reanuda
+    r = await client.put("/api/risk/limits", json={"account_id": "Sim102", "max_trailing_drawdown": 1000, "drawdown_buffer": 100, "trading_halted": False})
+    assert r.status_code == 409 and "suelo" in r.json()["detail"]
+    # con aire de nuevo, sí
+    b.unrealized = {}
+    b.accounts["Sim102"] = 25_600.0
+    await container.accounts.sync_once()
+    r = await client.put("/api/risk/limits", json={"account_id": "Sim102", "max_trailing_drawdown": 1000, "drawdown_buffer": 100, "trading_halted": False})
+    assert r.status_code == 200 and r.json()["trading_halted"] is False
+    # la API expone el drawdown de todas las cuentas, también sin límite configurado
+    accs = {a["account_id"]: a for a in (await client.get("/api/accounts")).json()}
+    assert accs["Sim102"]["drawdown"]["peak"] == 26_000 and accs["Sim102"]["drawdown"]["floor"] == 25_000
+    assert accs["Sim101"]["drawdown"]["limit"] == 0 and accs["Sim101"]["drawdown"]["floor"] is None and accs["Sim101"]["drawdown"]["peak"] > 0
+
+
+async def test_drawdown_floor_cap_locks_and_closed_mode_ignores_floating(client: AsyncClient, container):
+    b = container.bridge
+    b.noise = 0.0
+    b.accounts["Sim102"] = 50_000.0
+    await container.accounts.sync_once()
+    await container.accounts.set_peak("Sim102", None)
+    await client.put("/api/risk/limits", json={"account_id": "Sim102", "max_trailing_drawdown": 2500, "drawdown_floor_cap": 50_100})
+    await container.accounts.sync_once()
+    dd = container.accounts.accounts["Sim102"].drawdown
+    assert dd.floor == 47_500 and not dd.locked
+    b.accounts["Sim102"] = 53_000.0     # suelo natural 50 500 > tope 50 100: se bloquea (regla APEX)
+    await container.accounts.sync_once()
+    dd = container.accounts.accounts["Sim102"].drawdown
+    assert dd.floor == 50_100 and dd.locked and dd.room == 2900
+    # modo "solo cerrado": el flotante no sube el máximo ni cuenta como caída
+    await client.put("/api/risk/limits", json={"account_id": "Sim102", "max_trailing_drawdown": 2500, "drawdown_mode": "closed"})
+    b.unrealized = {"Sim102": 4000.0}
+    await container.accounts.sync_once()
+    dd = container.accounts.accounts["Sim102"].drawdown
+    assert dd.mode == "closed" and dd.peak == 53_000 and dd.drawdown == 0 and dd.floor == 50_500
+    b.unrealized = {"Sim102": -2000.0}
+    await container.accounts.sync_once()
+    dd = container.accounts.accounts["Sim102"].drawdown
+    assert dd.drawdown == 0 and dd.equity == 51_000 and container.risk.limits["Sim102"].trading_halted is False
+
+
+async def test_peak_survives_restart_and_can_be_reset_or_set(client: AsyncClient, container):
+    b = container.bridge
+    b.noise = 0.0
+    b.accounts["Sim102"] = 30_000.0
+    await container.accounts.sync_once()
+    await container.accounts.set_peak("Sim102", None)
+    b.accounts["Sim102"] = 29_000.0
+    await container.accounts.sync_once()
+    assert container.accounts.accounts["Sim102"].drawdown.peak == 30_000
+    # el máximo está guardado: un AccountService nuevo sobre el mismo store lo recupera
+    from tradepilot.services.account_service import AccountService
+    fresh = AccountService(b, container.bus, container.store)
+    await fresh.sync_once()
+    assert fresh.accounts["Sim102"].drawdown.peak == 30_000 and fresh.accounts["Sim102"].drawdown.drawdown == 1000
+    # reiniciar al valor actual (evaluación nueva) y fijar a mano (el prop firm tiene otro máximo)
+    r = await client.put("/api/accounts/Sim102/peak", json={"peak": None})
+    assert r.status_code == 200 and r.json()["drawdown"]["peak"] == 29_000 and r.json()["drawdown"]["drawdown"] == 0
+    r = await client.put("/api/accounts/Sim102/peak", json={"peak": 31_500})
+    assert r.json()["drawdown"]["peak"] == 31_500 and r.json()["drawdown"]["drawdown"] == 2500
+    assert any(a.event_type == "PEAK_SET" for a in container.audit.recent(3))
+    assert (await client.put("/api/accounts/Nope/peak", json={"peak": None})).status_code == 404
+    # tras sincronizar, el máximo fijado a mano se conserva (la cuenta vale menos)
+    await container.accounts.sync_once()
+    assert container.accounts.accounts["Sim102"].drawdown.peak == 31_500

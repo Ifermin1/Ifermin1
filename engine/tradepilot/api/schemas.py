@@ -48,7 +48,15 @@ class RiskLimitUpsert(BaseModel):
     max_daily_loss: float = Field(default=0.0, ge=0)
     max_daily_profit: float = Field(default=0.0, ge=0)
     max_position_size: int = Field(default=0, ge=0)
+    max_trailing_drawdown: float = Field(default=0.0, ge=0)
+    drawdown_mode: str = Field(default="intraday", pattern="^(intraday|closed)$")
+    drawdown_floor_cap: float = Field(default=0.0, ge=0)
+    drawdown_buffer: float = Field(default=0.0, ge=0)
     trading_halted: bool = False
+
+
+class PeakRequest(BaseModel):
+    peak: Optional[float] = Field(default=None, ge=0)   # None = reiniciar el máximo al valor actual de la cuenta
 
 
 class MockEventRequest(BaseModel):

@@ -75,6 +75,7 @@ Si *Cuentas* queda vacío, el addon no está respondiendo en 5557: revisa que Ni
 
 - **Cerrar todo**: en *Riesgo*, "Cerrar todas las seguidoras" o "Cerrar TODO (incluida la maestra)". El kill switch puede cerrar además de bloquear. En *Cuentas*, cada cuenta con posición tiene su botón *Cerrar*.
 - **Desincronización**: si una seguidora no tiene la posición de la maestra × multiplicador durante más de 6 s, aparece en rojo como DESINCRONIZADA, solo se le copian salidas, y el botón *Igualar a la maestra* manda la diferencia a mercado.
+- **Drawdown dinámico del prop firm**: el engine lleva el máximo que llegó a valer cada cuenta (con flotante, guardado entre reinicios) y el suelo que resulta de restarle el drawdown permitido. En *Riesgo* se ve para todas las cuentas; con *Drawdown máx.* configurado avisa al 80 % y pausa y cierra la cuenta cuando faltan los dólares del colchón, antes de que el prop firm la cierre.
 - **Stop rechazado**: si el bróker rechaza un stop copiado, el engine cierra esa cuenta al instante (`CLOSE_ON_STOP_REJECT=true` en `.env`).
 - **Diario**: `engine\data\journal\AAAA-MM-DD.jsonl` guarda todo lo recibido y enviado. Ante cualquier incidente, ese archivo es lo que hay que revisar.
 

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { Account, AuditEvent, RiskLimit, Rule, WorkingOrder } from "../lib/api";
+import type { Account, AuditEvent, Drawdown, RiskLimit, Rule, WorkingOrder } from "../lib/api";
 import type { PriceMap } from "../lib/store";
 import { ago, money, pointValue, pts, root, signedMoney, time } from "../lib/format";
 
@@ -13,6 +13,31 @@ export function livePnl(a: Account, prices: PriceMap): { value: number; live: bo
     floating += (px.last - p.avg_price) * p.quantity * pv;
   }
   return live ? { value: a.realized_pnl + floating, live: true } : { value: a.daily_pnl, live: false };
+}
+
+/** Tono del margen hasta el suelo del drawdown: rojo desde el 80 % consumido, ámbar desde el 50 %. */
+export const ddTone = (d: Drawdown): "ok" | "warn" | "bad" | "muted" => d.pct === null ? "muted" : d.pct >= 80 ? "bad" : d.pct >= 50 ? "warn" : "ok";
+export function DrawdownMeter({ d }: { d: Drawdown }) {
+  const tone = ddTone(d);
+  return (
+    <span className="dd-row" title={`Consumido ${d.pct?.toFixed(0)} % del drawdown permitido (${money(d.limit)}); quedan ${money(d.room ?? 0)} hasta el suelo ${money(d.floor ?? 0)}`}>
+      <span className={`meter ${tone}`}><i style={{ width: `${Math.min(100, Math.max(0, d.pct ?? 0))}%` }} /></span>
+      <span className={`small ${tone}`}>{d.pct?.toFixed(0)} %{d.buffer ? <span className="muted"> · cierre a {money(d.buffer)} del suelo</span> : null}</span>
+    </span>
+  );
+}
+
+/** Drawdown en vivo: la equity con el último tick (si se conoce el valor del punto) y el máximo que subiría con ella. */
+export function liveDrawdown(a: Account, prices: PriceMap): Drawdown {
+  const d = a.drawdown; const pnl = livePnl(a, prices);
+  if (!pnl.live || d.mode === "closed") return d;
+  const equity = a.balance + (pnl.value - a.realized_pnl);
+  const peak = Math.max(d.peak, equity);
+  let floor = d.floor; let locked = d.locked;
+  if (d.limit > 0 && floor !== null && !locked) floor = Math.max(floor, peak - d.limit);
+  const room = floor !== null ? equity - floor : null;
+  const pct = d.limit > 0 && room !== null ? Math.min(100, Math.max(0, ((d.limit - room) / d.limit) * 100)) : null;
+  return { ...d, equity, peak, drawdown: Math.max(0, peak - equity), floor, room, pct, locked };
 }
 
 const kind = (o: WorkingOrder, pos: number): "Stop" | "TP" | "Límite" | "Orden" => {
@@ -35,7 +60,9 @@ export function AccountPanel({ a, role, link, limit, lastFill, lastReject, price
   const orders = [...a.working_orders].sort((x, y) => orderPrice(y) - orderPrice(x));
   const conn = !a.reported ? "no reportada" : a.connected === null ? (a.connection || "sin estado") : a.connected ? "conectada" : "desconectada";
   const connTone = !a.reported || a.connected === null ? "muted" : a.connected ? "ok" : "bad";
-  const cls = ["acct-panel", role, copying ? "copying" : "", a.desync ? "desync" : "", limit?.trading_halted ? "halted" : "", a.connected === false ? "offline" : "", compact ? "compact" : ""].join(" ");
+  const dd = liveDrawdown(a, prices);
+  const ddHot = dd.pct !== null && dd.pct >= 80 && !limit?.trading_halted;
+  const cls = ["acct-panel", role, copying ? "copying" : "", a.desync ? "desync" : "", limit?.trading_halted ? "halted" : "", ddHot ? "dd-hot" : "", a.connected === false ? "offline" : "", compact ? "compact" : ""].join(" ");
   return (
     <article className={cls} data-account={a.account_id}>
       <header className="ap-head">
@@ -45,7 +72,8 @@ export function AccountPanel({ a, role, link, limit, lastFill, lastReject, price
         <div className="ap-badges">
           {role === "master" ? <span className="badge accent">maestra</span> : copying ? <span className="badge ok">copiando ×{link!.multiplier}</span> : <span className="badge muted">sin copiar</span>}
           {link?.target_root && <span className="chip">→ {link.target_root}</span>}
-          {limit?.trading_halted && <span className={`badge ${limit.halted_reason === "daily_profit" ? "ok" : "bad"}`}>{limit.halted_reason === "daily_profit" ? "objetivo logrado" : limit.halted_reason === "daily_loss" ? "pérdida diaria" : "pausada"}</span>}
+          {limit?.trading_halted && <span className={`badge ${limit.halted_reason === "daily_profit" ? "ok" : "bad"}`}>{limit.halted_reason === "daily_profit" ? "objetivo logrado" : limit.halted_reason === "daily_loss" ? "pérdida diaria" : limit.halted_reason === "drawdown" ? "drawdown" : "pausada"}</span>}
+          {ddHot && <span className="badge bad">drawdown {dd.pct!.toFixed(0)} %</span>}
           {a.desync && <span className="badge bad">desincronizada</span>}
           <span className={`badge ${connTone}`}>{conn}</span>
         </div>
@@ -56,6 +84,16 @@ export function AccountPanel({ a, role, link, limit, lastFill, lastReject, price
           <span className="stat-label">P&L hoy {pnl.live && <i className="live-dot" title="Estimado con el último precio" />}</span>
           <span className={`ap-pnl-value ${tone}`}>{pnl.live && "≈ "}{signedMoney(pnl.value)}</span>
           <span className="muted small">{money(a.balance)} · {ago(a.updated_at)}</span>
+        </div>
+
+        <div className="dd-row" data-testid="dd">
+          <div className="dd-line">
+            <span className="stat-label">Drawdown</span>
+            <span className={`num ${dd.drawdown > 0 ? "bad" : "muted"}`}>{dd.drawdown > 0 ? `−${money(dd.drawdown)}` : "0"}</span>
+            <span className="muted">desde el máximo {money(dd.peak)}{dd.peak_at && !compact ? ` (${time(dd.peak_at)})` : ""}</span>
+            {dd.floor !== null && <span className={ddTone(dd)}>· suelo {money(dd.floor)}{dd.locked ? " (bloqueado)" : ""} · quedan {money(dd.room ?? 0)}</span>}
+          </div>
+          {dd.pct !== null && <DrawdownMeter d={dd} />}
         </div>
 
         <div className="ap-pos">

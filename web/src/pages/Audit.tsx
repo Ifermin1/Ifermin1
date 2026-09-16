@@ -9,7 +9,8 @@ const FAMILIES: Record<Exclude<Family, "sistema">, string[]> = {
   bloqueos: ["BLOCKED", "SKIPPED", "TRIMMED", "NO_RULE", "ENTRY_MISSED", "DUPLICATE"],
   errores: ["ERROR", "FOLLOWER_REJECTED", "NAKED_CLOSE", "GAP", "DESYNC", "PHANTOM_ORDER"],
   riesgo: ["KILL_SWITCH_ON", "KILL_SWITCH_OFF", "DAILY_LOSS_WARNING", "DAILY_LOSS_LIMIT", "DAILY_PROFIT_WARNING", "DAILY_PROFIT_TARGET",
-           "FLATTEN", "FLATTENED", "SCHEDULED_FLATTEN", "SESSION_CLOSED", "SESSION_REOPENED", "RISK_LIMIT_SET", "RISK_LIMIT_REMOVED", "SCHEDULE_SET"],
+           "FLATTEN", "FLATTENED", "SCHEDULED_FLATTEN", "SESSION_CLOSED", "SESSION_REOPENED", "RISK_LIMIT_SET", "RISK_LIMIT_REMOVED", "SCHEDULE_SET",
+           "DRAWDOWN_WARNING", "DRAWDOWN_LIMIT", "PEAK_SET"],
 };
 const FAMILY_LABEL: Record<Family, string> = { copia: "Copia", bloqueos: "Bloqueos", errores: "Errores", riesgo: "Riesgo", sistema: "Sistema" };
 export const familyOf = (t: string): Family => (Object.keys(FAMILIES) as Exclude<Family, "sistema">[]).find((f) => FAMILIES[f].includes(t)) ?? "sistema";

@@ -82,6 +82,7 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
     replication.on_restart = risk.on_addon_restart
     accounts.on_positions_refreshed = replication.note_positions_refreshed
     accounts.audit = audit
+    accounts.limits_provider = lambda: risk.limits
     async def _after_sync() -> None:
         # independientes: un fallo en una vigilancia no debe apagar la otra
         for name, fn in (("sincronización", sync.check), ("riesgo", risk.check)):

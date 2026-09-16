@@ -35,6 +35,7 @@ class RiskService:
         self._stale_checks = 0
         self._started_at = datetime.now()
         self._warned_80: set[tuple[str, str, str]] = set()   # (cuenta, día, loss|profit) avisadas al 80 %
+        self._dd_warned: set[str] = set()                     # cuentas avisadas al 80 % del drawdown (se rearma al bajar del 50 %)
         self.now = datetime.now                       # inyectable en pruebas
         bus.subscribe("risk.naked", self._on_naked)
         self.limits: dict[str, RiskLimit] = {l.account_id: l for l in store.get_risk_limits()}
@@ -88,6 +89,7 @@ class RiskService:
         await self._check_heartbeat()
         await self._check_event_channel()
         await self._check_daily_limits()
+        await self._check_drawdown()
         await self._check_schedule()
 
     async def _check_heartbeat(self) -> None:
@@ -205,11 +207,46 @@ class RiskService:
                 self.audit.log("DAILY_PROFIT_WARNING", f"{acc}: P&L del día {pnl:,.2f}, al 80 % del objetivo de +{limit.max_daily_profit:,.2f}",
                                target=acc)
 
-    async def _halt_daily(self, limit: RiskLimit, snap, reason: str, event: str, message: str, why: str, value: float) -> None:
+    async def _check_drawdown(self) -> None:
+        """Drawdown dinámico del prop firm: la cuenta no puede caer más de `max_trailing_drawdown` desde el máximo que llegó a
+        valer (AccountService lleva la marca de agua). Aviso al 80 % consumido; pausa y cierre cuando faltan
+        `drawdown_buffer` USD (o menos) para el suelo, es decir, antes de que el prop firm cierre la cuenta."""
+        if not self.accounts:
+            return
+        for acc, limit in list(self.limits.items()):
+            if limit.max_trailing_drawdown <= 0:
+                self._dd_warned.discard(acc)
+                continue
+            snap = self.accounts.accounts.get(acc)
+            if snap is None or not snap.reported:
+                continue
+            dd = snap.drawdown
+            if dd.floor is None or dd.room is None:
+                continue
+            if limit.trading_halted:
+                continue
+            if dd.room <= limit.drawdown_buffer:
+                await self._halt_daily(limit, snap, "drawdown", "DRAWDOWN_LIMIT",
+                                       f"{acc}: vale {dd.equity:,.2f}, a {dd.room:,.2f} del suelo {dd.floor:,.2f} del drawdown "
+                                       f"(máximo {dd.peak:,.2f} − {limit.max_trailing_drawdown:,.2f}"
+                                       + (f", colchón {limit.drawdown_buffer:,.2f}" if limit.drawdown_buffer else "")
+                                       + "). Cuenta pausada y cerrada antes de que el prop firm la cierre.",
+                                       "límite de drawdown", limit.max_trailing_drawdown,
+                                       extra={"equity": dd.equity, "peak": dd.peak, "floor": dd.floor, "room": dd.room})
+            elif (dd.pct or 0) >= 80 and acc not in self._dd_warned:
+                self._dd_warned.add(acc)
+                self.audit.log("DRAWDOWN_WARNING", f"{acc}: drawdown al {dd.pct:.0f} % ({dd.drawdown:,.2f} de {limit.max_trailing_drawdown:,.2f} "
+                               f"desde el máximo {dd.peak:,.2f}); quedan {dd.room:,.2f} hasta el suelo {dd.floor:,.2f}",
+                               target=acc, details={"equity": dd.equity, "peak": dd.peak, "floor": dd.floor, "room": dd.room, "pct": dd.pct})
+            elif (dd.pct or 0) < 50:
+                self._dd_warned.discard(acc)
+
+    async def _halt_daily(self, limit: RiskLimit, snap, reason: str, event: str, message: str, why: str, value: float,
+                          extra: dict | None = None) -> None:
         acc = limit.account_id
         limit.trading_halted, limit.halted_reason, limit.halted_at = True, reason, datetime.now()
         self.store.save_risk_limit(limit)
-        self.audit.log(event, message, target=acc, details={"pnl": snap.daily_pnl, "limit": value})
+        self.audit.log(event, message, target=acc, details={"pnl": snap.daily_pnl, "limit": value, **(extra or {})})
         self.bus.publish_nowait(TOPIC_RISK, self.state().model_dump(mode="json"))
         if snap.open_positions:
             try:
@@ -315,6 +352,15 @@ class RiskService:
             if prev.halted_reason == "daily_profit" and limit.max_daily_profit > 0 and snap.daily_pnl >= limit.max_daily_profit:
                 raise ValueError(f"{limit.account_id} sigue con P&L {snap.daily_pnl:,.2f}, por encima del objetivo de "
                                  f"+{limit.max_daily_profit:,.2f}: no se reanuda hoy (sube el objetivo o quítalo si de verdad quieres seguir)")
+            if prev.halted_reason == "drawdown" and limit.max_trailing_drawdown > 0:
+                peak = snap.drawdown.peak
+                floor = peak - limit.max_trailing_drawdown
+                if limit.drawdown_floor_cap > 0:
+                    floor = min(floor, limit.drawdown_floor_cap)
+                value = snap.balance if limit.drawdown_mode == "closed" else snap.drawdown.equity
+                if value - floor <= limit.drawdown_buffer:
+                    raise ValueError(f"{limit.account_id} sigue a {value - floor:,.2f} del suelo del drawdown ({floor:,.2f}): no se "
+                                     "reanuda (sube el límite, baja el colchón o ajusta el máximo si de verdad quieres seguir)")
         if limit.trading_halted and not limit.halted_reason:
             prev = self.limits.get(limit.account_id)
             if prev and prev.trading_halted:
@@ -325,8 +371,13 @@ class RiskService:
             limit.halted_reason, limit.halted_at = "", None
         self.limits[limit.account_id] = limit
         self.store.save_risk_limit(limit)
+        if self.accounts:
+            self.accounts.refresh_drawdown(limit.account_id)
         self.audit.log("RISK_LIMIT_SET", f"Límites {limit.account_id}: pérdida diaria máx {limit.max_daily_loss}, "
                        f"objetivo de ganancia {limit.max_daily_profit}, tamaño máx {limit.max_position_size}, "
+                       f"drawdown máx {limit.max_trailing_drawdown} ({'con flotante' if limit.drawdown_mode == 'intraday' else 'solo cerrado'}"
+                       + (f", suelo bloqueado en {limit.drawdown_floor_cap}" if limit.drawdown_floor_cap else "")
+                       + (f", colchón {limit.drawdown_buffer}" if limit.drawdown_buffer else "") + "), "
                        f"halted={limit.trading_halted}", target=limit.account_id)
         self.bus.publish_nowait(TOPIC_RISK, self.state().model_dump(mode="json"))
         return limit
@@ -337,6 +388,8 @@ class RiskService:
         self.store.delete_risk_limit(account_id)
         if limit is None:
             return False
+        if self.accounts:
+            self.accounts.refresh_drawdown(account_id)
         self.audit.log("RISK_LIMIT_REMOVED", f"Límites de {account_id} eliminados: copia sin tope de pérdida, objetivo ni tamaño"
                        + (" (estaba en pausa: se reanuda)" if limit.trading_halted else ""), target=account_id)
         self.bus.publish_nowait(TOPIC_RISK, self.state().model_dump(mode="json"))
@@ -354,7 +407,8 @@ class RiskService:
             return True, None
         if limit.trading_halted:
             why = {"daily_loss": "límite de pérdida diaria",
-                   "daily_profit": "objetivo de ganancia diaria alcanzado"}.get(limit.halted_reason, "pausa manual")
+                   "daily_profit": "objetivo de ganancia diaria alcanzado",
+                   "drawdown": "límite de drawdown"}.get(limit.halted_reason, "pausa manual")
             return False, f"cuenta {account_id} en pausa ({why})"
         if limit.max_position_size:
             if quantity > limit.max_position_size:

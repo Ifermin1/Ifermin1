@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from tradepilot.api.auth import require_token
-from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, RuleCreate, RuleUpdate
+from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, RuleCreate, RuleUpdate
 from tradepilot.container import Container
 from tradepilot.domain.risk import RiskLimit, Schedule
 
@@ -58,6 +58,15 @@ async def set_master(body: MasterRequest, request: Request):
 async def account_settings(account_id: str, body: AccountSettings, request: Request):
     """Activar/desactivar una cuenta o ponerle alias desde la consola."""
     return await _c(request).accounts.set_settings(account_id, body.enabled, body.alias, body.auto)
+
+
+@router.put("/accounts/{account_id}/peak")
+async def set_peak(account_id: str, body: PeakRequest, request: Request):
+    """Fija a mano el máximo (marca de agua) del drawdown dinámico; peak=null lo reinicia al valor actual de la cuenta."""
+    try:
+        return await _c(request).accounts.set_peak(account_id, body.peak)
+    except KeyError:
+        raise HTTPException(404, f"cuenta {account_id} desconocida")
 
 
 @router.delete("/accounts/{account_id}", status_code=204)

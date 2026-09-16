@@ -12,9 +12,12 @@ export type Health = {
 export type Position = { account_id: string; symbol: string; quantity: number; avg_price: number; unrealized_pnl: number };
 export type WorkingOrder = { order_id: string; master_order_id: string; action: string; symbol: string; quantity: number; filled: number;
                              order_type: string; limit_price: number; stop_price: number; state: string };
+/** Drawdown dinámico (trailing) como lo mide el prop firm: distancia entre el máximo que llegó a valer la cuenta y su valor actual. */
+export type Drawdown = { equity: number; mode: "intraday" | "closed"; peak: number; peak_at: string | null; drawdown: number; limit: number;
+                         floor: number | null; room: number | null; pct: number | null; buffer: number; locked: boolean };
 export type Account = { account_id: string; balance: number; net_liquidity: number; daily_pnl: number; open_positions: Position[]; updated_at: string;
                         enabled: boolean; enabled_source: "auto" | "user"; alias: string; connected: boolean | null; connection: string; reported: boolean;
-                        realized_pnl: number; unrealized_pnl: number; desync: boolean; desync_detail: string; working_orders: WorkingOrder[] };
+                        realized_pnl: number; unrealized_pnl: number; desync: boolean; desync_detail: string; working_orders: WorkingOrder[]; drawdown: Drawdown };
 /** Tick de precio del addon (topic market.price), indexado por raíz del símbolo (NQ, MNQ…). */
 export type Price = { symbol: string; last: number; bid: number; ask: number; at: number };
 export type PnlHistory = Record<string, [string, number][]>;
@@ -24,7 +27,9 @@ export type Rule = { id: string; master_account: string; follower_account: strin
 export type ExecOptions = { target_root?: string | null; entry_mode?: "market" | "limit"; tolerance_ticks?: number; entry_timeout_s?: number; entry_fallback?: "market" | "cancel" };
 export type AuditEvent = { id: number | null; timestamp: string; event_type: string; source_account: string | null;
                            target_account: string | null; message: string; details: Record<string, unknown> | null };
-export type RiskLimit = { account_id: string; max_daily_loss: number; max_daily_profit: number; max_position_size: number; trading_halted: boolean; halted_reason: string; halted_at: string | null };
+export type RiskLimit = { account_id: string; max_daily_loss: number; max_daily_profit: number; max_position_size: number;
+                          max_trailing_drawdown: number; drawdown_mode: "intraday" | "closed"; drawdown_floor_cap: number; drawdown_buffer: number;
+                          trading_halted: boolean; halted_reason: string; halted_at: string | null };
 export type Schedule = { enabled: boolean; window_start: string; flatten_at: string; include_master: boolean; last_flatten_day: string };
 export type RiskState = { kill_switch: boolean; kill_switch_reason: string | null; kill_switch_at: string | null; limits: RiskLimit[];
                           schedule: Schedule; session_closed: boolean; addon_silent: boolean };
@@ -80,6 +85,8 @@ export function makeClient(s: Session) {
       req<{ sent: { symbol: string; action: string; quantity: number }[] }>(`/api/accounts/${encodeURIComponent(id)}/resync`, { method: "POST" }),
     upsertLimit: (l: Omit<RiskLimit, "halted_reason" | "halted_at">) => req<RiskLimit>("/api/risk/limits", { method: "PUT", body: JSON.stringify(l) }),
     deleteLimit: (id: string) => req<void>(`/api/risk/limits/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    /** Fija el máximo del drawdown (marca de agua) de una cuenta; null = reiniciarlo al valor actual. */
+    setPeak: (id: string, peak: number | null) => req<Account>(`/api/accounts/${encodeURIComponent(id)}/peak`, { method: "PUT", body: JSON.stringify({ peak }) }),
     setSchedule: (s: Omit<Schedule, "last_flatten_day">) => req<Schedule>("/api/risk/schedule", { method: "PUT", body: JSON.stringify(s) }),
     reopenSession: () => req<RiskState>("/api/risk/reopen", { method: "POST" }),
     mockEvent: (b: Record<string, unknown> = {}) => req<unknown>("/api/mock/master-event", { method: "POST", body: JSON.stringify(b) }),

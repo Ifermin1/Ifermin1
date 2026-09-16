@@ -12,8 +12,13 @@ class RiskLimit(DomainModel):
     max_daily_loss: float = 0.0       # 0 = sin límite (USD, P&L del día realizado + flotante)
     max_daily_profit: float = 0.0     # 0 = sin objetivo (USD): al alcanzarlo se pausa y cierra para asegurar la ganancia
     max_position_size: int = 0        # 0 = sin límite (contratos por orden y de posición resultante)
+    # Drawdown dinámico (trailing) del prop firm: se mide desde el máximo que llegó a valer la cuenta
+    max_trailing_drawdown: float = 0.0  # 0 = solo observar; USD que la cuenta puede caer desde su máximo
+    drawdown_mode: str = "intraday"     # "intraday": el máximo incluye el flotante (APEX, MFF…); "closed": solo balance cerrado
+    drawdown_floor_cap: float = 0.0     # 0 = el suelo sube siempre; si no, el suelo se bloquea al llegar a este valor (APEX: inicial + 100)
+    drawdown_buffer: float = 0.0        # colchón en USD: el engine pausa y cierra cuando faltan <= esto para el suelo
     trading_halted: bool = False
-    halted_reason: str = ""           # "" manual; "daily_loss" / "daily_profit" cuando lo pausó el engine
+    halted_reason: str = ""           # "" manual; "daily_loss" / "daily_profit" / "drawdown" cuando lo pausó el engine
     halted_at: Optional[datetime] = None
 
 

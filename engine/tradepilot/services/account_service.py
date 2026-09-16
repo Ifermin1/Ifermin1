@@ -4,7 +4,7 @@ from datetime import datetime
 from loguru import logger
 
 from tradepilot.core.events import TOPIC_ACCOUNTS, TOPIC_HEALTH, EventBus
-from tradepilot.domain.accounts import AccountSnapshot, BridgeHealth, PositionSnapshot
+from tradepilot.domain.accounts import AccountSnapshot, BridgeHealth, DrawdownSnapshot, PositionSnapshot
 from tradepilot.infrastructure.persistence.sqlite_store import SQLiteStore
 from tradepilot.infrastructure.brokers.base import BrokerBridge
 
@@ -20,6 +20,9 @@ class AccountService:
         self.interval = interval
         self.after_sync = None                 # corrutina a llamar tras cada sincronización (SyncService.check)
         self.on_positions_refreshed = None     # callable(cuenta | None) tras actualizar posiciones (libro de exposición)
+        self.limits_provider = lambda: {}      # {cuenta: RiskLimit} (lo inyecta el contenedor) para el drawdown dinámico
+        # Marca de agua por cuenta: el máximo que llegó a valer (con flotante y solo cerrado). Sobrevive a reinicios.
+        self._peaks: dict[str, dict] = store.get_peaks() if store else {}
         self._watched: set[str] = set()
         self._watch_pending: set[str] = set()   # WATCH que el addon aún no confirmó: se reintenta en cada sync
         self.accounts: dict[str, AccountSnapshot] = {}
@@ -68,6 +71,7 @@ class AccountService:
             snap.connected, snap.connection, snap.reported, snap.updated_at = info.connected, info.connection, True, now
             if self.store:
                 self.store.upsert_account_seen(info.account_id, info.balance, now.isoformat(), snap.enabled, info.connected)
+            self._track_drawdown(snap, now)
         if new_hidden:
             logger.info(f"{new_hidden} cuentas nuevas sin conexión quedan ocultas (se activan solas al conectarse)")
         positions = await self.bridge.get_positions()
@@ -156,6 +160,78 @@ class AccountService:
             if [o.model_dump() for o in snap.working_orders] != [o.model_dump() for o in new]:
                 snap.working_orders = new
 
+    # ---- drawdown dinámico (marca de agua) ----
+    def _track_drawdown(self, snap: AccountSnapshot, now: datetime) -> None:
+        """Actualiza el máximo que llegó a valer la cuenta (equity = balance + flotante, y balance cerrado) y calcula
+        el drawdown según el límite configurado. Es lo que mide el prop firm: si la cuenta baja `limit` desde su máximo,
+        la cierra. Aquí se ve venir y, con límite, el engine actúa antes (RiskService)."""
+        equity = snap.balance + snap.unrealized_pnl
+        pk = self._peaks.get(snap.account_id)
+        if pk is None or pk.get("peak_equity") is None:
+            pk = self._peaks[snap.account_id] = {"peak_equity": equity, "peak_equity_at": now.isoformat(timespec="seconds"),
+                                                 "peak_balance": snap.balance, "peak_balance_at": now.isoformat(timespec="seconds")}
+            changed = True
+        else:
+            changed = False
+            if equity > pk["peak_equity"]:
+                pk["peak_equity"], pk["peak_equity_at"], changed = equity, now.isoformat(timespec="seconds"), True
+            if snap.balance > (pk.get("peak_balance") or 0.0):
+                pk["peak_balance"], pk["peak_balance_at"], changed = snap.balance, now.isoformat(timespec="seconds"), True
+        if changed and self.store:
+            try:
+                self.store.save_peak(snap.account_id, pk["peak_equity"], pk["peak_equity_at"], pk["peak_balance"], pk["peak_balance_at"])
+            except Exception as exc:
+                logger.warning(f"No se pudo guardar el máximo de {snap.account_id}: {exc}")
+        self._compute_drawdown(snap, pk, equity)
+
+    def _compute_drawdown(self, snap: AccountSnapshot, pk: dict, equity: float) -> None:
+        limit = self.limits_provider().get(snap.account_id)
+        mode = limit.drawdown_mode if limit else "intraday"
+        closed = mode == "closed"
+        peak = pk["peak_balance"] if closed else pk["peak_equity"]
+        peak_at = pk.get("peak_balance_at" if closed else "peak_equity_at")
+        value = snap.balance if closed else equity
+        dd = DrawdownSnapshot(equity=round(equity, 2), mode=mode, peak=round(peak, 2),
+                              peak_at=datetime.fromisoformat(peak_at) if peak_at else None,
+                              drawdown=round(max(0.0, peak - value), 2))
+        if limit and limit.max_trailing_drawdown > 0:
+            floor = peak - limit.max_trailing_drawdown
+            if limit.drawdown_floor_cap > 0 and floor >= limit.drawdown_floor_cap:
+                floor, dd.locked = limit.drawdown_floor_cap, True
+            dd.limit, dd.buffer, dd.floor = limit.max_trailing_drawdown, limit.drawdown_buffer, round(floor, 2)
+            dd.room = round(value - floor, 2)
+            dd.pct = round(min(100.0, max(0.0, (limit.max_trailing_drawdown - dd.room) / limit.max_trailing_drawdown * 100)), 1)
+        snap.drawdown = dd
+
+    def refresh_drawdown(self, account_id: str) -> None:
+        """Recalcula el drawdown de una cuenta con el límite actual (tras cambiar los límites en la consola)."""
+        snap, pk = self.accounts.get(account_id), self._peaks.get(account_id)
+        if snap is not None and pk is not None:
+            self._compute_drawdown(snap, pk, snap.balance + snap.unrealized_pnl)
+
+    async def set_peak(self, account_id: str, peak: float | None) -> AccountSnapshot:
+        """Fija a mano el máximo (marca de agua) de una cuenta o, con None, lo reinicia al valor actual. Útil cuando el
+        prop firm tiene otro máximo (la cuenta operó sin el engine) o al empezar una evaluación nueva."""
+        snap = self.accounts.get(account_id)
+        if snap is None:
+            raise KeyError(account_id)
+        now = datetime.now().isoformat(timespec="seconds")
+        equity = snap.balance + snap.unrealized_pnl
+        if peak is None:
+            pk = {"peak_equity": equity, "peak_equity_at": now, "peak_balance": snap.balance, "peak_balance_at": now}
+        else:
+            pk = {"peak_equity": float(peak), "peak_equity_at": now, "peak_balance": float(peak), "peak_balance_at": now}
+        self._peaks[account_id] = pk
+        if self.store:
+            self.store.save_peak(account_id, pk["peak_equity"], pk["peak_equity_at"], pk["peak_balance"], pk["peak_balance_at"])
+        self._compute_drawdown(snap, pk, equity)
+        if self.audit is not None:
+            self.audit.log("PEAK_SET", f"{account_id}: máximo para el drawdown {'reiniciado al valor actual' if peak is None else 'fijado a mano'}: "
+                           f"{pk['peak_equity']:,.2f}" + (f" (suelo {snap.drawdown.floor:,.2f})" if snap.drawdown.floor is not None else ""),
+                           target=account_id, details={"peak": pk["peak_equity"], "floor": snap.drawdown.floor})
+        await self.publish_accounts(force=True)
+        return snap
+
     pnl_sample_seconds = 15.0
     _last_sample: float = 0.0
 
@@ -184,6 +260,7 @@ class AccountService:
     async def publish_accounts(self, force: bool = False) -> None:
         """Publica el snapshot solo si cambió algo relevante (con cientos de cuentas importa)."""
         sig = tuple((a.account_id, a.balance, a.connected, a.enabled, a.alias, a.reported, a.desync, round(a.daily_pnl),
+                     round(a.drawdown.peak), a.drawdown.floor, a.drawdown.pct,
                      tuple((p.symbol, p.quantity) for p in a.open_positions),
                      tuple((o.order_id, o.quantity, o.filled, o.limit_price, o.stop_price, o.state) for o in a.working_orders))
                     for a in self.accounts.values())
@@ -222,8 +299,10 @@ class AccountService:
         if snap is None or snap.reported:
             return False
         del self.accounts[account_id]
+        self._peaks.pop(account_id, None)
         if self.store:
             self.store.delete_account(account_id)
+            self.store.delete_peak(account_id)
         await self.publish_accounts()
         return True
 

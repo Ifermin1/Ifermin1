@@ -102,6 +102,16 @@ ese paso.
    - *Ganancia diaria máx. ($)*: al llegar, la cuenta se pausa y se cierra sola para **asegurar la ganancia** (útil para
      reglas de consistencia del prop firm o para no devolver lo ganado). 0 = sin objetivo. Avisa al 80 % y, como con la
      pérdida, no se reanuda mientras el P&L del día siga por encima del objetivo (súbelo o quítalo si de verdad quieres seguir).
+   - *Drawdown máx. del prop firm ($)*: el **drawdown dinámico (trailing)** de la evaluación. El engine lleva por cada cuenta el
+     **máximo** que llegó a valer (balance + flotante, guardado entre reinicios) y calcula el **suelo** = máximo − drawdown; el
+     suelo sube con cada máximo nuevo y nunca baja. Avisa al 80 % consumido (`DRAWDOWN_WARNING`) y, cuando faltan los dólares de
+     *Cerrar cuando falten* (colchón) para el suelo, pausa y cierra la cuenta (`DRAWDOWN_LIMIT`) **antes** de que el prop firm la
+     cierre. Pon el drawdown real del prop firm (APEX 50K: 2500) y un colchón (100–200 $): el prop firm mide tick a tick y el engine
+     cada 2 s. *El máximo se mide*: "con el flotante" (APEX, MFF, la mayoría) o "solo con lo cerrado" (firms que miden por balance).
+     *El suelo se bloquea en*: para reglas tipo APEX en que el suelo deja de subir al llegar a inicial + 100 (50K → 50100); 0 = sube siempre.
+   - La tarjeta **Drawdown dinámico · todas las cuentas** muestra, con o sin límite, cuánto vale cada cuenta, su máximo, el drawdown
+     actual, el suelo y el margen. *Ajustar máximo* fija el máximo a mano (si el prop firm tiene otro porque la cuenta operó sin el
+     engine) o, vacío, lo reinicia al valor actual (evaluación nueva). Cada panel de cuenta en *Inicio* y *Cuentas* lleva la misma fila.
 5. **Riesgo → Horario** (recomendado para prop firms): *Copiar desde* (por ejemplo 09:30) y *Cerrar todo a las* (por ejemplo
    15:55, hora local del PC). A esa hora se cancela todo, se cierra todo y no se copia hasta el día siguiente. "Incluir la
    maestra" marcado.
@@ -142,6 +152,9 @@ ese paso.
 | `OVERCLOSE_FIX` | La seguidora quedó con posición contraria (o con posición y la maestra plana) justo después de una copia: el bróker llenó una copia que ya había dado por cancelada. El engine la cerró a mercado (el addon 2.4 lo corrige antes por su cuenta). | Comprobar en NinjaTrader que quedó plana. Si ves varios seguidos, revisa la conexión del bróker. |
 | `PHANTOM_ORDER` | Una orden viva sin nada por ejecutar (en el gráfico sale con 0 contratos). No protege nada. El addon 2.4 cancela las copias TPX; las de la maestra no se tocan. | Si sigue ahí, cancélala a mano en NinjaTrader. |
 | **Límite de pérdida diaria alcanzado** | La cuenta se pausó y se cerró. | Nada hasta mañana. *Reanudar* solo funciona si el P&L ya no está por debajo del límite. |
+| `DRAWDOWN_WARNING` | La cuenta consumió el 80 % del drawdown dinámico permitido: está cerca del suelo que el prop firm usa para cerrarla. | Reducir o cerrar. El engine cerrará solo al llegar al colchón configurado. |
+| **Límite de drawdown alcanzado** (`DRAWDOWN_LIMIT`) | A la cuenta le quedaban el colchón o menos hasta el suelo: se pausó y se cerró antes de que el prop firm la cerrara. | *Reanudar* solo funciona si vuelve a tener margen (sube el límite, baja el colchón o ajusta el máximo si de verdad quieres seguir). |
+| `PEAK_SET` | Alguien fijó o reinició a mano el máximo del drawdown de una cuenta. | Nada; comprobar que coincide con el que tiene el prop firm. |
 | **Objetivo de ganancia diaria alcanzado** | La cuenta se pausó y se cerró con la ganancia asegurada. | Nada hasta mañana. *Reanudar* solo funciona si subes o quitas el objetivo. |
 | **Sesión cerrada por horario** | Se ejecutó el cierre programado. | Nada. Si de verdad hay que seguir hoy, *Reabrir hoy* en *Riesgo*. |
 | **Sin heartbeat del addon** | NinjaTrader no envía eventos desde hace más de 15 s. No se copia. El engine reconecta solo el canal de eventos (`RESUBSCRIBE`); si tampoco responde a comandos aparece `ADDON_DOWN`. | Si no se recupera en un minuto: comprobar NinjaTrader abierto, conectado y el addon cargado (Output). |

@@ -267,3 +267,12 @@ table.chart-table td, table.chart-table th { font-size: 12px; white-space: nowra
 .chip-btn.fam-sistema.active { background: var(--muted); color: #0b1220; }
 tr.fam-errores td:nth-child(6) { color: var(--bad); }
 .strip-mobile .strip-item b { font-size: 14px; }
+
+/* drawdown dinámico: barra de lo consumido del margen permitido */
+.dd-row { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.dd-row .dd-line { display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+.meter { position: relative; height: 6px; border-radius: 3px; background: var(--panel); border: 1px solid var(--line); overflow: hidden; min-width: 80px; }
+.meter > i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: var(--ok); }
+.meter.warn > i { background: var(--warn); } .meter.bad > i { background: var(--bad); }
+.meter-cell { min-width: 120px; }
+.acct-panel.dd-hot { border-left-color: var(--bad); }
