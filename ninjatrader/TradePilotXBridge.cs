@@ -9,6 +9,10 @@
 //                                  "GET_ACCOUNTS_ALL" -> "Sim101|50000.0|Connected|MFF;..." (todas)
 //                                  "GET_MASTER"       -> "Sim101"
 //                                  "SET_MASTER|Sim102" -> "OK|Sim102"  (cambia la master en caliente y la guarda)
+//                                  "GET_POSITIONS"    -> "Sim101|NQ SEP26|Long|2|28936.0;..."  (todas las cuentas)
+//                                  "FLATTEN|Sim102"   -> "OK|Sim102|2"  (cancela órdenes y cierra posiciones)
+//                                  "WATCH|Sim102"     -> "OK|Sim102"  (escuchar órdenes/posiciones de un follower)
+//   Todos los mensajes publicados llevan "seq" creciente para detectar pérdidas.
 //
 // Instalación: ver ninjatrader/README.md (requiere NetMQ.dll + AsyncIO.dll en
 // Documents\NinjaTrader 8\bin\Custom y añadirlas como referencias).
@@ -36,7 +40,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 {
     public class TradePilotXBridge : AddOnBase
     {
-        private const string BridgeVersion = "1.4";
+        private const string BridgeVersion = "1.5";
 
         // ---- configuración ------------------------------------------------
         private class BridgeConfig
@@ -87,6 +91,7 @@ namespace NinjaTrader.NinjaScript.AddOns
         // Cuentas follower cuyas órdenes/ejecuciones ya escuchamos (ACK de vuelta a TradePilot)
         private readonly ConcurrentDictionary<string, Account> followers = new ConcurrentDictionary<string, Account>();
         private readonly object lifecycleLock = new object();
+        private long seq;
 
         // ===================================================================
         protected override void OnStateChange()
@@ -157,10 +162,11 @@ namespace NinjaTrader.NinjaScript.AddOns
 
                     Account.AccountStatusUpdate += OnAccountStatusUpdate;
                     AttachMaster();
+                    RebuildState();
                     foreach (string sym in cfg.PriceInstruments)
                         EnsurePriceFeed(sym);
 
-                    Info(string.Format("Bridge v{0} online. master={1} pub={2} sub={3} sync={4} (GET_ACCOUNTS_ALL, SET_MASTER; sin duplicados ni salidas dobles)",
+                    Info(string.Format("Bridge v{0} online. master={1} pub={2} sub={3} sync={4} (v1.5: FLATTEN, GET_POSITIONS, seq)",
                         BridgeVersion, cfg.MasterAccount, cfg.MasterPort, cfg.FollowerPort, cfg.SyncPort));
                 }
                 catch (Exception ex)
@@ -180,7 +186,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                 DetachMaster();
                 foreach (Account f in followers.Values)
                 {
-                    try { f.OrderUpdate -= OnFollowerOrder; f.ExecutionUpdate -= OnFollowerExecution; } catch { }
+                    try { f.OrderUpdate -= OnFollowerOrder; f.ExecutionUpdate -= OnFollowerExecution; f.PositionUpdate -= OnFollowerPosition; } catch { }
                 }
                 followers.Clear();
                 foreach (var feed in marketFeeds.Values)
@@ -248,6 +254,39 @@ namespace NinjaTrader.NinjaScript.AddOns
                 Info("Cuenta master cambiada a " + name + (master == null ? " (aún no conectada)" : ""));
             }
             return "OK|" + name;
+        }
+
+        /// <summary>Tras un reinicio del addon, recupera las órdenes TPX vivas de los followers y las pendientes
+        /// del master para no volver a copiarlas ni a publicarlas.</summary>
+        private void RebuildState()
+        {
+            int recovered = 0;
+            try
+            {
+                List<Account> all;
+                lock (Account.All) all = Account.All.ToList();
+                foreach (Account a in all)
+                {
+                    List<Order> orders;
+                    lock (a.Orders) orders = a.Orders.ToList();
+                    foreach (Order o in orders)
+                    {
+                        if (!IsLive(o)) continue;
+                        if (a.Name == cfg.MasterAccount)
+                        {
+                            if (o.OrderType != OrderType.Market) pendingPublished[OrderKey(o)] = true;
+                        }
+                        else if ((o.Name ?? "").StartsWith("TPX "))
+                        {
+                            followerOrders[a.Name + "|" + MasterIdFromName(o.Name)] = o;
+                            AttachFollower(a);
+                            recovered++;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex) { Error("RebuildState: " + ex.Message); }
+            if (recovered > 0) Info("Estado recuperado: " + recovered + " órdenes TPX vivas en followers");
         }
 
         private void DetachMaster()
@@ -573,6 +612,7 @@ namespace NinjaTrader.NinjaScript.AddOns
             {
                 account.OrderUpdate += OnFollowerOrder;
                 account.ExecutionUpdate += OnFollowerExecution;
+                account.PositionUpdate += OnFollowerPosition;
                 Info("Escuchando follower " + account.Name);
             }
         }
@@ -648,6 +688,70 @@ namespace NinjaTrader.NinjaScript.AddOns
                 && o.OrderState != OrderState.Rejected && o.OrderState != OrderState.Unknown;
         }
 
+        private void OnFollowerPosition(object sender, PositionEventArgs e)
+        {
+            try
+            {
+                string account = e.Position != null && e.Position.Account != null ? e.Position.Account.Name : "";
+                Publish(Json.Obj(
+                    "msg_type", "POSITION",
+                    "account", account,
+                    "symbol", e.Position.Instrument.FullName,
+                    "market_position", e.MarketPosition.ToString(),
+                    "quantity", e.Quantity,
+                    "avg_price", e.AveragePrice,
+                    "timestamp", Now()));
+            }
+            catch (Exception ex) { Error("OnFollowerPosition: " + ex.Message); }
+        }
+
+        /// <summary>Cierre de emergencia: cancela todas las órdenes vivas de la cuenta y cierra sus posiciones.</summary>
+        private string Flatten(string accountName)
+        {
+            Account account;
+            lock (Account.All) account = Account.All.FirstOrDefault(a => a.Name == accountName);
+            if (account == null) return "ERROR|cuenta desconocida: " + accountName;
+            int closed = 0;
+            try
+            {
+                List<Instrument> instruments;
+                lock (account.Positions) instruments = account.Positions.Where(p => p.Quantity != 0).Select(p => p.Instrument).Distinct().ToList();
+                List<Order> live;
+                lock (account.Orders) live = account.Orders.Where(IsLive).ToList();
+                if (live.Count > 0) { try { account.Cancel(live); } catch (Exception cx) { Warn("Flatten: cancelando órdenes: " + cx.Message); } }
+                if (instruments.Count > 0)
+                {
+                    account.Flatten(instruments);   // NinjaTrader cancela lo que quede y cierra a mercado
+                    closed = instruments.Count;
+                }
+                Info(string.Format("FLATTEN {0}: {1} órdenes canceladas, {2} instrumentos cerrados", accountName, live.Count, closed));
+                Publish(Json.Obj("msg_type", "FLATTENED", "account", accountName, "orders_cancelled", live.Count,
+                    "instruments_closed", closed, "timestamp", Now()));
+                return "OK|" + accountName + "|" + closed;
+            }
+            catch (Exception ex)
+            {
+                Error("Flatten " + accountName + ": " + ex.Message);
+                return "ERROR|" + ex.Message;
+            }
+        }
+
+        private string PositionsReply()
+        {
+            var parts = new List<string>();
+            List<Account> all;
+            lock (Account.All) all = Account.All.ToList();
+            foreach (Account a in all)
+            {
+                List<Position> positions;
+                try { lock (a.Positions) positions = a.Positions.Where(p => p.Quantity != 0).ToList(); } catch { continue; }
+                foreach (Position p in positions)
+                    parts.Add(a.Name + "|" + p.Instrument.FullName + "|" + p.MarketPosition + "|" + p.Quantity + "|"
+                        + p.AveragePrice.ToString("0.########", CultureInfo.InvariantCulture));
+            }
+            return string.Join(";", parts);
+        }
+
         private static bool IsWorking(Order o)
         {
             return o.OrderState == OrderState.Working || o.OrderState == OrderState.Accepted
@@ -691,9 +795,14 @@ namespace NinjaTrader.NinjaScript.AddOns
                             try { cash = a.Get(AccountItem.CashValue, Currency.UsDollar); } catch { }
                             string status, connection;
                             ConnectionInfo(a, out status, out connection);
+                            double realized = 0, unrealized = 0;
+                            try { realized = a.Get(AccountItem.RealizedProfitLoss, Currency.UsDollar); } catch { }
+                            try { unrealized = a.Get(AccountItem.UnrealizedProfitLoss, Currency.UsDollar); } catch { }
                             parts.Add(a.Name.Replace("|", "/").Replace(";", ",") + "|"
                                 + cash.ToString("0.00", CultureInfo.InvariantCulture) + "|"
-                                + status + "|" + connection.Replace("|", "/").Replace(";", ","));
+                                + status + "|" + connection.Replace("|", "/").Replace(";", ",") + "|"
+                                + realized.ToString("0.00", CultureInfo.InvariantCulture) + "|"
+                                + unrealized.ToString("0.00", CultureInfo.InvariantCulture));
                         }
                     }
                     reply = string.Join(";", parts);
@@ -701,6 +810,22 @@ namespace NinjaTrader.NinjaScript.AddOns
                 else if (request == "GET_MASTER")
                 {
                     reply = cfg.MasterAccount;
+                }
+                else if (request == "GET_POSITIONS")
+                {
+                    reply = PositionsReply();
+                }
+                else if (request.StartsWith("FLATTEN|"))
+                {
+                    reply = Flatten(request.Substring("FLATTEN|".Length).Trim());
+                }
+                else if (request.StartsWith("WATCH|"))
+                {
+                    string name = request.Substring("WATCH|".Length).Trim();
+                    Account acc;
+                    lock (Account.All) acc = Account.All.FirstOrDefault(a => a.Name == name);
+                    if (acc == null) reply = "ERROR|cuenta desconocida: " + name;
+                    else { AttachFollower(acc); reply = "OK|" + name; }
                 }
                 else if (request.StartsWith("SET_MASTER|"))
                 {
@@ -729,7 +854,9 @@ namespace NinjaTrader.NinjaScript.AddOns
         private void Publish(string json)
         {
             if (!running || outbox == null) return;
-            outbox.Enqueue(json);
+            long n = System.Threading.Interlocked.Increment(ref seq);
+            // cada mensaje lleva un número creciente: TradePilot detecta huecos y reinicios
+            outbox.Enqueue("{\"seq\":" + n.ToString(CultureInfo.InvariantCulture) + "," + json.Substring(1));
         }
 
         private static string Now() { return DateTime.Now.ToString("o"); }

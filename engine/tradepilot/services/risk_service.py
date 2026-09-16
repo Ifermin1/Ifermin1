@@ -7,13 +7,17 @@ from tradepilot.services.audit_service import AuditService
 
 
 class RiskService:
-    """Kill switch global + límites por cuenta. El replicador consulta
+    """Kill switch global + límites por cuenta + cierre de emergencia. El replicador consulta
     `allows()` antes de enviar cualquier orden."""
 
-    def __init__(self, store: SQLiteStore, bus: EventBus, audit: AuditService) -> None:
+    def __init__(self, store: SQLiteStore, bus: EventBus, audit: AuditService, bridge=None, accounts=None) -> None:
         self.store = store
         self.bus = bus
         self.audit = audit
+        self.bridge = bridge
+        self.accounts = accounts
+        self.rules_provider = lambda: []
+        bus.subscribe("risk.naked", self._on_naked)
         self.limits: dict[str, RiskLimit] = {l.account_id: l for l in store.get_risk_limits()}
         self.kill_switch = store.get_kv("kill_switch", "0") == "1"
         self.kill_switch_reason = store.get_kv("kill_switch_reason")
@@ -23,6 +27,12 @@ class RiskService:
     def state(self) -> RiskState:
         return RiskState(kill_switch=self.kill_switch, kill_switch_reason=self.kill_switch_reason,
                          kill_switch_at=self.kill_switch_at, limits=list(self.limits.values()))
+
+    async def kill(self, active: bool, reason: str | None = None, flatten: bool = False) -> RiskState:
+        state = self.set_kill_switch(active, reason)
+        if active and flatten:
+            await self.flatten_all(include_master=False, reason="kill switch")
+        return state
 
     def set_kill_switch(self, active: bool, reason: str | None = None) -> RiskState:
         self.kill_switch = active
@@ -35,6 +45,55 @@ class RiskService:
                        f"Kill switch {'ACTIVADO' if active else 'desactivado'}" + (f": {reason}" if reason else ""))
         self.bus.publish_nowait(TOPIC_RISK, self.state().model_dump(mode="json"))
         return self.state()
+
+    # ---- cierre de emergencia ----
+    async def flatten(self, account_id: str, reason: str = "") -> str:
+        if self.bridge is None:
+            raise RuntimeError("sin puente")
+        self.audit.log("FLATTEN", f"Cierre de emergencia en {account_id}" + (f": {reason}" if reason else ""), target=account_id)
+        reply = await self.bridge.flatten(account_id)
+        if self.accounts:
+            await self.accounts.sync_once()
+        return reply
+
+    def follower_accounts(self) -> list[str]:
+        """Seguidoras de la maestra actual; si la maestra aún no se conoce, las de todas las reglas activas."""
+        master = self.bridge.health.master_account if self.bridge else None
+        seen: list[str] = []
+        for r in self.rules_provider():
+            if r.enabled and (master is None or r.master_matches(master)) and r.follower_account not in seen:
+                seen.append(r.follower_account)
+        return seen
+
+    async def flatten_all(self, include_master: bool = False, reason: str = "") -> dict[str, str]:
+        targets = self.follower_accounts()
+        master = self.bridge.health.master_account if self.bridge else None
+        if master is None:
+            masters = {r.master_account for r in self.rules_provider() if r.enabled}
+            master = next(iter(masters)) if len(masters) == 1 else None
+        if include_master and master and master not in targets:
+            targets.append(master)
+        results: dict[str, str] = {}
+        for acc in targets:
+            try:
+                results[acc] = await self.flatten(acc, reason)
+            except Exception as exc:
+                results[acc] = f"ERROR: {exc}"
+                self.audit.log("ERROR", f"No se pudo cerrar {acc}: {exc}", target=acc)
+        return results
+
+    async def _on_naked(self, data: dict) -> None:
+        """Stop rechazado en una seguidora: cerrar antes de que quede sin protección."""
+        account = str(data.get("account", ""))
+        pos = sum(abs(p.quantity) for p in (self.accounts.accounts.get(account).open_positions
+                                             if self.accounts and account in self.accounts.accounts else []))
+        self.audit.log("NAKED_CLOSE", f"{account}: {data.get('reason')} -> cerrando posición ({pos} contratos) por seguridad",
+                       target=account)
+        try:
+            await self.flatten(account, "stop rechazado")
+        except Exception as exc:
+            self.audit.log("ERROR", f"No se pudo cerrar {account} tras stop rechazado: {exc}. ¡Revisa la cuenta a mano!",
+                           target=account)
 
     def upsert_limit(self, limit: RiskLimit) -> RiskLimit:
         self.limits[limit.account_id] = limit

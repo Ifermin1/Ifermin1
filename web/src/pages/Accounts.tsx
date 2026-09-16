@@ -49,6 +49,15 @@ export function Accounts() {
     if (!confirm(`¿Cambiar la cuenta maestra a ${acc}?\n\nA partir de ahora se replicarán las operaciones de ${acc}. Las cuentas que copiaban a ${detected ?? "la anterior"} dejan de copiar hasta que las vincules a la nueva.`)) return;
     const r = await client!.setMaster(acc); setMaster(r.master_account);
   });
+  const flatten = (acc: string) => guard(acc, async () => {
+    if (!confirm(`¿CERRAR ${acc}?\n\nSe cancelan todas sus órdenes y se cierra la posición a mercado.`)) return;
+    await client!.flatten(acc, "manual desde consola");
+  });
+  const resync = (acc: string) => guard(acc, async () => {
+    if (!confirm(`¿Igualar ${acc} a la maestra?\n\nSe manda a mercado la diferencia de contratos.`)) return;
+    const r = await client!.resync(acc);
+    if (r.sent.length === 0) alert("Ya coincide con la maestra.");
+  });
   const forget = (acc: string) => guard(acc, async () => { if (confirm(`¿Olvidar ${acc}? Volverá a aparecer si NinjaTrader la reporta.`)) await client!.forgetAccount(acc); });
 
   const masterAcc = accounts.find((a) => a.account_id.toLowerCase() === master.toLowerCase());
@@ -72,7 +81,8 @@ export function Accounts() {
             {!master && <option value="">Selecciona…</option>}
             {accounts.map((a) => <option key={a.account_id} value={a.account_id}>{label(a)}{a.account_id === detected ? " · maestro del addon" : ""}</option>)}
           </select>
-          {masterAcc && <><ConnBadge a={masterAcc} /><span className="muted">{money(masterAcc.balance)} · {posText(masterAcc)}</span></>}
+          {masterAcc && <><ConnBadge a={masterAcc} /><span className="muted">{money(masterAcc.balance)} · {posText(masterAcc)}</span>
+            {masterAcc.open_positions.length > 0 && <button className="danger-solid small-btn" disabled={busy === masterAcc.account_id} onClick={() => void flatten(masterAcc.account_id)}>Cerrar maestra</button>}</>}
         </div>
         {detected && master && master !== detected && (
           <p className="error">El addon sigue publicando <b>{detected}</b>; el cambio a {master} no se aplicó.</p>
@@ -94,7 +104,9 @@ export function Accounts() {
                     <div className="acct-name"><b>{a.alias || a.account_id}</b>{a.alias && <span className="muted small">{a.account_id}</span>}
                       <ConnBadge a={a} />{l?.trading_halted && <span className="badge bad">pausada</span>}{on && <span className="badge ok">copiando</span>}
                     </div>
-                    <div className="acct-meta"><span>{money(a.balance)}</span><span className="muted">{posText(a)}</span><span className="muted">{ago(a.updated_at)}</span></div>
+                    <div className="acct-meta"><span>{money(a.balance)}</span>
+                      <span className={a.daily_pnl < 0 ? "bad" : a.daily_pnl > 0 ? "ok" : "muted"}>P&L {money(a.daily_pnl)}</span>
+                      <span className={a.open_positions.length ? "" : "muted"}>{posText(a)}</span><span className="muted">{ago(a.updated_at)}</span></div>
                     {(fill || rej) && (
                       <div className="acct-last">
                         {rej && (!fill || rej.timestamp > fill.timestamp)
@@ -103,6 +115,8 @@ export function Accounts() {
                       </div>
                     )}
                     {on && a.connected === false && <div className="acct-last warn">Copiando pero desconectada: NinjaTrader rechazará las órdenes hasta que conecte.</div>}
+                    {a.desync && <div className="acct-last bad">DESINCRONIZADA: {a.desync_detail}. Solo se copian salidas hasta igualarla.
+                      <button className="ghost small-btn" disabled={busy === a.account_id} onClick={() => void resync(a.account_id)}>Igualar a la maestra</button></div>}
                   </div>
                   <div className="acct-actions">
                     <label className="mult">x<input type="number" step="0.1" min="0.1" value={link?.multiplier ?? 1} disabled={busy === a.account_id || !master}
@@ -113,6 +127,7 @@ export function Accounts() {
                         onChange={(e) => void apply(a.account_id, e.target.checked, link?.multiplier ?? 1)} /><span />
                     </label>
                     {link && <button className="ghost danger" disabled={busy === a.account_id} onClick={() => void remove(a.account_id)} title="Quitar vínculo">✕</button>}
+                    {a.open_positions.length > 0 && <button className="danger-solid small-btn" disabled={busy === a.account_id} onClick={() => void flatten(a.account_id)} title="Cancelar órdenes y cerrar posición">Cerrar</button>}
                   </div>
                 </li>
               );

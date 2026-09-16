@@ -85,10 +85,10 @@ button:disabled { opacity: .6; cursor: default; }
 .feed { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .feed li { display: grid; grid-template-columns: auto auto 1fr; gap: 8px; align-items: baseline; font-size: 13px; }
 .tag { font-size: 10px; font-weight: 700; letter-spacing: .3px; padding: 2px 6px; border-radius: 4px; background: var(--panel-2); color: var(--muted); white-space: nowrap; }
-.t-REPLICATED, .t-FOLLOWER_FILL { background: rgba(52,211,153,.15); color: var(--ok); }
+.t-REPLICATED, .t-FOLLOWER_FILL, .t-RESYNC { background: rgba(52,211,153,.15); color: var(--ok); }
 .t-MASTER_RECEIVED { background: rgba(34,211,238,.15); color: var(--accent); }
-.t-BLOCKED, .t-ERROR, .t-KILL_SWITCH_ON, .t-FOLLOWER_REJECTED { background: rgba(248,113,113,.15); color: var(--bad); }
-.t-SKIPPED, .t-RISK_LIMIT_SET, .t-NO_RULE { background: rgba(251,191,36,.15); color: var(--warn); }
+.t-BLOCKED, .t-ERROR, .t-KILL_SWITCH_ON, .t-FOLLOWER_REJECTED, .t-DESYNC, .t-NAKED_CLOSE, .t-GAP, .t-ADDON_RESTART, .t-FLATTEN, .t-FLATTENED { background: rgba(248,113,113,.15); color: var(--bad); }
+.t-SKIPPED, .t-RISK_LIMIT_SET, .t-NO_RULE, .t-SYNC_ORDER { background: rgba(251,191,36,.15); color: var(--warn); }
 
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; }
@@ -148,3 +148,8 @@ input.alias { padding: 6px 8px; min-width: 140px; }
 .act-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
 .tiny { font-size: 10px; }
 button.link.tiny { padding: 0; color: var(--warn); }
+
+.small-btn { padding: 6px 10px; font-size: 12px; }
+.acct-last.bad { color: var(--bad); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.kill-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+label.inline.small { font-size: 12px; }

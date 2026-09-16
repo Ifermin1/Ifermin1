@@ -33,6 +33,15 @@ class BrokerAccount(DomainModel):
     balance: float = 0.0
     connected: Optional[bool] = None   # None = el addon no informa del estado
     connection: str = ""
+    realized_pnl: float = 0.0
+    unrealized_pnl: float = 0.0
+
+
+class BrokerPosition(DomainModel):
+    account_id: str
+    symbol: str
+    quantity: int          # con signo: >0 largo, <0 corto
+    avg_price: float = 0.0
 
 
 class AccountSnapshot(DomainModel):
@@ -49,3 +58,8 @@ class AccountSnapshot(DomainModel):
     connected: Optional[bool] = None
     connection: str = ""
     reported: bool = True              # False = el bróker no la reportó en la última sincronización
+    realized_pnl: float = 0.0
+    unrealized_pnl: float = 0.0
+    # sincronización con la maestra (solo seguidoras vinculadas)
+    desync: bool = False
+    desync_detail: str = ""

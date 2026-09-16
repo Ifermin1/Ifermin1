@@ -18,6 +18,8 @@ class AccountService:
         self.bus = bus
         self.store = store
         self.interval = interval
+        self.after_sync = None                 # corrutina a llamar tras cada sincronización (SyncService.check)
+        self._watched: set[str] = set()
         self.accounts: dict[str, AccountSnapshot] = {}
         # Cuentas recordadas de sesiones anteriores: aparecen aunque el bróker aún no las reporte
         for row in (store.get_accounts() if store else []):
@@ -59,11 +61,16 @@ class AccountService:
                 snap.enabled = auto_enabled
                 logger.info(f"Cuenta {info.account_id} {'activada (conectada)' if auto_enabled else 'oculta (desconectada)'}")
             snap.balance = snap.net_liquidity = info.balance
+            snap.realized_pnl, snap.unrealized_pnl = info.realized_pnl, info.unrealized_pnl
+            snap.daily_pnl = info.realized_pnl + info.unrealized_pnl
             snap.connected, snap.connection, snap.reported, snap.updated_at = info.connected, info.connection, True, now
             if self.store:
                 self.store.upsert_account_seen(info.account_id, info.balance, now.isoformat(), snap.enabled, info.connected)
         if new_hidden:
             logger.info(f"{new_hidden} cuentas nuevas sin conexión quedan ocultas (se activan solas al conectarse)")
+        positions = await self.bridge.get_positions()
+        if positions is not None:
+            self.apply_positions(positions, now)
         if data:
             for acc, snap in self.accounts.items():
                 if acc not in reported:
@@ -74,13 +81,47 @@ class AccountService:
                         if self.store:
                             self.store.set_account_settings(acc, enabled=False)
             await self.publish_accounts()
+        if self.after_sync:
+            try:
+                await self.after_sync()
+            except Exception as exc:
+                logger.error(f"Error en vigilancia de sincronización: {exc}")
         await self.bus.publish(TOPIC_HEALTH, self.health().model_dump(mode="json"))
+
+    async def watch(self, account_id: str) -> None:
+        """Pide al addon que reporte esa cuenta (órdenes/posiciones) aunque aún no le hayamos mandado órdenes."""
+        if account_id in self._watched:
+            return
+        self._watched.add(account_id)
+        try:
+            await self.bridge.watch(account_id)
+        except Exception as exc:
+            logger.warning(f"watch {account_id}: {exc}")
 
     _last_signature: tuple | None = None
 
+    def apply_positions(self, positions: list, now: datetime) -> None:
+        """Snapshot completo de posiciones del bróker (GET_POSITIONS): sustituye lo que teníamos."""
+        by_acc: dict[str, list[PositionSnapshot]] = {}
+        for p in positions:
+            by_acc.setdefault(p.account_id, []).append(
+                PositionSnapshot(account_id=p.account_id, symbol=p.symbol, quantity=p.quantity, avg_price=p.avg_price))
+        for acc, snap in self.accounts.items():
+            new = by_acc.get(acc, [])
+            if [(x.symbol, x.quantity) for x in snap.open_positions] != [(x.symbol, x.quantity) for x in new]:
+                snap.open_positions = new
+                snap.updated_at = now
+
+    def position(self, account_id: str, symbol: str) -> int:
+        snap = self.accounts.get(account_id)
+        if not snap:
+            return 0
+        root = symbol.split(" ")[0].upper()
+        return sum(p.quantity for p in snap.open_positions if p.symbol.split(" ")[0].upper() == root)
+
     async def publish_accounts(self, force: bool = False) -> None:
         """Publica el snapshot solo si cambió algo relevante (con cientos de cuentas importa)."""
-        sig = tuple((a.account_id, a.balance, a.connected, a.enabled, a.alias, a.reported,
+        sig = tuple((a.account_id, a.balance, a.connected, a.enabled, a.alias, a.reported, a.desync, round(a.daily_pnl),
                      tuple((p.symbol, p.quantity) for p in a.open_positions)) for a in self.accounts.values())
         if force or sig != self._last_signature:
             self._last_signature = sig

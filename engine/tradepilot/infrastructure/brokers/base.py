@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
 from tradepilot.core.events import EventBus
-from tradepilot.domain.accounts import BridgeHealth, BrokerAccount
+from tradepilot.domain.accounts import BridgeHealth, BrokerAccount, BrokerPosition
 
 
 class BrokerBridge(ABC):
@@ -25,6 +25,17 @@ class BrokerBridge(ABC):
     def note_addon_version(self, version: str) -> None:
         """El addon anuncia su versión en el HEARTBEAT; las implementaciones pueden reaccionar."""
         self.health.addon_version = version
+
+    async def get_positions(self) -> list[BrokerPosition] | None:
+        """Posiciones abiertas de todas las cuentas. None = el puente no lo soporta."""
+        return None
+
+    async def flatten(self, account: str) -> str:
+        """Cancela todas las órdenes y cierra las posiciones de la cuenta. Lanza RuntimeError si falla."""
+        raise RuntimeError("este puente no permite cerrar posiciones")
+
+    async def watch(self, account: str) -> None:
+        """Pide al bróker que reporte órdenes/posiciones de esa cuenta (no-op si no aplica)."""
 
     async def set_master(self, account: str) -> str:
         """Cambia la cuenta maestra en el bróker. Devuelve el nombre aplicado o lanza RuntimeError."""

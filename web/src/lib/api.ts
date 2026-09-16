@@ -2,15 +2,17 @@
 // para que la PWA instalada en el teléfono recuerde a qué engine conectarse.
 
 export type Health = {
-  app: string; mode: "mock" | "ninja";
+  app: string; mode: "mock" | "ninja"; addon_outdated: boolean; min_addon_version: string;
   bridge: { mode: string; connected: boolean; last_msg_in: string | null; last_msg_out: string | null;
             last_sync: string | null; last_heartbeat: string | null; master_account: string | null; addon_version: string | null; error_count: number; master_feed_up: boolean; follower_feed_up: boolean; sync_up: boolean };
   risk: RiskState; stats: { events_in: number; orders_out: number; blocked: number; errors: number; rejected: number; fills: number; duplicates: number;
-           latency_ms_last: number | null; latency_ms_avg: number | null; slippage_last: number | null; slippage_avg: number | null }; ws_clients: number;
+           latency_ms_last: number | null; latency_ms_avg: number | null; slippage_last: number | null; slippage_avg: number | null;
+           seq_gaps: number; addon_restarts: number; flattens: number }; ws_clients: number;
 };
 export type Position = { account_id: string; symbol: string; quantity: number; avg_price: number; unrealized_pnl: number };
 export type Account = { account_id: string; balance: number; net_liquidity: number; daily_pnl: number; open_positions: Position[]; updated_at: string;
-                        enabled: boolean; enabled_source: "auto" | "user"; alias: string; connected: boolean | null; connection: string; reported: boolean };
+                        enabled: boolean; enabled_source: "auto" | "user"; alias: string; connected: boolean | null; connection: string; reported: boolean;
+                        realized_pnl: number; unrealized_pnl: number; desync: boolean; desync_detail: string };
 export type Rule = { id: string; master_account: string; follower_account: string; multiplier: number;
                      symbol_filter: string | null; enabled: boolean };
 export type AuditEvent = { id: number | null; timestamp: string; event_type: string; source_account: string | null;
@@ -58,8 +60,14 @@ export function makeClient(s: Session) {
       req<void>(`/api/accounts/${encodeURIComponent(follower)}/link?master_account=${encodeURIComponent(master)}`, { method: "DELETE" }),
     audit: (limit = 100, type?: string) => req<AuditEvent[]>(`/api/audit?limit=${limit}${type ? `&event_type=${type}` : ""}`),
     risk: () => req<RiskState>("/api/risk"),
-    killSwitch: (active: boolean, reason?: string) =>
-      req<RiskState>("/api/risk/kill-switch", { method: "POST", body: JSON.stringify({ active, reason }) }),
+    killSwitch: (active: boolean, reason?: string, flatten = false) =>
+      req<RiskState>("/api/risk/kill-switch", { method: "POST", body: JSON.stringify({ active, reason, flatten }) }),
+    flattenAll: (include_master: boolean, reason?: string) =>
+      req<{ results: Record<string, string> }>("/api/risk/flatten-all", { method: "POST", body: JSON.stringify({ include_master, reason }) }),
+    flatten: (id: string, reason?: string) =>
+      req<{ result: string }>(`/api/accounts/${encodeURIComponent(id)}/flatten`, { method: "POST", body: JSON.stringify({ reason }) }),
+    resync: (id: string) =>
+      req<{ sent: { symbol: string; action: string; quantity: number }[] }>(`/api/accounts/${encodeURIComponent(id)}/resync`, { method: "POST" }),
     upsertLimit: (l: RiskLimit) => req<RiskLimit>("/api/risk/limits", { method: "PUT", body: JSON.stringify(l) }),
     mockEvent: (b: Record<string, unknown> = {}) => req<unknown>("/api/mock/master-event", { method: "POST", body: JSON.stringify(b) }),
     wsUrl: () => `${base.replace(/^http/, "ws")}/api/ws?token=${encodeURIComponent(s.token)}`,

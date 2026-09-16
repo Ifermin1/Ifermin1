@@ -18,7 +18,7 @@ from loguru import logger
 
 from tradepilot.core.config import settings
 from tradepilot.core.events import TOPIC_MASTER_EVENT, EventBus
-from tradepilot.domain.accounts import BrokerAccount
+from tradepilot.domain.accounts import BrokerAccount, BrokerPosition
 from tradepilot.infrastructure.brokers.base import BrokerBridge
 
 
@@ -107,6 +107,47 @@ class NinjaZmqBridge(BrokerBridge):
                 self._reset_req_socket()
                 return None
 
+    async def get_positions(self) -> list[BrokerPosition] | None:
+        reply = await self.request("GET_POSITIONS")
+        if reply is None or reply.startswith("ERROR|"):
+            return None
+        return self.parse_positions(reply)
+
+    @staticmethod
+    def parse_positions(reply: str) -> list[BrokerPosition]:
+        out: list[BrokerPosition] = []
+        for part in reply.split(";"):
+            f = [x.strip() for x in part.split("|")]
+            if len(f) < 4 or not f[0]:
+                continue
+            try:
+                qty = int(float(f[3]))
+            except ValueError:
+                continue
+            side = f[2].lower()
+            signed = -qty if side == "short" else qty if side == "long" else 0
+            try:
+                price = float(f[4]) if len(f) > 4 and f[4] else 0.0
+            except ValueError:
+                price = 0.0
+            if signed:
+                out.append(BrokerPosition(account_id=f[0], symbol=f[1], quantity=signed, avg_price=price))
+        return out
+
+    async def flatten(self, account: str) -> str:
+        reply = await self.request(f"FLATTEN|{account}", timeout_ms=8000)
+        if reply is None:
+            raise RuntimeError("NinjaTrader no responde al cierre (¿addon cargado?)")
+        if reply.startswith("OK|"):
+            logger.warning(f"FLATTEN ejecutado en {account}: {reply}")
+            return reply
+        if "unknown request" in reply:
+            raise RuntimeError("el addon es antiguo: actualiza a v1.5 para cerrar posiciones desde la consola")
+        raise RuntimeError(reply.replace("ERROR|", "El addon respondió: "))
+
+    async def watch(self, account: str) -> None:
+        await self.request(f"WATCH|{account}")
+
     async def set_master(self, account: str) -> str:
         reply = await self.request(f"SET_MASTER|{account}")
         if reply is None:
@@ -179,7 +220,14 @@ class NinjaZmqBridge(BrokerBridge):
             if len(fields) >= 3 and fields[2]:
                 connected = fields[2].lower() == "connected"
             connection = fields[3] if len(fields) >= 4 else ""
-            accounts.append(BrokerAccount(account_id=fields[0], balance=balance, connected=connected, connection=connection))
+
+            def _num(i: int) -> float:
+                try:
+                    return float(fields[i]) if len(fields) > i and fields[i] else 0.0
+                except ValueError:
+                    return 0.0
+            accounts.append(BrokerAccount(account_id=fields[0], balance=balance, connected=connected, connection=connection,
+                                          realized_pnl=_num(4), unrealized_pnl=_num(5)))
         return accounts
 
     _last_warning: str | None = None

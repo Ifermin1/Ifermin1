@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from tradepilot.api.auth import require_token
-from tradepilot.api.schemas import AccountSettings, KillSwitchRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, RuleCreate, RuleUpdate
+from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, RuleCreate, RuleUpdate
 from tradepilot.container import Container
 from tradepilot.domain.risk import RiskLimit
 
@@ -12,12 +12,23 @@ def _c(request: Request) -> Container:
     return request.app.state.container
 
 
+def _ver(v: str) -> tuple:
+    try:
+        return tuple(int(x) for x in v.split("."))
+    except ValueError:
+        return (0,)
+
+
 @router.get("/health")
 def health(request: Request):
     c = _c(request)
+    v = c.accounts.health().addon_version
+    outdated = c.settings.ENGINE_MODE == "ninja" and (v is None or _ver(v) < _ver(c.settings.MIN_ADDON_VERSION))
     return {
         "app": c.settings.APP_NAME,
         "mode": c.settings.ENGINE_MODE,
+        "addon_outdated": outdated,
+        "min_addon_version": c.settings.MIN_ADDON_VERSION,
         "bridge": c.accounts.health(),
         "risk": c.risk.state(),
         "stats": c.replication.stats,
@@ -56,12 +67,15 @@ async def forget_account(account_id: str, request: Request):
 
 
 @router.put("/accounts/{follower}/link")
-def link_account(follower: str, body: LinkRequest, request: Request):
+async def link_account(follower: str, body: LinkRequest, request: Request):
     """Vincular (o actualizar) una cuenta seguidora al maestro con un clic."""
+    c = _c(request)
     try:
-        return _c(request).replication.link(body.master_account, follower, body.multiplier, body.enabled)
+        rule = c.replication.link(body.master_account, follower, body.multiplier, body.enabled)
     except ValueError as exc:
         raise HTTPException(422, str(exc))
+    await c.accounts.watch(follower)
+    return rule
 
 
 @router.delete("/accounts/{follower}/link", status_code=204)
@@ -109,8 +123,32 @@ def risk(request: Request):
 
 
 @router.post("/risk/kill-switch")
-def kill_switch(body: KillSwitchRequest, request: Request):
-    return _c(request).risk.set_kill_switch(body.active, body.reason)
+async def kill_switch(body: KillSwitchRequest, request: Request):
+    return await _c(request).risk.kill(body.active, body.reason, body.flatten)
+
+
+@router.post("/risk/flatten-all")
+async def flatten_all(body: FlattenAllRequest, request: Request):
+    """Cierre de emergencia de todas las seguidoras vinculadas (y la maestra si se pide)."""
+    results = await _c(request).risk.flatten_all(body.include_master, body.reason or "")
+    return {"results": results}
+
+
+@router.post("/accounts/{account_id}/flatten")
+async def flatten_account(account_id: str, body: FlattenRequest, request: Request):
+    try:
+        return {"result": await _c(request).risk.flatten(account_id, body.reason or "")}
+    except RuntimeError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/accounts/{account_id}/resync")
+async def resync_account(account_id: str, request: Request):
+    """Igualar la seguidora a la maestra x multiplicador mandando la diferencia a mercado."""
+    c = _c(request)
+    if c.sync.expected_positions(account_id) is None:
+        raise HTTPException(400, "La cuenta no está vinculada a la maestra actual")
+    return {"sent": await c.sync.resync(account_id), "diff": c.sync.diff(account_id)}
 
 
 @router.put("/risk/limits")

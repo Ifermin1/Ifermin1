@@ -10,6 +10,7 @@ Uso:  python scripts/fake_ninja.py            (una operación del maestro cada 5
       python scripts/fake_ninja.py --once     (una y termina)
       python scripts/fake_ninja.py --reject   (los followers rechazan las órdenes)
       python scripts/fake_ninja.py --old-addon (imita un addon sin GET_ACCOUNTS_ALL)
+      python scripts/fake_ninja.py --manual   (no opera solo; petición "EMIT|BUY|1" por 5557 dispara una operación)
 """
 import json
 import random
@@ -29,6 +30,8 @@ OFFLINE.update({f"NarvaezIbrahimUPTN{i}": 0.0 for i in range(91021, 91060)})
 CONNECTION = "MFF"
 MASTER = "Sim101"
 SYMBOL = "NQ 12-26"
+POSITIONS: dict[tuple, int] = {}   # (cuenta, símbolo) -> qty con signo; se actualiza con los fills
+SEQ = 0
 
 
 def now() -> str:
@@ -43,13 +46,20 @@ rep = ctx.socket(zmq.REP); rep.bind("tcp://*:5557")
 poller = zmq.Poller(); poller.register(rep, zmq.POLLIN); poller.register(sub, zmq.POLLIN)
 print("fake NinjaTrader escuchando en 5555/5556/5557 (Ctrl+C para salir)")
 
-once, reject = "--once" in sys.argv, "--reject" in sys.argv
+once, reject, manual = "--once" in sys.argv, "--reject" in sys.argv, "--manual" in sys.argv
 price = 20000.0
 next_emit, next_hb, next_price, emitted = time.time() + 2, time.time() + 5, time.time() + 0.25, 0
 
 
 def send(obj: dict) -> None:
-    pub.send_string(json.dumps(obj))
+    global SEQ
+    SEQ += 1
+    pub.send_string(json.dumps({"seq": SEQ, **obj}))
+
+
+def apply_fill(account: str, action: str, symbol: str, qty: int) -> None:
+    sign = 1 if action.upper().startswith("BUY") else -1
+    POSITIONS[(account, symbol)] = POSITIONS.get((account, symbol), 0) + sign * qty
 
 
 while True:
@@ -60,6 +70,26 @@ while True:
                 rep.send_string(";".join(f"{a}|{b:.2f}" for a, b in ACCOUNTS.items()))
             elif msg == "GET_MASTER":
                 rep.send_string(MASTER)
+            elif msg == "GET_POSITIONS":
+                rep.send_string(";".join(f"{a}|{s_}|{'Long' if q > 0 else 'Short'}|{abs(q)}|{price:.2f}"
+                                         for (a, s_), q in POSITIONS.items() if q))
+            elif msg.startswith("FLATTEN|"):
+                acc = msg.split("|", 1)[1]
+                n = sum(1 for (a, _), q in POSITIONS.items() if a == acc and q)
+                for k in list(POSITIONS):
+                    if k[0] == acc:
+                        POSITIONS[k] = 0
+                send({"msg_type": "FLATTENED", "account": acc, "orders_cancelled": 0, "instruments_closed": n, "timestamp": now()})
+                print("FLATTEN", acc); rep.send_string(f"OK|{acc}|{n}")
+            elif msg.startswith("WATCH|"):
+                rep.send_string("OK|" + msg.split("|", 1)[1])
+            elif msg.startswith("EMIT|"):   # gancho de pruebas: EMIT|BUY|2
+                _, act, q = msg.split("|")
+                oid = uuid.uuid4().hex[:8]
+                send({"msg_type": "EXECUTION", "account": MASTER, "action": act, "symbol": SYMBOL, "quantity": int(q),
+                      "price": round(price, 2), "order_type": "MARKET", "state": "Filled", "order_id": oid,
+                      "execution_id": "E" + oid, "timestamp": now()})
+                apply_fill(MASTER, act, SYMBOL, int(q)); rep.send_string("OK|" + oid)
             elif msg.startswith("SET_MASTER|") and "--old-addon" not in sys.argv:
                 new = msg.split("|", 1)[1]
                 if new in ACCOUNTS or new in OFFLINE:
@@ -86,6 +116,7 @@ while True:
                 send({**base, "msg_type": "ORDER_STATUS", "filled": o["quantity"], "price": price, "limit_price": 0,
                       "stop_price": 0, "state": "Filled", "error": "", "native_error": ""})
                 send({**base, "msg_type": "EXECUTION", "price": price, "state": "Filled", "execution_id": "E" + fid})
+                apply_fill(o["account"], o["action"], o["symbol"], o["quantity"])
     t = time.time()
     if t >= next_price:
         price += random.uniform(-2, 2)
@@ -94,11 +125,12 @@ while True:
         next_price = t + 0.25
     if t >= next_hb:
         send({"msg_type": "HEARTBEAT", "account": MASTER, "version": "1.2", "timestamp": now()}); next_hb = t + 5
-    if t >= next_emit:
+    if t >= next_emit and not manual:
         oid = uuid.uuid4().hex[:8]; action = random.choice(["BUY", "SELL"])
         send({"msg_type": "EXECUTION", "account": MASTER, "action": action, "symbol": SYMBOL, "quantity": 1,
               "price": round(price, 2), "order_type": "MARKET", "state": "Filled", "order_id": oid,
               "execution_id": "E" + oid, "timestamp": now()})
+        apply_fill(MASTER, action, SYMBOL, 1)
         send({"msg_type": "POSITION", "account": MASTER, "symbol": SYMBOL,
               "market_position": "Long" if action == "BUY" else "Short", "quantity": 1, "avg_price": round(price, 2),
               "timestamp": now()})

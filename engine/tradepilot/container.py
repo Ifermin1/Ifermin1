@@ -7,11 +7,13 @@ from tradepilot.core.config import Settings, settings as default_settings
 from tradepilot.core.events import EventBus
 from tradepilot.core.netinfo import console_urls
 from tradepilot.infrastructure.brokers.base import BrokerBridge
+from tradepilot.infrastructure.persistence.journal import Journal
 from tradepilot.infrastructure.persistence.sqlite_store import SQLiteStore
 from tradepilot.services.account_service import AccountService
 from tradepilot.services.audit_service import AuditService
 from tradepilot.services.replication_service import ReplicationService
 from tradepilot.services.risk_service import RiskService
+from tradepilot.services.sync_service import SyncService
 
 
 @dataclass
@@ -24,6 +26,8 @@ class Container:
     risk: RiskService
     accounts: AccountService
     replication: ReplicationService
+    sync: SyncService
+    journal: Journal
 
     async def start(self) -> None:
         await self.bridge.start()
@@ -42,6 +46,7 @@ class Container:
     async def stop(self) -> None:
         await self.accounts.stop()
         await self.bridge.stop()
+        self.journal.close()
         self.store.close()
 
 
@@ -58,7 +63,13 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
             from tradepilot.infrastructure.brokers.mock import MockBridge
             bridge = MockBridge(bus)
     audit = AuditService(store, bus)
-    risk = RiskService(store, bus, audit)
     accounts = AccountService(bridge, bus, store, interval=cfg.ACCOUNT_SYNC_SECONDS)
-    replication = ReplicationService(bridge, store, audit, risk, bus, accounts)
-    return Container(cfg, bus, store, bridge, audit, risk, accounts, replication)
+    risk = RiskService(store, bus, audit, bridge, accounts)
+    journal = Journal(cfg.JOURNAL_DIR or None)
+    replication = ReplicationService(bridge, store, audit, risk, bus, accounts, journal, cfg.CLOSE_ON_STOP_REJECT)
+    sync = SyncService(accounts, bridge, audit, bus, cfg.DESYNC_GRACE_SECONDS)
+    sync.rules_provider = lambda: replication.rules
+    risk.rules_provider = lambda: replication.rules
+    replication.sync = sync
+    accounts.after_sync = sync.check
+    return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal)

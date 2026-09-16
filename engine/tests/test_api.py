@@ -136,11 +136,14 @@ async def test_addon_upgrade_detected_from_heartbeat(container):
     from tradepilot.core.events import EventBus
     from tradepilot.infrastructure.brokers.ninja_zmq import NinjaZmqBridge
     b = NinjaZmqBridge(EventBus())
-    b._supports_all = False
-    b._retry_all_at = 10**12
-    container.replication.bridge = b
-    await container.replication.process_master_event({"msg_type": "HEARTBEAT", "account": "Sim101", "version": "1.1"})
-    assert b._supports_all is True and b.health.addon_version == "1.1"
+    try:
+        b._supports_all = False
+        b._retry_all_at = 10**12
+        container.replication.bridge = b
+        await container.replication.process_master_event({"msg_type": "HEARTBEAT", "account": "Sim101", "version": "1.1"})
+        assert b._supports_all is True and b.health.addon_version == "1.1"
+    finally:
+        await b.stop()   # sin esto el contexto ZMQ bloquea al recolectarse
 
 
 async def test_set_master(client: AsyncClient, container):
@@ -151,3 +154,86 @@ async def test_set_master(client: AsyncClient, container):
     r = await client.post("/api/master", json={"account": "NoExiste"})
     assert r.status_code == 400 and "desconocida" in r.json()["detail"]
     assert (await client.get("/api/audit?event_type=MASTER_CHANGED")).json()[0]["source_account"] == "Sim102"
+
+
+async def test_flatten_and_kill_with_flatten(client: AsyncClient, container):
+    b = container.bridge
+    b.positions[("Sim102", "NQ 12-26")] = 2
+    await client.put("/api/accounts/Sim102/link", json={"master_account": "Sim101"})
+    r = await client.post("/api/accounts/Sim102/flatten", json={"reason": "prueba"})
+    assert r.status_code == 200 and b.flattened == ["Sim102"] and b.positions[("Sim102", "NQ 12-26")] == 0
+    types = [a.event_type for a in container.audit.recent(4)]
+    assert "FLATTEN" in types and "FLATTENED" in types
+    b.positions[("Sim102", "NQ 12-26")] = 1
+    r = await client.post("/api/risk/kill-switch", json={"active": True, "reason": "pánico", "flatten": True})
+    assert r.json()["kill_switch"] is True and b.flattened == ["Sim102", "Sim102"]
+    r = await client.post("/api/risk/flatten-all", json={"include_master": True})
+    assert r.status_code == 200 and "Sim101" in r.json()["results"]
+
+
+async def test_desync_detection_blocks_entries_and_resync(client: AsyncClient, container):
+    """La seguidora tiene 3 y la maestra 1 (x1): tras el periodo de gracia se marca DESYNC,
+    se bloquean copias que aumenten exposición, pasan las que la reducen, y 'igualar' manda la diferencia."""
+    container.sync.grace = 0
+    container.bridge.health.master_account = "Sim101"
+    b = container.bridge
+    await client.put("/api/accounts/Sim102/link", json={"master_account": "Sim101"})
+    b.positions[("Sim101", "NQ 12-26")] = 1
+    b.positions[("Sim102", "NQ 12-26")] = 3
+    await container.accounts.sync_once()
+    await container.accounts.sync_once()
+    acc = {a["account_id"]: a for a in (await client.get("/api/accounts")).json()}["Sim102"]
+    assert acc["desync"] is True and "esperado +1" in acc["desync_detail"]
+    # copia que aumenta exposición (BUY estando largo) -> bloqueada
+    b.fill_orders = False
+    await client.post("/api/mock/master-event", json={"action": "BUY", "quantity": 1, "symbol": "NQ 12-26"})
+    last = (await client.get("/api/audit?limit=1")).json()[0]
+    assert last["event_type"] == "BLOCKED" and "desincronizada" in last["message"]
+    # copia que reduce (SELL) -> pasa
+    await client.post("/api/mock/master-event", json={"action": "SELL", "quantity": 1, "symbol": "NQ 12-26"})
+    assert (await client.get("/api/audit?limit=1")).json()[0]["event_type"] == "REPLICATED"
+    # igualar: real 3, esperado 1 -> SELL 2
+    b.fill_orders = True
+    r = await client.post("/api/accounts/Sim102/resync")
+    assert r.json()["sent"] == [{"symbol": "NQ 12-26", "action": "SELL", "quantity": 2}]
+    await container.accounts.sync_once()
+    acc = {a["account_id"]: a for a in (await client.get("/api/accounts")).json()}["Sim102"]
+    assert acc["desync"] is False
+    assert any(a.event_type == "RESYNC" for a in container.audit.recent(5))
+
+
+async def test_stop_rejected_closes_follower(client: AsyncClient, container):
+    b = container.bridge
+    b.positions[("Sim102", "NQ 12-26")] = 2
+    await container.accounts.sync_once()
+    await container.replication.process_master_event({"msg_type": "ORDER_STATUS", "account": "Sim102", "action": "SELL",
+        "symbol": "NQ 12-26", "quantity": 2, "order_type": "STOPMARKET", "state": "Rejected", "order_id": "f1",
+        "master_order_id": "m1", "error": "OrderRejected", "native_error": "max qty", "timestamp": "x"})
+    import asyncio
+    await asyncio.sleep(0.05)
+    assert b.flattened == ["Sim102"]
+    types = [a.event_type for a in container.audit.recent(6)]
+    assert "NAKED_CLOSE" in types and "FOLLOWER_REJECTED" in types
+
+
+async def test_seq_gaps_and_restart_detected(container):
+    rep = container.replication
+    for seq in (1, 2, 5, 6, 1):
+        await rep.process_master_event({"msg_type": "HEARTBEAT", "account": "Sim101", "seq": seq})
+    assert rep.stats["seq_gaps"] == 2 and rep.stats["addon_restarts"] == 1
+    types = [a.event_type for a in container.audit.recent(5)]
+    assert "GAP" in types and "ADDON_RESTART" in types
+
+
+async def test_journal_records_in_and_out(container, tmp_path):
+    from tradepilot.infrastructure.persistence.journal import Journal
+    j = Journal(str(tmp_path / "journal"))
+    container.replication.journal = j
+    await container.replication.start()
+    container.replication.add_rule("Sim101", "Sim102")
+    await container.bridge.emit_master_event(quantity=1, symbol="NQ 12-26")
+    j.close()
+    lines = [l for f in (tmp_path / "journal").glob("*.jsonl") for l in f.read_text().splitlines()]
+    import json
+    dirs = [json.loads(l)["dir"] for l in lines]
+    assert "in" in dirs and "out" in dirs

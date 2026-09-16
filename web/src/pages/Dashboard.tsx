@@ -24,6 +24,16 @@ export function Dashboard() {
       </div>
       <p className="muted small">Latencia: desde que el engine recibe el fill del maestro hasta que recibe el fill del seguidor. Deslizamiento: precio del seguidor frente al del maestro, positivo = peor para el seguidor.</p>
 
+      {health?.addon_outdated && (
+        <Card className="alert-card"><strong>Addon de NinjaTrader desactualizado</strong> ({health.bridge.addon_version ? `v${health.bridge.addon_version}` : "sin versión"}; se requiere v{health.min_addon_version}).
+          Las protecciones (cierre de emergencia, posiciones, detección de pérdidas) no funcionan hasta recompilarlo.</Card>
+      )}
+      {(health?.stats.seq_gaps || health?.stats.addon_restarts) ? (
+        <Card className="alert-card"><strong>Mensajes perdidos del addon:</strong> {health?.stats.seq_gaps ?? 0} huecos, {health?.stats.addon_restarts ?? 0} reinicios en esta sesión. Revisa la sincronización de las seguidoras en <i>Cuentas</i>.</Card>
+      ) : null}
+      {accounts.some((a) => a.desync) && (
+        <Card className="alert-card"><strong>Seguidoras desincronizadas:</strong> {accounts.filter((a) => a.desync).map((a) => a.account_id).join(", ")}. Ve a <i>Cuentas</i> para igualarlas o cerrarlas.</Card>
+      )}
       {risk?.kill_switch && (
         <Card className="alert-card">
           <strong>Kill switch activo.</strong> No se está replicando ninguna orden. {risk.kill_switch_reason && <>Motivo: {risk.kill_switch_reason}.</>}

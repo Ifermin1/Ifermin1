@@ -11,7 +11,7 @@ from datetime import datetime
 from loguru import logger
 
 from tradepilot.core.events import TOPIC_MASTER_EVENT, EventBus
-from tradepilot.domain.accounts import BrokerAccount
+from tradepilot.domain.accounts import BrokerAccount, BrokerPosition
 from tradepilot.infrastructure.brokers.base import BrokerBridge
 
 SYMBOLS = ["NQ 12-26", "ES 12-26", "MNQ 12-26", "CL 11-26"]
@@ -26,6 +26,9 @@ class MockBridge(BrokerBridge):
         self.interval = interval
         self.accounts = accounts or {"Sim101": 50_000.0, "Sim102": 25_000.0, "Sim103": 100_000.0}
         self.disconnected: set[str] = set()   # cuentas que el simulador reporta como desconectadas
+        self.positions: dict[tuple[str, str], int] = {}   # (cuenta, símbolo) -> qty con signo
+        self.flattened: list[str] = []
+        self.fill_orders = True   # las órdenes enviadas actualizan la posición del simulador
         self.sent_orders: list[dict] = []
         self._task: asyncio.Task | None = None
         self._running = False
@@ -70,6 +73,20 @@ class MockBridge(BrokerBridge):
         await self.bus.publish(TOPIC_MASTER_EVENT, event)
         return event
 
+    async def get_positions(self) -> list[BrokerPosition] | None:
+        return [BrokerPosition(account_id=a, symbol=sym, quantity=q) for (a, sym), q in self.positions.items() if q]
+
+    async def flatten(self, account: str) -> str:
+        if account not in self.accounts:
+            raise RuntimeError(f"cuenta desconocida: {account}")
+        n = sum(1 for (a, _), q in self.positions.items() if a == account and q)
+        for k in list(self.positions):
+            if k[0] == account:
+                self.positions[k] = 0
+        self.flattened.append(account)
+        await self.bus.publish(TOPIC_MASTER_EVENT, {"msg_type": "FLATTENED", "account": account, "instruments_closed": n})
+        return f"OK|{account}|{n}"
+
     async def set_master(self, account: str) -> str:
         if account not in self.accounts:
             raise RuntimeError(f"cuenta desconocida: {account}")
@@ -92,4 +109,8 @@ class MockBridge(BrokerBridge):
             "limit_price": limit_price, "stop_price": stop_price,
         })
         self.health.last_msg_out = datetime.now()
+        if self.fill_orders and msg_type == "EXECUTION":
+            k = (target_account, symbol)
+            sign = 1 if action.upper().startswith("BUY") else -1
+            self.positions[k] = self.positions.get(k, 0) + sign * quantity
         logger.info(f"[mock] orden -> {target_account} {action} {quantity} {symbol}")

@@ -71,6 +71,15 @@ En modo `mock` el engine **no está conectado a NinjaTrader**: las operaciones s
 Si *Cuentas* queda vacío, el addon no está respondiendo en 5557: revisa que NinjaTrader esté abierto y el addon cargado. Sin NinjaTrader a mano puedes probar el modo `ninja` con `python scripts\fake_ninja.py`, que imita el addon.
 3. Acceso desde fuera de casa (túnel Cloudflare / Tailscale): fase posterior, ver `docs/ARQUITECTURA.md` §2.
 
+## Protecciones
+
+- **Cerrar todo**: en *Riesgo*, "Cerrar todas las seguidoras" o "Cerrar TODO (incluida la maestra)". El kill switch puede cerrar además de bloquear. En *Cuentas*, cada cuenta con posición tiene su botón *Cerrar*.
+- **Desincronización**: si una seguidora no tiene la posición de la maestra × multiplicador durante más de 6 s, aparece en rojo como DESINCRONIZADA, solo se le copian salidas, y el botón *Igualar a la maestra* manda la diferencia a mercado.
+- **Stop rechazado**: si el bróker rechaza un stop copiado, el engine cierra esa cuenta al instante (`CLOSE_ON_STOP_REJECT=true` en `.env`).
+- **Diario**: `engine\data\journal\AAAA-MM-DD.jsonl` guarda todo lo recibido y enviado. Ante cualquier incidente, ese archivo es lo que hay que revisar.
+
+Todo esto requiere el addon **v1.5**; la consola avisa en rojo si el addon es anterior.
+
 ## Problemas comunes
 
 - **`Proactor event loop does not implement add_reader`** en Windows: versión antigua del engine. Haz `git pull`; el arranque actual fuerza el bucle de eventos que ZMQ necesita.

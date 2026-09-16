@@ -15,6 +15,8 @@ from tradepilot.services.account_service import AccountService
 from tradepilot.services.audit_service import AuditService
 from tradepilot.services.risk_service import RiskService
 
+STOP_TYPES = {"STOPMARKET", "STOPLIMIT", "STOP", "MIT"}
+
 REJECTED_STATES = {"REJECTED", "ERROR"}
 
 
@@ -26,16 +28,22 @@ class ReplicationService:
     """
 
     def __init__(self, bridge: BrokerBridge, store: SQLiteStore, audit: AuditService,
-                 risk: RiskService, bus: EventBus, accounts: AccountService | None = None) -> None:
+                 risk: RiskService, bus: EventBus, accounts: AccountService | None = None,
+                 journal=None, close_on_stop_reject: bool = True) -> None:
         self.bridge = bridge
         self.store = store
         self.audit = audit
         self.risk = risk
         self.bus = bus
         self.accounts = accounts
+        self.journal = journal
+        self.close_on_stop_reject = close_on_stop_reject
+        self.sync = None                      # SyncService, lo inyecta el contenedor
+        self._last_seq: int | None = None
         self.rules: list[ReplicationRule] = store.get_all_rules()
         self.stats = {"events_in": 0, "orders_out": 0, "blocked": 0, "errors": 0, "rejected": 0, "fills": 0, "duplicates": 0,
-                      "latency_ms_last": None, "latency_ms_avg": None, "slippage_last": None, "slippage_avg": None}
+                      "latency_ms_last": None, "latency_ms_avg": None, "slippage_last": None, "slippage_avg": None,
+                      "seq_gaps": 0, "addon_restarts": 0, "flattens": 0}
         self._seen: OrderedDict[tuple, None] = OrderedDict()
         # (follower, master_order_id) -> qty de la orden pendiente que ya copiamos (stop / take profit)
         self._sent_pending: OrderedDict[tuple, int] = OrderedDict()
@@ -102,6 +110,15 @@ class ReplicationService:
     # ---- entrada de mensajes ----
     async def process_master_event(self, data: dict) -> list[ReplicationTask]:
         msg_type = str(data.get("msg_type", "")).upper()
+        if self.journal and msg_type != MSG_PRICE:
+            self.journal.write("in", data)
+        self._check_seq(data)
+
+        if msg_type == "FLATTENED":
+            self.stats["flattens"] += 1
+            self.audit.log("FLATTENED", f"{data.get('account')}: {data.get('orders_cancelled', 0)} órdenes canceladas, "
+                           f"{data.get('instruments_closed', 0)} instrumentos cerrados", target=str(data.get("account", "")))
+            return []
 
         if msg_type == MSG_HEARTBEAT:
             self.bridge.health.last_heartbeat = datetime.now()
@@ -177,6 +194,8 @@ class ReplicationService:
             ok, reason = self.risk.allows(rule.follower_account, qty)
             if ok and self.accounts is not None and not self.accounts.is_enabled(rule.follower_account):
                 ok, reason = False, f"cuenta {rule.follower_account} desactivada en la consola"
+            if ok and self._desync_blocks(rule.follower_account, event):
+                ok, reason = False, f"{rule.follower_account} desincronizada: solo se copian salidas hasta igualarla"
             if not ok:
                 self.stats["blocked"] += 1
                 self.audit.log("BLOCKED", f"Bloqueado por riesgo: {reason}", source=event.account,
@@ -210,6 +229,10 @@ class ReplicationService:
                                          quantity=task.scaled_quantity, order_type=ev.order_type,
                                          master_order_id=task.master_order_id, msg_type=ev.msg_type, price=ev.price,
                                          limit_price=ev.limit_price, stop_price=ev.stop_price)
+            if self.journal:
+                self.journal.write("out", {"msg_type": ev.msg_type, "account": task.target_account, "action": ev.action,
+                                           "symbol": ev.symbol, "quantity": task.scaled_quantity, "order_type": ev.order_type,
+                                           "master_order_id": task.master_order_id, "rule_id": task.rule_id})
             task.status = "SENT"
             self.stats["orders_out"] += 1
             if ev.msg_type == "ORDER_PENDING":
@@ -222,6 +245,31 @@ class ReplicationService:
             self.stats["errors"] += 1
             self.audit.log("ERROR", f"Fallo replicando a {task.target_account}: {exc}",
                            source=ev.account, target=task.target_account)
+
+    def _desync_blocks(self, follower: str, event: MasterEvent) -> bool:
+        """Con DESYNC solo pasan las copias que reducen la exposición actual de la seguidora."""
+        snap = self.accounts.accounts.get(follower) if self.accounts else None
+        if not snap or not snap.desync:
+            return False
+        pos = self.accounts.position(follower, event.symbol)
+        buying = event.action.upper().startswith("BUY")
+        reduces = (pos > 0 and not buying) or (pos < 0 and buying)
+        return not reduces
+
+    def _check_seq(self, data: dict) -> None:
+        seq = data.get("seq")
+        if not isinstance(seq, int):
+            return
+        if self._last_seq is not None:
+            if seq < self._last_seq:
+                self.stats["addon_restarts"] += 1
+                self.audit.log("ADDON_RESTART", f"El addon de NinjaTrader se reinició (seq {self._last_seq} -> {seq}); revisando posiciones")
+            elif seq > self._last_seq + 1:
+                missed = seq - self._last_seq - 1
+                self.stats["seq_gaps"] += missed
+                self.audit.log("GAP", f"Se perdieron {missed} mensajes del addon (seq {self._last_seq} -> {seq}); revisando posiciones",
+                               details={"missed": missed})
+        self._last_seq = seq
 
     # ---- followers (ACK de vuelta) ----
     def _on_follower_fill(self, event: MasterEvent) -> None:
@@ -254,6 +302,9 @@ class ReplicationService:
         if state in REJECTED_STATES or error:
             self.stats["rejected"] += 1
             self.audit.log("FOLLOWER_REJECTED", f"{account}: {desc} {error} {native}".strip(), target=account, details=details)
+            order_type = str(data.get("order_type", "")).upper().replace("_", "")
+            if order_type in STOP_TYPES and self.close_on_stop_reject:
+                self.bus.publish_nowait("risk.naked", {"account": account, "reason": f"stop rechazado: {error} {native}".strip()})
         else:
             self.audit.log("FOLLOWER_STATUS", f"{account}: {desc}", target=account, details=details)
 

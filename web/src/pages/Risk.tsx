@@ -11,11 +11,28 @@ export function Risk() {
   const [halted, setHalted] = useState(false);
   if (!client) return null;
 
+  const [flattenOnKill, setFlattenOnKill] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
   async function toggleKill() {
     const active = !risk?.kill_switch;
-    if (active && !confirm("¿Activar el KILL SWITCH? Se bloquearán todas las réplicas.")) return;
+    if (active && !confirm(flattenOnKill
+      ? "¿KILL SWITCH? Se bloquean todas las réplicas Y SE CIERRAN las posiciones de las seguidoras a mercado."
+      : "¿KILL SWITCH? Se bloquean todas las réplicas (las posiciones abiertas se quedan).")) return;
     const reason = active ? prompt("Motivo (opcional)") ?? undefined : undefined;
-    setRisk(await client!.killSwitch(active, reason));
+    setBusy(true);
+    try { setRisk(await client!.killSwitch(active, reason, active && flattenOnKill)); } finally { setBusy(false); }
+  }
+  async function flattenAll(includeMaster: boolean) {
+    if (!confirm(includeMaster ? "¿CERRAR TODO, incluida la maestra? Cancela órdenes y cierra posiciones a mercado en todas las cuentas."
+                               : "¿Cerrar todas las seguidoras? Cancela sus órdenes y cierra sus posiciones a mercado.")) return;
+    setBusy(true); setMsg(null);
+    try {
+      const r = await client!.flattenAll(includeMaster, "manual desde consola");
+      const entries = Object.entries(r.results);
+      setMsg(entries.length ? entries.map(([a, res]) => `${a}: ${res.startsWith("OK") ? "cerrada" : res}`).join(" · ") : "No hay seguidoras vinculadas.");
+    } catch (ex) { setMsg(ex instanceof Error ? ex.message : String(ex)); }
+    finally { setBusy(false); }
   }
   async function save(e: FormEvent) {
     e.preventDefault();
@@ -31,10 +48,22 @@ export function Risk() {
             <h2>Kill switch global</h2>
             <p className="muted">{risk?.kill_switch ? `Activo desde ${time(risk.kill_switch_at)}${risk.kill_switch_reason ? ` · ${risk.kill_switch_reason}` : ""}` : "Inactivo. Las reglas replican con normalidad."}</p>
           </div>
-          <button className={risk?.kill_switch ? "primary" : "danger-solid"} onClick={toggleKill}>
-            {risk?.kill_switch ? "Reanudar replicación" : "DETENER TODO"}
-          </button>
+          <div className="kill-actions">
+            {!risk?.kill_switch && <label className="inline small"><input type="checkbox" checked={flattenOnKill} onChange={(e) => setFlattenOnKill(e.target.checked)} /> y cerrar posiciones de seguidoras</label>}
+            <button className={risk?.kill_switch ? "primary" : "danger-solid"} disabled={busy} onClick={toggleKill}>
+              {risk?.kill_switch ? "Reanudar replicación" : "DETENER TODO"}
+            </button>
+          </div>
         </div>
+      </Card>
+
+      <Card title="Cierre de emergencia">
+        <p className="muted">Cancela todas las órdenes y cierra las posiciones a mercado en NinjaTrader. Requiere addon v1.5 o superior.</p>
+        <div className="kill-actions">
+          <button className="danger-solid" disabled={busy} onClick={() => void flattenAll(false)}>Cerrar todas las seguidoras</button>
+          <button className="danger-solid" disabled={busy} onClick={() => void flattenAll(true)}>Cerrar TODO (incluida la maestra)</button>
+        </div>
+        {msg && <p className="muted small">{msg}</p>}
       </Card>
 
       <Card title="Límites por cuenta">

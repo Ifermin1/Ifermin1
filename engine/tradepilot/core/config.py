@@ -28,6 +28,12 @@ class Settings(BaseSettings):
 
     ACCOUNT_SYNC_SECONDS: float = 2.0
     DB_PATH: str = "data/tradepilot.db"
+    JOURNAL_DIR: str = "data/journal"     # "" para desactivar
+
+    # Protecciones
+    DESYNC_GRACE_SECONDS: float = 6.0     # cuánto puede diferir una seguidora antes de marcar DESYNC
+    CLOSE_ON_STOP_REJECT: bool = True     # stop rechazado en una seguidora => cerrar su posición
+    MIN_ADDON_VERSION: str = "1.5"
 
 
 settings = Settings()
