@@ -127,7 +127,9 @@ cierra; no se reanuda mientras el P&L siga por debajo), objetivo de ganancia dia
 hasta el día siguiente, `reopen` manual), tamaño máximo de posición resultante, y vigilancia del heartbeat (`ADDON_SILENT`).
 Nivel 3 (hecho): CI en GitHub (pytest, build y escenarios contra el addon simulado), arranque automático del engine
 (tarea programada con reinicio), mapeo de símbolo por seguidora (`target_root`), entradas límite con tolerancia y plazo
-(`entry_mode`, addon v1.7), autocuración del canal de eventos (`RESUBSCRIBE`).
+(`entry_mode`, addon v1.7), autocuración del canal de eventos (`RESUBSCRIBE`): vigilante del heartbeat (15 s) y, con addon v1.8, comparación por
+el canal de comandos (`PING` → `PONG|boot|seq`) que detecta en ~4 s un reinicio o eventos que no llegan; tras reconectar
+se vuelve a pedir `WATCH` de cada seguidora (`ADDON_RECOVERY`).
 Pendiente: avisos por Telegram.
 
 ## 7. Próximos pasos sugeridos

@@ -13,6 +13,10 @@ class BridgeHealth(DomainModel):
     last_heartbeat: Optional[datetime] = None
     master_account: Optional[str] = None   # la publica el addon en cada HEARTBEAT
     addon_version: Optional[str] = None    # >= 1.1 anuncia versión en el HEARTBEAT
+    addon_boot: Optional[str] = None       # id de arranque del addon visto por el canal de eventos (>= 1.8)
+    addon_boot_req: Optional[str] = None   # id de arranque según el canal de comandos (PING)
+    addon_seq_req: Optional[int] = None    # último seq publicado según el canal de comandos (PING)
+    resubscribes: int = 0                  # reconexiones del canal de eventos
     error_count: int = 0
     master_feed_up: bool = False     # SUB 5555
     follower_feed_up: bool = False   # PUB 5556

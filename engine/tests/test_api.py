@@ -317,6 +317,43 @@ async def test_daily_profit_target_halts_and_flattens(client: AsyncClient, conta
     assert next(l for l in container.store.get_risk_limits() if l.account_id == "Sim102").max_daily_profit == 2000
 
 
+async def test_stale_event_channel_is_reconnected_and_followers_rewatched(client: AsyncClient, container):
+    from datetime import datetime, timedelta
+    b = container.bridge
+    b.health.master_account = "Sim101"
+    await client.put("/api/accounts/Sim102/link", json={"master_account": "Sim101"})
+    assert b.watched == ["Sim102"]
+    # el canal de eventos vio el arranque "A"; por comandos el addon dice que ya es el arranque "B" y lleva 500 mensajes
+    b.health.addon_boot = "A"
+    b.health.last_msg_in = datetime.now() - timedelta(seconds=10)
+    b.boot, b.seq = "B", 500
+    await container.accounts.sync_once()          # 1ª comprobación sospechosa
+    assert b.health.resubscribes == 0
+    await container.accounts.sync_once()          # 2ª seguida -> reconectar
+    assert b.health.resubscribes == 1
+    types = [a.event_type for a in container.audit.recent(6)]
+    assert "RESUBSCRIBE" in types and "ADDON_RECOVERY" in types
+    assert b.watched == ["Sim102", "Sim102"], "tras reconectar hay que volver a pedir WATCH de la seguidora"
+    # con mensajes recientes no se toca nada aunque el seq por comandos vaya por delante
+    b.health.last_msg_in = datetime.now()
+    await container.accounts.sync_once(); await container.accounts.sync_once()
+    assert b.health.resubscribes == 1
+
+
+async def test_addon_restart_seen_on_events_rewatches_followers(client: AsyncClient, container):
+    b = container.bridge
+    b.health.master_account = "Sim101"
+    await client.put("/api/accounts/Sim102/link", json={"master_account": "Sim101"})
+    await b.emit_master_event(seq=50, action="BUY", quantity=1, symbol="NQ 12-26")
+    await b.emit_master_event(seq=1, action="SELL", quantity=1, symbol="NQ 12-26")
+    types = [a.event_type for a in container.audit.recent(12)]
+    assert "ADDON_RESTART" in types and "ADDON_RECOVERY" in types
+    assert b.watched == ["Sim102", "Sim102"]
+    assert container.replication.stats["addon_restarts"] == 1
+    # y la operación posterior al reinicio se copia igual
+    assert any(a.event_type == "REPLICATED" for a in container.audit.recent(6))
+
+
 async def test_schedule_window_and_scheduled_flatten(client: AsyncClient, container):
     from datetime import datetime
     b = container.bridge

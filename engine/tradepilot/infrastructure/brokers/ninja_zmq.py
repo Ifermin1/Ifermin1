@@ -108,12 +108,26 @@ class NinjaZmqBridge(BrokerBridge):
                 return None
 
     async def ping(self) -> bool:
-        return (await self.request("PING", timeout_ms=2000)) == "PONG"
+        reply = await self.request("PING", timeout_ms=2000)
+        return reply is not None and reply.startswith("PONG")
+
+    async def ping_state(self) -> tuple[bool, str | None, int | None]:
+        """Addon >= 1.8 responde "PONG|<boot>|<seq>": permite saber si publica eventos que no nos llegan."""
+        reply = await self.request("PING", timeout_ms=2000)
+        if reply is None or not reply.startswith("PONG"):
+            return False, None, None
+        parts = reply.split("|")
+        if len(parts) < 3:
+            return True, None, None
+        try:
+            return True, parts[1] or None, int(parts[2])
+        except ValueError:
+            return True, parts[1] or None, None
 
     async def resubscribe(self) -> None:
         """Recrea el socket SUB y su tarea de escucha. Se usa cuando el addon responde a comandos
         pero no llegan eventos (típico tras un reinicio de NinjaTrader o del addon)."""
-        self.stats_resubscribes = getattr(self, "stats_resubscribes", 0) + 1
+        self.health.resubscribes += 1
         if self._listen_task and not self._listen_task.done():
             self._listen_task.cancel()
             try:

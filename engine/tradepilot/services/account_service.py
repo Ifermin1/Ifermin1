@@ -88,6 +88,10 @@ class AccountService:
                 logger.error(f"Error en vigilancia de sincronización: {exc}")
         await self.bus.publish(TOPIC_HEALTH, self.health().model_dump(mode="json"))
 
+    def forget_watches(self) -> None:
+        """Tras un reinicio del addon hay que volver a pedir WATCH de cada seguidora."""
+        self._watched.clear()
+
     async def watch(self, account_id: str) -> None:
         """Pide al addon que reporte esa cuenta (órdenes/posiciones) aunque aún no le hayamos mandado órdenes."""
         if account_id in self._watched:

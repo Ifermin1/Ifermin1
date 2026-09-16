@@ -41,8 +41,14 @@ class BrokerBridge(ABC):
         """¿El bróker responde a consultas? (canal de comandos)"""
         return True
 
+    async def ping_state(self) -> tuple[bool, str | None, int | None]:
+        """(responde, id de arranque, último seq publicado) según el canal de comandos. Los dos últimos
+        son None si el bróker no los reporta (addon < 1.8): entonces solo vigila el heartbeat."""
+        return await self.ping(), None, None
+
     async def resubscribe(self) -> None:
         """Reconecta el canal de eventos (heartbeat/operaciones) sin tocar el de comandos."""
+        self.health.resubscribes += 1
 
     async def set_master(self, account: str) -> str:
         """Cambia la cuenta maestra en el bróker. Devuelve el nombre aplicado o lanza RuntimeError."""

@@ -12,6 +12,7 @@ Uso:  python scripts/fake_ninja.py            (una operación del maestro cada 5
       python scripts/fake_ninja.py --old-addon (imita un addon sin GET_ACCOUNTS_ALL)
       python scripts/fake_ninja.py --manual   (no opera solo; petición "EMIT|BUY|1" por 5557 dispara una operación)
       python scripts/fake_ninja.py --no-fill-limits (las entradas límite quedan trabajando: prueba el fallback del addon)
+  Ganchos por 5557: EMIT|BUY|2, SET_PNL|cuenta|valor, MUTE|segundos (simula un canal de eventos atascado)
 """
 import json
 import random
@@ -34,6 +35,8 @@ SYMBOL = "NQ 12-26"
 POSITIONS: dict[tuple, int] = {}   # (cuenta, símbolo) -> qty con signo; se actualiza con los fills
 PNL: dict[str, float] = {}         # P&L del día por cuenta (gancho de pruebas SET_PNL|cuenta|valor)
 SEQ = 0
+BOOT = uuid.uuid4().hex[:8]        # cambia en cada arranque, como en el addon v1.8
+MUTE_UNTIL = 0.0                   # gancho de pruebas MUTE|N: durante N s publica "al vacío" (canal de eventos atascado)
 
 
 def now() -> str:
@@ -57,6 +60,8 @@ next_emit, next_hb, next_price, emitted = time.time() + 2, time.time() + 5, time
 def send(obj: dict) -> None:
     global SEQ
     SEQ += 1
+    if time.time() < MUTE_UNTIL:
+        return                     # el addon "publica" (seq avanza) pero el engine no recibe nada
     pub.send_string(json.dumps({"seq": SEQ, **obj}))
 
 
@@ -85,7 +90,11 @@ while True:
                 send({"msg_type": "FLATTENED", "account": acc, "orders_cancelled": 0, "instruments_closed": n, "timestamp": now()})
                 print("FLATTEN", acc); rep.send_string(f"OK|{acc}|{n}")
             elif msg.startswith("WATCH|"):
-                rep.send_string("OK|" + msg.split("|", 1)[1])
+                print("WATCH", msg.split("|", 1)[1]); rep.send_string("OK|" + msg.split("|", 1)[1])
+            elif msg.startswith("MUTE|"):   # gancho de pruebas: MUTE|8 (eventos perdidos durante 8 s)
+                MUTE_UNTIL = time.time() + float(msg.split("|", 1)[1]); print("MUTE hasta", MUTE_UNTIL); rep.send_string("OK")
+            elif msg == "PING":
+                rep.send_string("PONG" if "--old-addon" in sys.argv else f"PONG|{BOOT}|{SEQ}")
             elif msg.startswith("SET_PNL|"):  # gancho de pruebas: SET_PNL|Sim102|-510
                 _, acc, val = msg.split("|"); PNL[acc] = float(val); rep.send_string("OK")
             elif msg.startswith("EMIT|"):   # gancho de pruebas: EMIT|BUY|2
@@ -99,7 +108,7 @@ while True:
                 new = msg.split("|", 1)[1]
                 if new in ACCOUNTS or new in OFFLINE:
                     MASTER = new; print("MASTER CAMBIADA A", MASTER)
-                    send({"msg_type": "HEARTBEAT", "account": MASTER, "version": "1.2", "timestamp": now()})
+                    send({"msg_type": "HEARTBEAT", "account": MASTER, "version": "1.2", "boot": BOOT, "timestamp": now()})
                     rep.send_string("OK|" + new)
                 else:
                     rep.send_string("ERROR|cuenta desconocida: " + new)
@@ -135,7 +144,7 @@ while True:
               "ask": round(price + 0.25, 2), "timestamp": now()})
         next_price = t + 0.25
     if t >= next_hb:
-        send({"msg_type": "HEARTBEAT", "account": MASTER, "version": "1.2", "timestamp": now()}); next_hb = t + 5
+        send({"msg_type": "HEARTBEAT", "account": MASTER, "version": "1.2", "boot": BOOT, "timestamp": now()}); next_hb = t + 5
     if t >= next_emit and not manual:
         oid = uuid.uuid4().hex[:8]; action = random.choice(["BUY", "SELL"])
         send({"msg_type": "EXECUTION", "account": MASTER, "action": action, "symbol": SYMBOL, "quantity": 1,

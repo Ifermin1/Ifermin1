@@ -36,6 +36,7 @@ class ReplicationService:
         self.risk = risk
         self.bus = bus
         self.accounts = accounts
+        self.on_restart = None                # corrutina(detalle) a llamar cuando el addon se reinicia (la inyecta el contenedor)
         self.journal = journal
         self.close_on_stop_reject = close_on_stop_reject
         self.sync = None                      # SyncService, lo inyecta el contenedor
@@ -114,7 +115,12 @@ class ReplicationService:
         msg_type = str(data.get("msg_type", "")).upper()
         if self.journal and msg_type != MSG_PRICE:
             self.journal.write("in", data)
-        self._check_seq(data)
+        restarted = self._check_seq(data)
+        if restarted and self.on_restart is not None:
+            try:
+                await self.on_restart(restarted)
+            except Exception as exc:
+                logger.error(f"Recuperación tras reinicio del addon: {exc}")
 
         if msg_type == "ENTRY_MISSED":
             self.audit.log("ENTRY_MISSED", f"{data.get('account')}: entrada límite {data.get('action')} {data.get('quantity')} "
@@ -133,6 +139,8 @@ class ReplicationService:
                 self.bridge.health.master_account = str(data["account"])
             if data.get("version"):
                 self.bridge.note_addon_version(str(data["version"]))
+            if data.get("boot"):
+                self.bridge.health.addon_boot = str(data["boot"])
             return []
         if msg_type == MSG_PRICE:
             await self.bus.publish(TOPIC_PRICE, data)
@@ -287,20 +295,28 @@ class ReplicationService:
         reduces = (pos > 0 and not buying) or (pos < 0 and buying)
         return not reduces
 
-    def _check_seq(self, data: dict) -> None:
+    @property
+    def last_seq(self) -> int | None:
+        return self._last_seq
+
+    def _check_seq(self, data: dict) -> str | None:
+        """Devuelve un texto si detecta que el addon se reinició (seq hacia atrás)."""
         seq = data.get("seq")
         if not isinstance(seq, int):
-            return
+            return None
+        restarted = None
         if self._last_seq is not None:
             if seq < self._last_seq:
                 self.stats["addon_restarts"] += 1
-                self.audit.log("ADDON_RESTART", f"El addon de NinjaTrader se reinició (seq {self._last_seq} -> {seq}); revisando posiciones")
+                restarted = f"El addon de NinjaTrader se reinició (seq {self._last_seq} -> {seq})"
+                self.audit.log("ADDON_RESTART", restarted + "; revisando posiciones")
             elif seq > self._last_seq + 1:
                 missed = seq - self._last_seq - 1
                 self.stats["seq_gaps"] += missed
                 self.audit.log("GAP", f"Se perdieron {missed} mensajes del addon (seq {self._last_seq} -> {seq}); revisando posiciones",
                                details={"missed": missed})
         self._last_seq = seq
+        return restarted
 
     # ---- followers (ACK de vuelta) ----
     def _on_follower_fill(self, event: MasterEvent) -> None:

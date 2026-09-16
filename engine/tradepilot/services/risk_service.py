@@ -30,6 +30,10 @@ class RiskService:
         self._silent_since: datetime | None = None
         self._last_resubscribe: datetime | None = None
         self.resubscribe_every = 30.0
+        self.stale_after = 2            # comprobaciones seguidas (una por sincronización) con eventos que no llegan
+        self.quiet_seconds = 3.0        # sin ningún mensaje del addon durante este tiempo = canal sospechoso
+        self._stale_checks = 0
+        self._started_at = datetime.now()
         self._warned_80: set[tuple[str, str, str]] = set()   # (cuenta, día, loss|profit) avisadas al 80 %
         self.now = datetime.now                       # inyectable en pruebas
         bus.subscribe("risk.naked", self._on_naked)
@@ -82,6 +86,7 @@ class RiskService:
     async def check(self) -> None:
         """Se ejecuta tras cada sincronización de cuentas: heartbeat, pérdida diaria, cierre programado."""
         await self._check_heartbeat()
+        await self._check_event_channel()
         await self._check_daily_limits()
         await self._check_schedule()
 
@@ -92,7 +97,6 @@ class RiskService:
         now = datetime.now()
         if hb is None:
             # al arrancar, dar al addon el tiempo de un heartbeat antes de declararlo mudo
-            self._started_at = getattr(self, "_started_at", now)
             if (now - self._started_at).total_seconds() < self.heartbeat_timeout:
                 return
         silent = hb is None or (now - hb).total_seconds() > self.heartbeat_timeout
@@ -117,8 +121,59 @@ class RiskService:
             if alive:
                 await self.bridge.resubscribe()
                 self.audit.log("RESUBSCRIBE", "El addon responde a comandos pero no envía eventos: canal de eventos reconectado")
+                await self.on_addon_restart("Canal de eventos reconectado tras el silencio del addon")
             else:
                 self.audit.log("ADDON_DOWN", "El addon tampoco responde a comandos (PING): NinjaTrader cerrado o addon no cargado")
+
+    async def _check_event_channel(self) -> None:
+        """Detección rápida de un canal de eventos atascado: por el canal de comandos el addon (>= 1.8) dice qué
+        arranque es y cuántos mensajes lleva publicados; si publica y aquí no llega nada, se reconecta el canal
+        en segundos en vez de esperar al vigilante del heartbeat (15 s)."""
+        if self.bridge is None or self.replication is None:
+            return
+        try:
+            alive, boot, seq = await self.bridge.ping_state()
+        except Exception:
+            return
+        if not alive or (boot is None and seq is None):
+            self._stale_checks = 0
+            return
+        h = self.bridge.health
+        h.addon_boot_req, h.addon_seq_req = boot, seq
+        now = datetime.now()
+        last_in = h.last_msg_in
+        if last_in is not None:
+            quiet = (now - last_in).total_seconds() >= self.quiet_seconds
+        else:
+            quiet = (now - self._started_at).total_seconds() >= 10.0
+        sub_seq = self.replication.last_seq
+        boot_mismatch = bool(boot) and bool(h.addon_boot) and boot != h.addon_boot
+        seq_ahead = seq is not None and (sub_seq is None or seq > sub_seq)
+        stale = quiet and (boot_mismatch or seq_ahead)
+        if not stale:
+            self._stale_checks = 0
+            return
+        self._stale_checks += 1
+        if self._stale_checks < self.stale_after:
+            return
+        self._stale_checks = 0
+        await self.bridge.resubscribe()
+        why = ("el addon se reinició" if boot_mismatch else f"el addon lleva publicados {seq} mensajes y aquí el último recibido es {sub_seq}")
+        self.audit.log("RESUBSCRIBE", f"Los eventos del addon no estaban llegando ({why}): canal de eventos reconectado",
+                       details={"boot": boot, "seq": seq, "last_seq": sub_seq})
+        await self.on_addon_restart("Canal de eventos reconectado")
+
+    async def on_addon_restart(self, detail: str) -> None:
+        """Tras un reinicio del addon o una reconexión: volver a registrar las seguidoras (el addon olvidó sus WATCH)
+        y avisar de que pudieron perderse operaciones; la vigilancia de posiciones marcará DESYNC si fue así."""
+        followers = self.follower_accounts()
+        if self.accounts is not None:
+            self.accounts.forget_watches()
+            for acc in followers:
+                await self.accounts.watch(acc)
+        self.audit.log("ADDON_RECOVERY", f"{detail}. Seguidoras registradas de nuevo ({', '.join(followers) or 'ninguna'}). "
+                       "Si la maestra operó mientras tanto, la seguidora aparecerá DESINCRONIZADA: iguálala o ciérrala")
+        self.bus.publish_nowait(TOPIC_RISK, self.state().model_dump(mode="json"))
 
     async def _check_daily_limits(self) -> None:
         """Pérdida máxima y objetivo de ganancia del día por cuenta (P&L realizado + flotante del addon)."""

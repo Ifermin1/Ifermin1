@@ -12,6 +12,7 @@
 //                                  "GET_POSITIONS"    -> "Sim101|NQ SEP26|Long|2|28936.0;..."  (todas las cuentas)
 //                                  "FLATTEN|Sim102"   -> "OK|Sim102|2"  (cancela órdenes y cierra posiciones)
 //                                  "WATCH|Sim102"     -> "OK|Sim102"  (escuchar órdenes/posiciones de un follower)
+//                                  "PING"             -> "PONG|<boot>|<seq>" (v1.8: arranque del addon y último seq publicado)
 //   Todos los mensajes publicados llevan "seq" creciente para detectar pérdidas.
 //
 // Instalación: ver ninjatrader/README.md (requiere NetMQ.dll + AsyncIO.dll en
@@ -40,7 +41,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 {
     public class TradePilotXBridge : AddOnBase
     {
-        private const string BridgeVersion = "1.7";
+        private const string BridgeVersion = "1.8";
 
         // ---- configuración ------------------------------------------------
         private class BridgeConfig
@@ -99,6 +100,9 @@ namespace NinjaTrader.NinjaScript.AddOns
         private readonly ConcurrentDictionary<string, Account> followers = new ConcurrentDictionary<string, Account>();
         private readonly object lifecycleLock = new object();
         private long seq;
+        // id único de cada arranque del bridge: el engine lo compara entre el canal de eventos y el de comandos
+        // para detectar en segundos que se reinició el addon y sus eventos ya no le llegan
+        private string bootId = "";
 
         // ===================================================================
         protected override void OnStateChange()
@@ -159,7 +163,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                     heartbeatTimer = new NetMQTimer(TimeSpan.FromMilliseconds(Math.Max(1000, cfg.HeartbeatMs)));
                     heartbeatTimer.Elapsed += (s, e) =>
                     {
-                        Publish(Json.Obj("msg_type", "HEARTBEAT", "account", cfg.MasterAccount, "version", BridgeVersion, "timestamp", Now()));
+                        Publish(Json.Obj("msg_type", "HEARTBEAT", "account", cfg.MasterAccount, "version", BridgeVersion, "boot", bootId, "timestamp", Now()));
                         CheckSilentFeeds();
                     };
 
@@ -167,13 +171,14 @@ namespace NinjaTrader.NinjaScript.AddOns
                     poller.RunAsync();
                     running = true;
 
+                    bootId = Guid.NewGuid().ToString("N").Substring(0, 8);
                     Account.AccountStatusUpdate += OnAccountStatusUpdate;
                     AttachMaster();
                     RebuildState();
                     foreach (string sym in cfg.PriceInstruments)
                         EnsurePriceFeed(sym);
 
-                    Info(string.Format("Bridge v{0} online. master={1} pub={2} sub={3} sync={4} (v1.7: entradas límite con tolerancia)",
+                    Info(string.Format("Bridge v{0} online. master={1} pub={2} sub={3} sync={4} (v1.8: PING con boot/seq)",
                         BridgeVersion, cfg.MasterAccount, cfg.MasterPort, cfg.FollowerPort, cfg.SyncPort));
                 }
                 catch (Exception ex)
@@ -257,7 +262,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                 cfg.MasterAccount = name;
                 SaveConfig();
                 AttachMaster();
-                Publish(Json.Obj("msg_type", "HEARTBEAT", "account", cfg.MasterAccount, "version", BridgeVersion, "timestamp", Now()));
+                Publish(Json.Obj("msg_type", "HEARTBEAT", "account", cfg.MasterAccount, "version", BridgeVersion, "boot", bootId, "timestamp", Now()));
                 Info("Cuenta master cambiada a " + name + (master == null ? " (aún no conectada)" : ""));
             }
             return "OK|" + name;
@@ -909,7 +914,8 @@ namespace NinjaTrader.NinjaScript.AddOns
                 }
                 else if (request == "PING")
                 {
-                    reply = "PONG";
+                    // v1.8: arranque y último seq publicado, para que el engine sepa si se está perdiendo eventos
+                    reply = "PONG|" + bootId + "|" + System.Threading.Interlocked.Read(ref seq).ToString(CultureInfo.InvariantCulture);
                 }
                 else
                 {

@@ -31,6 +31,9 @@ class MockBridge(BrokerBridge):
         self.fill_orders = True   # las órdenes enviadas actualizan la posición del simulador
         self.pnl: dict[str, float] = {}   # P&L del día por cuenta (pruebas)
         self.sent_orders: list[dict] = []
+        self.watched: list[str] = []      # cuentas por las que el engine pidió WATCH
+        self.boot: str | None = None      # simula el "PONG|boot|seq" del addon >= 1.8 (pruebas)
+        self.seq: int | None = None
         self._task: asyncio.Task | None = None
         self._running = False
 
@@ -76,6 +79,13 @@ class MockBridge(BrokerBridge):
 
     async def resubscribe(self) -> None:
         self.resubscribes = getattr(self, "resubscribes", 0) + 1
+        self.health.resubscribes += 1
+
+    async def watch(self, account: str) -> None:
+        self.watched.append(account)
+
+    async def ping_state(self) -> tuple[bool, str | None, int | None]:
+        return True, self.boot, self.seq
 
     async def get_positions(self) -> list[BrokerPosition] | None:
         return [BrokerPosition(account_id=a, symbol=sym, quantity=q) for (a, sym), q in self.positions.items() if q]
