@@ -70,6 +70,30 @@ def apply_fill(account: str, action: str, symbol: str, qty: int) -> None:
     POSITIONS[(account, symbol)] = POSITIONS.get((account, symbol), 0) + sign * qty
 
 
+def handle_order(raw: str, via: str) -> str:
+    """Orden del engine: por 5556 (sin confirmación) o por 5557 como ORDER|json (v1.9, con confirmación)."""
+    o = json.loads(raw)
+    print(f"ORDEN RECIBIDA DEL ENGINE ({via}):", raw)
+    fid = "F" + uuid.uuid4().hex[:6]
+    base = {"account": o["account"], "action": o["action"], "symbol": o["symbol"], "quantity": o["quantity"],
+            "order_type": o["order_type"], "order_id": fid, "master_order_id": o["master_order_id"], "timestamp": now()}
+    is_limit_entry = o.get("entry_mode") == "limit"
+    if is_limit_entry:
+        print(f"  entrada límite: tolerancia {o.get('tolerance_ticks')} ticks, {o.get('entry_timeout_s')} s, luego {o.get('entry_fallback')}")
+    if reject:
+        send({**base, "msg_type": "ORDER_STATUS", "filled": 0, "price": 0, "limit_price": 0, "stop_price": 0,
+              "state": "Rejected", "error": "OrderRejected", "native_error": "Insufficient margin"})
+    elif is_limit_entry and no_fill_limits:
+        send({**base, "msg_type": "ORDER_STATUS", "filled": 0, "price": 0, "limit_price": o.get("price", 0), "stop_price": 0,
+              "state": "Working", "error": "", "native_error": ""})
+    else:
+        send({**base, "msg_type": "ORDER_STATUS", "filled": o["quantity"], "price": price, "limit_price": 0,
+              "stop_price": 0, "state": "Filled", "error": "", "native_error": ""})
+        send({**base, "msg_type": "EXECUTION", "price": price, "state": "Filled", "execution_id": "E" + fid})
+        apply_fill(o["account"], o["action"], o["symbol"], o["quantity"])
+    return "OK|" + o["msg_type"]
+
+
 while True:
     for sock, _ in poller.poll(100):
         if sock is rep:
@@ -93,6 +117,8 @@ while True:
                 print("WATCH", msg.split("|", 1)[1]); rep.send_string("OK|" + msg.split("|", 1)[1])
             elif msg.startswith("MUTE|"):   # gancho de pruebas: MUTE|8 (eventos perdidos durante 8 s)
                 MUTE_UNTIL = time.time() + float(msg.split("|", 1)[1]); print("MUTE hasta", MUTE_UNTIL); rep.send_string("OK")
+            elif msg.startswith("ORDER|"):
+                rep.send_string("ERROR|unknown request" if "--old-addon" in sys.argv else handle_order(msg[6:], "5557"))
             elif msg == "PING":
                 rep.send_string("PONG" if "--old-addon" in sys.argv else f"PONG|{BOOT}|{SEQ}")
             elif msg.startswith("SET_PNL|"):  # gancho de pruebas: SET_PNL|Sim102|-510
@@ -118,25 +144,7 @@ while True:
             else:
                 rep.send_string("PONG" if msg == "PING" else "ERROR|unknown request")
         elif sock is sub:
-            raw = sub.recv_string(); o = json.loads(raw)
-            print("ORDEN RECIBIDA DEL ENGINE:", raw)
-            fid = "F" + uuid.uuid4().hex[:6]
-            base = {"account": o["account"], "action": o["action"], "symbol": o["symbol"], "quantity": o["quantity"],
-                    "order_type": o["order_type"], "order_id": fid, "master_order_id": o["master_order_id"], "timestamp": now()}
-            is_limit_entry = o.get("entry_mode") == "limit"
-            if is_limit_entry:
-                print(f"  entrada límite: tolerancia {o.get('tolerance_ticks')} ticks, {o.get('entry_timeout_s')} s, luego {o.get('entry_fallback')}")
-            if reject:
-                send({**base, "msg_type": "ORDER_STATUS", "filled": 0, "price": 0, "limit_price": 0, "stop_price": 0,
-                      "state": "Rejected", "error": "OrderRejected", "native_error": "Insufficient margin"})
-            elif is_limit_entry and no_fill_limits:
-                send({**base, "msg_type": "ORDER_STATUS", "filled": 0, "price": 0, "limit_price": o.get("price", 0), "stop_price": 0,
-                      "state": "Working", "error": "", "native_error": ""})
-            else:
-                send({**base, "msg_type": "ORDER_STATUS", "filled": o["quantity"], "price": price, "limit_price": 0,
-                      "stop_price": 0, "state": "Filled", "error": "", "native_error": ""})
-                send({**base, "msg_type": "EXECUTION", "price": price, "state": "Filled", "execution_id": "E" + fid})
-                apply_fill(o["account"], o["action"], o["symbol"], o["quantity"])
+            handle_order(sub.recv_string(), "5556")
     t = time.time()
     if t >= next_price:
         price += random.uniform(-2, 2)

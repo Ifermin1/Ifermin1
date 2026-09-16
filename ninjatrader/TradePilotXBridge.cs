@@ -13,6 +13,8 @@
 //                                  "FLATTEN|Sim102"   -> "OK|Sim102|2"  (cancela órdenes y cierra posiciones)
 //                                  "WATCH|Sim102"     -> "OK|Sim102"  (escuchar órdenes/posiciones de un follower)
 //                                  "PING"             -> "PONG|<boot>|<seq>" (v1.8: arranque del addon y último seq publicado)
+//                                  "ORDER|{json}"     -> "OK|tipo" / "IGNORED|motivo" / "ERROR|motivo" (v1.9: orden con confirmación;
+//                                                        mismo JSON que por 5556, que sigue aceptándose para engines antiguos)
 //   Todos los mensajes publicados llevan "seq" creciente para detectar pérdidas.
 //
 // Instalación: ver ninjatrader/README.md (requiere NetMQ.dll + AsyncIO.dll en
@@ -41,7 +43,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 {
     public class TradePilotXBridge : AddOnBase
     {
-        private const string BridgeVersion = "1.8";
+        private const string BridgeVersion = "1.9";
 
         // ---- configuración ------------------------------------------------
         private class BridgeConfig
@@ -178,7 +180,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                     foreach (string sym in cfg.PriceInstruments)
                         EnsurePriceFeed(sym);
 
-                    Info(string.Format("Bridge v{0} online. master={1} pub={2} sub={3} sync={4} (v1.8: PING con boot/seq)",
+                    Info(string.Format("Bridge v{0} online. master={1} pub={2} sub={3} sync={4} (v1.9: órdenes con confirmación por 5557)",
                         BridgeVersion, cfg.MasterAccount, cfg.MasterPort, cfg.FollowerPort, cfg.SyncPort));
                 }
                 catch (Exception ex)
@@ -489,9 +491,17 @@ namespace NinjaTrader.NinjaScript.AddOns
         private void OnFollowerMessage(object sender, NetMQSocketEventArgs e)
         {
             string raw = null;
+            try { raw = e.Socket.ReceiveFrameString(); }
+            catch (Exception ex) { Error("OnFollowerMessage: " + ex.Message); return; }
+            HandleFollowerMessage(raw);
+        }
+
+        /// <summary>Orden de TradePilot. Llega por 5556 (PUB/SUB, sin confirmación) o, desde v1.9, como "ORDER|json"
+        /// por 5557 (REQ/REP): así el engine sabe con certeza si la orden llegó. Devuelve "OK|...", "IGNORED|..." o "ERROR|...".</summary>
+        private string HandleFollowerMessage(string raw)
+        {
             try
             {
-                raw = e.Socket.ReceiveFrameString();
                 Dictionary<string, string> m = Json.ParseFlat(raw);
                 string msgType = Get(m, "msg_type").ToUpperInvariant();
                 string accountName = Get(m, "account");
@@ -503,8 +513,8 @@ namespace NinjaTrader.NinjaScript.AddOns
                 Account account;
                 lock (Account.All)
                     account = Account.All.FirstOrDefault(a => a.Name == accountName);
-                if (account == null) { Warn("Follower desconocido: " + accountName + " | " + raw); return; }
-                if (account.Name == cfg.MasterAccount) { Warn("Ignorada orden dirigida a la cuenta master (bucle): " + raw); return; }
+                if (account == null) { Warn("Follower desconocido: " + accountName + " | " + raw); return "ERROR|follower desconocido: " + accountName; }
+                if (account.Name == cfg.MasterAccount) { Warn("Ignorada orden dirigida a la cuenta master (bucle): " + raw); return "IGNORED|orden dirigida a la maestra"; }
 
                 string key = accountName + "|" + masterOrderId;
                 Order existing;
@@ -522,28 +532,28 @@ namespace NinjaTrader.NinjaScript.AddOns
                                     (int)NumOr(m, "entry_timeout_s", 5), Get(m, "entry_fallback"), entryKey, masterOrderId);
                             else
                                 SubmitNew(account, symbol, Get(m, "action"), OrderType.Market, qty, 0, 0, entryKey, masterOrderId);
-                            return;
+                            return "OK|EXECUTION";
                         }
                         // Copia de una orden PENDIENTE del master (stop / TP): su fill lo hace la propia orden del follower.
                         // Da igual que llegue antes o después: si la orden del follower está viva o ya ejecutó, no se copia.
                         {
-                            if (IsLive(existing)) { Info("EXECUTION ignorada: el follower ya tiene orden viva para " + masterOrderId); return; }
+                            if (IsLive(existing)) { Info("EXECUTION ignorada: el follower ya tiene orden viva para " + masterOrderId); return "IGNORED|el follower ya tiene orden viva"; }
                             int remaining = existing.Quantity - existing.Filled;
-                            if (remaining <= 0) { Info("EXECUTION ignorada: la orden del follower ya se ejecutó (" + masterOrderId + ")"); return; }
+                            if (remaining <= 0) { Info("EXECUTION ignorada: la orden del follower ya se ejecutó (" + masterOrderId + ")"); return "IGNORED|la orden del follower ya se ejecutó"; }
                             // La orden del follower quedó sin ejecutar del todo (rechazada / cancelada): copiamos el fill del
                             // master a mercado, pero nunca más de lo que faltó por ejecutar.
                             int already = reconciledQty.GetOrAdd(key, 0);
                             int toSend = Math.Min(qty, remaining - already);
-                            if (toSend <= 0) { Info("EXECUTION ignorada: lo pendiente de " + masterOrderId + " ya se cubrió"); return; }
+                            if (toSend <= 0) { Info("EXECUTION ignorada: lo pendiente de " + masterOrderId + " ya se cubrió"); return "IGNORED|lo pendiente ya se cubrió"; }
                             reconciledQty[key] = already + toSend;
                             Warn(string.Format("Orden del follower {0} quedó {1} con {2}/{3} ejecutados: copiando {4} a mercado",
                                 masterOrderId, existing.OrderState, existing.Filled, existing.Quantity, toSend));
                             SubmitNew(account, symbol, Get(m, "action"), OrderType.Market, toSend, 0, 0, key + "#recon" + already, masterOrderId);
-                            return;
+                            return "OK|EXECUTION_RECON";
                         }
 
                     case "ORDER_PENDING":
-                        if (existing != null && IsLive(existing)) { Info("ORDER_PENDING duplicada ignorada para " + key); return; }
+                        if (existing != null && IsLive(existing)) { Info("ORDER_PENDING duplicada ignorada para " + key); return "IGNORED|ORDER_PENDING duplicada"; }
                         {
                             OrderType type = ParseType(Get(m, "order_type"));
                             double limit = NumOr(m, "limit_price", type == OrderType.Limit || type == OrderType.StopLimit ? price : 0);
@@ -555,7 +565,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                         break;
 
                     case "ORDER_MODIFIED":
-                        if (existing == null || !IsWorking(existing)) { Warn("ORDER_MODIFIED sin orden trabajando para " + key); return; }
+                        if (existing == null || !IsWorking(existing)) { Warn("ORDER_MODIFIED sin orden trabajando para " + key); return "IGNORED|sin orden trabajando"; }
                         {
                             double limit = NumOr(m, "limit_price", price);
                             double stop = NumOr(m, "stop_price", price);
@@ -568,17 +578,18 @@ namespace NinjaTrader.NinjaScript.AddOns
                         break;
 
                     case "ORDER_CANCELLED":
-                        if (existing == null || !IsLive(existing)) { Info("ORDER_CANCELLED sin orden viva para " + key); return; }
+                        if (existing == null || !IsLive(existing)) { Info("ORDER_CANCELLED sin orden viva para " + key); return "IGNORED|sin orden viva"; }
                         try { account.Cancel(new[] { existing }); Info("Cancelada " + key); }
                         catch (Exception cx) { Warn("No se pudo cancelar " + key + " en estado " + existing.OrderState + ": " + cx.Message); }
                         break;
 
                     default:
                         Warn("msg_type desconocido desde TradePilot: " + msgType);
-                        break;
+                        return "ERROR|msg_type desconocido: " + msgType;
                 }
+                return "OK|" + msgType;
             }
-            catch (Exception ex) { Error("OnFollowerMessage: " + ex.Message + " | " + raw); }
+            catch (Exception ex) { Error("OnFollowerMessage: " + ex.Message + " | " + raw); return "ERROR|" + ex.Message; }
         }
 
         private void SubmitNew(Account account, string symbol, string action, OrderType type, int qty, double limit, double stop, string key, string masterOrderId)
@@ -911,6 +922,11 @@ namespace NinjaTrader.NinjaScript.AddOns
                 else if (request.StartsWith("SET_MASTER|"))
                 {
                     reply = SetMaster(request.Substring("SET_MASTER|".Length));
+                }
+                else if (request.StartsWith("ORDER|"))
+                {
+                    // v1.9: órdenes con confirmación. Si no respondemos, el engine lo sabe y reintenta; nunca se pierden en silencio.
+                    reply = HandleFollowerMessage(request.Substring("ORDER|".Length));
                 }
                 else if (request == "PING")
                 {

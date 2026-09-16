@@ -129,7 +129,9 @@ Nivel 3 (hecho): CI en GitHub (pytest, build y escenarios contra el addon simula
 (tarea programada con reinicio), mapeo de símbolo por seguidora (`target_root`), entradas límite con tolerancia y plazo
 (`entry_mode`, addon v1.7), autocuración del canal de eventos (`RESUBSCRIBE`): vigilante del heartbeat (15 s) y, con addon v1.8, comparación por
 el canal de comandos (`PING` → `PONG|boot|seq`) que detecta en ~4 s un reinicio o eventos que no llegan; tras reconectar
-se vuelve a pedir `WATCH` de cada seguidora (`ADDON_RECOVERY`).
+se vuelve a pedir `WATCH` de cada seguidora (`ADDON_RECOVERY`). Desde el addon v1.9 las órdenes van por el canal de
+comandos con confirmación (`ORDER|json` → `OK/IGNORED/ERROR`): una orden que el addon no confirma se reintenta una vez y,
+si sigue sin respuesta, queda como `ERROR` en la auditoría en vez de darse por enviada.
 Pendiente: avisos por Telegram.
 
 ## 7. Próximos pasos sugeridos

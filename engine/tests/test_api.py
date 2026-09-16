@@ -1,3 +1,6 @@
+import asyncio
+
+import pytest
 from httpx import AsyncClient
 
 from tests.conftest import TOKEN
@@ -428,3 +431,76 @@ async def test_link_with_execution_options_and_persistence(client: AsyncClient, 
     from tradepilot.infrastructure.persistence.sqlite_store import SQLiteStore
     rules = container.store.get_all_rules()
     assert rules[0].entry_mode == "limit" and rules[0].tolerance_ticks == 2
+
+
+async def test_orders_go_through_confirmed_channel_with_fallback():
+    """Con addon >= 1.9 la orden va por 5557 y se confirma; si el addon es antiguo, se cae a 5556 sin confirmación;
+    si el addon no responde, la orden se reintenta y luego falla con error en vez de darse por enviada."""
+    import threading
+    import zmq as pyzmq
+    from tradepilot.core.config import settings
+    from tradepilot.core.events import EventBus
+    from tradepilot.infrastructure.brokers.ninja_zmq import NinjaZmqBridge
+
+    ctx = pyzmq.Context()
+    rep = ctx.socket(pyzmq.REP); rep.setsockopt(pyzmq.LINGER, 0); rep.bind(f"tcp://127.0.0.1:{settings.ZMQ_SYNC_PORT}")
+    sub = ctx.socket(pyzmq.SUB); sub.setsockopt(pyzmq.LINGER, 0); sub.bind(f"tcp://127.0.0.1:{settings.ZMQ_FOLLOWER_PORT}")
+    sub.setsockopt_string(pyzmq.SUBSCRIBE, "")
+    received: list[str] = []
+    mode = {"reply": "OK|EXECUTION"}          # None = no contestar (addon colgado)
+    stop = threading.Event()
+
+    def serve() -> None:
+        while not stop.is_set():
+            if rep.poll(50):
+                msg = rep.recv_string(); received.append(msg)
+                if mode["reply"] is None:
+                    # REP no puede quedarse sin contestar: recreamos el socket para simular un addon mudo
+                    continue
+                rep.send_string(mode["reply"])
+    t = threading.Thread(target=serve, daemon=True); t.start()
+
+    b = NinjaZmqBridge(EventBus())
+    b.order_timeout_ms = 300
+    try:
+        await b.start()
+        await asyncio.sleep(0.2)
+        await b.send_order("Sim102", "BUY", "NQ 12-26", 1, "MARKET", "m1")
+        assert received[-1].startswith("ORDER|") and '"master_order_id": "m1"' in received[-1]
+        assert b.health.order_channel == "req" and b.health.orders_confirmed == 1
+        # el addon rechaza -> error claro
+        mode["reply"] = "ERROR|follower desconocido: X"
+        with pytest.raises(RuntimeError, match="rechazó"):
+            await b.send_order("X", "BUY", "NQ 12-26", 1, "MARKET", "m2")
+        # addon antiguo -> se cae a 5556
+        mode["reply"] = "ERROR|unknown request"
+        await b.send_order("Sim102", "BUY", "NQ 12-26", 1, "MARKET", "m3")
+        assert b.health.order_channel == "pub" and b._orders_via_req is False
+        # PUB/SUB puede perder el primer mensaje (slow joiner): justamente por eso el canal normal es el confirmado
+        got = []
+        for _ in range(5):
+            if sub.poll(300):
+                got.append(sub.recv_string()); break
+            await b.send_order("Sim102", "BUY", "NQ 12-26", 1, "MARKET", "m3")
+        assert got and '"master_order_id": "m3"' in got[0]
+        # el heartbeat anuncia addon 1.9 -> vuelve al canal con confirmación
+        b.note_addon_version("1.9")
+        assert b._orders_via_req is True
+    finally:
+        await b.stop()
+        stop.set(); t.join(timeout=2)
+        rep.close(); sub.close(); ctx.term()
+
+
+async def test_order_without_confirmation_fails_instead_of_silently_sent():
+    from tradepilot.core.events import EventBus
+    from tradepilot.infrastructure.brokers.ninja_zmq import NinjaZmqBridge
+    b = NinjaZmqBridge(EventBus())     # nadie escucha en 5557
+    b.order_timeout_ms = 200
+    try:
+        await b.start()
+        with pytest.raises(RuntimeError, match="no confirmó"):
+            await b.send_order("Sim102", "BUY", "NQ 12-26", 1, "MARKET", "m9")
+        assert b.health.orders_retried == 1 and b.health.orders_confirmed == 0
+    finally:
+        await b.stop()

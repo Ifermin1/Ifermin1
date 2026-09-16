@@ -12,7 +12,7 @@ funciona también con el addon anterior (solo verá las conectadas y lo avisará
 2. En NinjaTrader: *New → NinjaScript Editor*, carpeta *AddOns*, abre `TradePilotXBridge` (o crea uno con ese nombre).
 3. Sustituye todo el contenido por el de `TradePilotXBridge.cs` y pulsa **F5** (compilar). Debe compilar sin errores.
 4. Reinicia NinjaTrader (o desactiva y activa el addon). En *Tools → Output* debe aparecer
-   `[TradePilotX] Bridge v1.8 online. master=... (v1.8: PING con boot/seq)`.
+   `[TradePilotX] Bridge v1.9 online. master=... (v1.9: órdenes con confirmación por 5557)`.
 
 ## Protocolo (puerto 5557, REQ/REP)
 
@@ -25,12 +25,17 @@ funciona también con el addon anterior (solo verá las conectadas y lo avisará
 | `FLATTEN\|Sim102` | `OK\|Sim102\|n` cancela todas las órdenes vivas de la cuenta y cierra sus posiciones a mercado |
 | `WATCH\|Sim102` | `OK\|Sim102` suscribe órdenes/ejecuciones/posiciones de esa cuenta (ACK al engine) |
 | `SET_MASTER\|Sim102` | `OK\|Sim102` o `ERROR\|motivo`. Cambia la cuenta maestra en caliente y la guarda en `config.json` |
+| `ORDER\|{json}` | `OK\|tipo`, `IGNORED\|motivo` o `ERROR\|motivo` (v1.9). Mismo JSON que por 5556 |
 | `PING` | `PONG\|<boot>\|<seq>` (v1.8; antes `PONG`). `boot` cambia en cada arranque del addon y también viaja en el `HEARTBEAT` |
 
 El campo de estado es el `ConnectionStatus` de NinjaTrader (`Connected`, `Disconnected`, `Connecting`...).
 La cuenta maestra inicial se lee de `Documents\NinjaTrader 8\TradePilotX\config.json` (`MasterAccount`) y se puede cambiar desde la consola (v1.2+).
 
 ## Historial
+
+- **1.9**: las órdenes del engine llegan como `ORDER|{json}` por el canal de comandos (5557) y el addon las confirma
+  (`OK|tipo`, `IGNORED|motivo`, `ERROR|motivo`). Antes iban por 5556 (PUB/SUB) sin confirmación y, tras un reinicio del
+  addon, podían perderse en silencio (el engine las daba por enviadas). 5556 se mantiene para engines antiguos.
 
 - **1.8**: `PING` responde `PONG|<boot>|<seq>` y el `HEARTBEAT` lleva `boot`. Con ello el engine detecta en unos segundos
   que el addon se reinició o que publica eventos que no le llegan (canal de eventos atascado tras recompilar o reconectar),

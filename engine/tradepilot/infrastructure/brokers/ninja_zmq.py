@@ -30,9 +30,13 @@ class NinjaZmqBridge(BrokerBridge):
         self.sub_socket = self.context.socket(zmq.SUB)
         self.pub_socket = self.context.socket(zmq.PUB)
         self.req_socket = self.context.socket(zmq.REQ)
+        self.order_socket = self.context.socket(zmq.REQ)   # canal de órdenes con confirmación (addon >= 1.9)
         self._running = False
         self._listen_task: asyncio.Task | None = None
         self._req_lock = asyncio.Lock()
+        self._order_lock = asyncio.Lock()
+        self._orders_via_req = True   # se desactiva si el addon no conoce ORDER| (versión antigua)
+        self.order_timeout_ms = 3000
         self._supports_all = True   # se desactiva si el addon no conoce GET_ACCOUNTS_ALL
         self._retry_all_at = 0.0    # cuándo volver a probar GET_ACCOUNTS_ALL (el addon puede actualizarse en caliente)
 
@@ -53,6 +57,7 @@ class NinjaZmqBridge(BrokerBridge):
             self.req_socket.setsockopt(zmq.LINGER, 0)
             self.req_socket.connect(f"tcp://{host}:{settings.ZMQ_SYNC_PORT}")
             self.health.sync_up = True
+            self._reset_order_socket(first=True)
 
             self._running = True
             self._listen_task = asyncio.create_task(self._listen_master())
@@ -66,7 +71,7 @@ class NinjaZmqBridge(BrokerBridge):
         self._running = False
         if self._listen_task and not self._listen_task.done():
             self._listen_task.cancel()
-        for sock in (self.sub_socket, self.pub_socket, self.req_socket):
+        for sock in (self.sub_socket, self.pub_socket, self.req_socket, self.order_socket):
             sock.close(linger=0)
         self.context.term()
         self.health.master_feed_up = self.health.follower_feed_up = self.health.sync_up = False
@@ -142,7 +147,15 @@ class NinjaZmqBridge(BrokerBridge):
         self.sub_socket.connect(f"tcp://{settings.ZMQ_HOST}:{settings.ZMQ_MASTER_PORT}")
         self.sub_socket.setsockopt_string(zmq.SUBSCRIBE, "")
         self._listen_task = asyncio.create_task(self._listen_master())
-        logger.warning("Canal de eventos ZMQ (5555) reconectado")
+        # El canal de órdenes sin confirmación (5556) sufre el mismo problema tras un reinicio del addon: recrearlo también.
+        try:
+            self.pub_socket.close(linger=0)
+        except Exception:
+            pass
+        self.pub_socket = self.context.socket(zmq.PUB)
+        self.pub_socket.connect(f"tcp://{settings.ZMQ_HOST}:{settings.ZMQ_FOLLOWER_PORT}")
+        self._reset_order_socket()
+        logger.warning("Canales ZMQ de eventos (5555) y órdenes (5556/5557) reconectados")
 
     async def get_positions(self) -> list[BrokerPosition] | None:
         reply = await self.request("GET_POSITIONS")
@@ -272,6 +285,11 @@ class NinjaZmqBridge(BrokerBridge):
     def note_addon_version(self, version: str) -> None:
         if self.health.addon_version != version:
             logger.info(f"Addon de NinjaTrader v{version} detectado")
+            try:
+                if tuple(int(x) for x in version.split(".")[:2]) >= (1, 9) and not self._orders_via_req:
+                    self._orders_via_req = True   # el addon se actualizó en caliente: volver al canal con confirmación
+            except ValueError:
+                pass
         super().note_addon_version(version)
         if not self._supports_all:
             self._supports_all = True   # v1.1+ soporta GET_ACCOUNTS_ALL: reintentar ya
@@ -292,6 +310,30 @@ class NinjaZmqBridge(BrokerBridge):
         except Exception as exc:
             logger.error(f"No se pudo recrear el socket REQ: {exc}")
 
+    def _reset_order_socket(self, first: bool = False) -> None:
+        try:
+            if not first:
+                self.order_socket.close(linger=0)
+                self.order_socket = self.context.socket(zmq.REQ)
+            self.order_socket.setsockopt(zmq.LINGER, 0)
+            self.order_socket.connect(f"tcp://{settings.ZMQ_HOST}:{settings.ZMQ_SYNC_PORT}")
+        except Exception as exc:
+            logger.error(f"No se pudo recrear el socket de órdenes: {exc}")
+
+    async def _order_request(self, message: str) -> str | None:
+        """Como request() pero por el socket dedicado a órdenes (no espera detrás de la sincronización de cuentas)."""
+        async with self._order_lock:
+            try:
+                await self.order_socket.send_string(message)
+                if not await self.order_socket.poll(self.order_timeout_ms):
+                    self._reset_order_socket()
+                    return None
+                return await self.order_socket.recv_string()
+            except Exception as exc:
+                logger.error(f"Error enviando orden por 5557: {exc}")
+                self._reset_order_socket()
+                return None
+
     async def send_order(self, target_account, action, symbol, quantity, order_type, master_order_id,
                          msg_type="EXECUTION", price=0.0, limit_price=0.0, stop_price=0.0, entry=None) -> None:
         if not self._running:
@@ -303,10 +345,39 @@ class NinjaZmqBridge(BrokerBridge):
         }
         if entry:
             payload.update(entry)   # entry_mode / tolerance_ticks / entry_timeout_s / entry_fallback
+        raw = json.dumps(payload)
+        if self._orders_via_req:
+            # Canal con confirmación (addon >= 1.9): si el addon no contesta, se reintenta una vez (el addon ignora
+            # duplicados) y si sigue sin contestar se levanta error: nunca una orden "enviada" que nadie recibió.
+            reply = await self._order_request("ORDER|" + raw)
+            if reply is None:
+                self.health.orders_retried += 1
+                logger.warning(f"NinjaTrader no confirmó la orden {action} {quantity} {symbol} -> {target_account}: reintentando")
+                reply = await self._order_request("ORDER|" + raw)
+            if reply is None:
+                self.health.error_count += 1
+                raise RuntimeError(f"NinjaTrader no confirmó la orden en {2 * self.order_timeout_ms // 1000} s "
+                                   "(¿addon cargado? revisa el Output de NinjaTrader)")
+            if reply.startswith("ERROR|unknown request"):
+                self._orders_via_req = False
+                self.health.order_channel = "pub"
+                logger.warning("El addon no acepta órdenes por 5557 (anterior a v1.9): se usa 5556 sin confirmación. Actualiza el addon.")
+            else:
+                self.health.order_channel = "req"
+                self.health.last_msg_out = datetime.now()
+                if reply.startswith("ERROR|"):
+                    self.health.error_count += 1
+                    raise RuntimeError("NinjaTrader rechazó la orden: " + reply[6:])
+                self.health.orders_confirmed += 1
+                if reply.startswith("IGNORED|"):
+                    logger.info(f"Orden {action} {quantity} {symbol} -> {target_account} ignorada por el addon: {reply[8:]}")
+                else:
+                    logger.info(f"Orden confirmada -> {target_account} {action} {quantity} {symbol}")
+                return
         try:
-            await self.pub_socket.send_string(json.dumps(payload))
+            await self.pub_socket.send_string(raw)
             self.health.last_msg_out = datetime.now()
-            logger.info(f"Orden publicada -> {target_account} {action} {quantity} {symbol}")
+            logger.info(f"Orden publicada (5556, sin confirmación) -> {target_account} {action} {quantity} {symbol}")
         except Exception as exc:
             self.health.error_count += 1
             logger.error(f"Error publicando orden ZMQ: {exc}")

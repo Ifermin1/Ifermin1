@@ -17,6 +17,9 @@ class BridgeHealth(DomainModel):
     addon_boot_req: Optional[str] = None   # id de arranque según el canal de comandos (PING)
     addon_seq_req: Optional[int] = None    # último seq publicado según el canal de comandos (PING)
     resubscribes: int = 0                  # reconexiones del canal de eventos
+    order_channel: str = "pub"             # "req" = órdenes con confirmación por 5557 (addon >= 1.9); "pub" = 5556 sin confirmación
+    orders_confirmed: int = 0              # órdenes confirmadas por el addon
+    orders_retried: int = 0                # órdenes reenviadas por falta de confirmación
     error_count: int = 0
     master_feed_up: bool = False     # SUB 5555
     follower_feed_up: bool = False   # PUB 5556

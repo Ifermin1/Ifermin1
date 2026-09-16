@@ -43,6 +43,8 @@ api("/risk/limits", "PUT", {"account_id": "Sim102", "max_daily_loss": 500, "max_
 ninja("EMIT|BUY|2"); time.sleep(3.5)
 check("entrada copiada 2/2", pos("Sim101") == 2 and pos("Sim102") == 2, f"({pos('Sim101')}/{pos('Sim102')})")
 check("seq sin huecos", api("/health")["stats"]["seq_gaps"] == 0)
+h = api("/health")["bridge"]
+check("órdenes por canal con confirmación", h["order_channel"] == "req" and h["orders_confirmed"] >= 1, f"{h['order_channel']} {h['orders_confirmed']}")
 ninja("EMIT|BUY|2"); time.sleep(3)
 check("bloqueo por posición resultante", any(a["event_type"] == "BLOCKED" and "posición resultante" in a["message"] for a in api("/audit?limit=6")))
 api("/accounts/Sim102/flatten", "POST", {"reason": "ci"}); time.sleep(6.5)
