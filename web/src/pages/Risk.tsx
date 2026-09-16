@@ -1,6 +1,6 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useStore } from "../lib/store";
-import { time } from "../lib/format";
+import { money, time } from "../lib/format";
 import { Card, Empty } from "../components/ui";
 
 export function Risk() {
@@ -11,6 +11,8 @@ export function Risk() {
   const [halted, setHalted] = useState(false);
   if (!client) return null;
 
+  const [sched, setSched] = useState({ enabled: false, window_start: "", flatten_at: "", include_master: true });
+  useEffect(() => { if (risk?.schedule) setSched({ enabled: risk.schedule.enabled, window_start: risk.schedule.window_start, flatten_at: risk.schedule.flatten_at, include_master: risk.schedule.include_master }); }, [risk?.schedule]);
   const [flattenOnKill, setFlattenOnKill] = useState(true);
   const [flattenMaster, setFlattenMaster] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -34,6 +36,15 @@ export function Risk() {
       setMsg(entries.length ? entries.map(([a, res]) => `${a}: ${res.startsWith("OK") ? "cerrada" : res}`).join(" · ") : "No hay seguidoras vinculadas.");
     } catch (ex) { setMsg(ex instanceof Error ? ex.message : String(ex)); }
     finally { setBusy(false); }
+  }
+  async function saveSchedule(e: FormEvent) {
+    e.preventDefault();
+    try { await client!.setSchedule(sched); setRisk(await client!.risk()); setMsg("Horario guardado."); }
+    catch (ex) { setMsg(ex instanceof Error ? ex.message : String(ex)); }
+  }
+  async function reopen() {
+    if (!confirm("¿Levantar el bloqueo del cierre programado de hoy? Las copias se reanudan ahora.")) return;
+    setRisk(await client!.reopenSession());
   }
   async function save(e: FormEvent) {
     e.preventDefault();
@@ -61,6 +72,27 @@ export function Risk() {
         </div>
       </Card>
 
+      {risk?.addon_silent && (
+        <Card className="alert-card"><strong>Sin heartbeat del addon.</strong> NinjaTrader no está enviando nada desde hace más de 30 s: las operaciones de la maestra no se están copiando. Revisa que NinjaTrader esté abierto y el addon cargado.</Card>
+      )}
+      {risk?.session_closed && (
+        <Card className="alert-card"><div className="kill">
+          <div><strong>Sesión cerrada por horario</strong> ({risk.schedule.flatten_at}). No se copia nada hasta mañana.</div>
+          <button className="ghost" onClick={() => void reopen()}>Reabrir hoy</button></div></Card>
+      )}
+
+      <Card title="Horario de copia y cierre programado">
+        <p className="muted small">Hora local del PC donde corre el engine. Fuera de la ventana no se copia nada. A la hora de cierre se cancelan órdenes, se cierran posiciones y se bloquea hasta el día siguiente. Útil para la regla de las prop firms de estar plano al cierre.</p>
+        <form className="rule-form" onSubmit={saveSchedule}>
+          <label className="inline"><input type="checkbox" checked={sched.enabled} onChange={(e) => setSched({ ...sched, enabled: e.target.checked })} /> Horario activo</label>
+          <label>Copiar desde (HH:MM)<input type="time" value={sched.window_start} onChange={(e) => setSched({ ...sched, window_start: e.target.value })} /></label>
+          <label>Cerrar todo a las (HH:MM)<input type="time" value={sched.flatten_at} onChange={(e) => setSched({ ...sched, flatten_at: e.target.value })} /></label>
+          <label className="inline"><input type="checkbox" checked={sched.include_master} onChange={(e) => setSched({ ...sched, include_master: e.target.checked })} /> incluir la maestra</label>
+          <button className="primary">Guardar horario</button>
+        </form>
+        {risk?.schedule.enabled && <p className="muted small">Activo: {risk.schedule.window_start ? `desde ${risk.schedule.window_start}` : "sin hora de inicio"}{risk.schedule.flatten_at ? ` · cierre a las ${risk.schedule.flatten_at}` : " · sin cierre programado"}{risk.schedule.last_flatten_day ? ` · último cierre ${risk.schedule.last_flatten_day}` : ""}</p>}
+      </Card>
+
       <Card title="Cierre de emergencia">
         <p className="muted">Cancela todas las órdenes y cierra las posiciones a mercado en NinjaTrader. Requiere addon v1.5 o superior.</p>
         <div className="kill-actions">
@@ -81,11 +113,18 @@ export function Risk() {
         </form>
         {!risk || risk.limits.length === 0 ? <Empty>Sin límites configurados (0 = sin límite).</Empty> : (
           <div className="table-wrap"><table>
-            <thead><tr><th>Cuenta</th><th className="num">Pérdida máx.</th><th className="num">Tamaño máx.</th><th>Estado</th></tr></thead>
-            <tbody>{risk.limits.map((l) => (
-              <tr key={l.account_id}><td><b>{l.account_id}</b></td><td className="num">{l.max_daily_loss || "—"}</td><td className="num">{l.max_position_size || "—"}</td>
-                <td>{l.trading_halted ? <span className="badge bad">pausada</span> : <span className="badge ok">activa</span>}</td></tr>
-            ))}</tbody>
+            <thead><tr><th>Cuenta</th><th className="num">Pérdida máx.</th><th className="num">P&L hoy</th><th className="num">Tamaño máx.</th><th>Estado</th><th></th></tr></thead>
+            <tbody>{risk.limits.map((l) => {
+              const acc = accounts.find((a) => a.account_id === l.account_id);
+              const pnl = acc?.daily_pnl ?? 0; const pct = l.max_daily_loss ? Math.min(100, Math.max(0, (-pnl / l.max_daily_loss) * 100)) : 0;
+              return (
+                <tr key={l.account_id}><td><b>{l.account_id}</b></td><td className="num">{l.max_daily_loss || "—"}</td>
+                  <td className={`num ${pnl < 0 ? (pct >= 80 ? "bad" : "warn") : "ok"}`}>{acc ? money(pnl) : "—"}{l.max_daily_loss ? <span className="muted small"> ({pct.toFixed(0)} %)</span> : null}</td>
+                  <td className="num">{l.max_position_size || "—"}</td>
+                  <td>{l.trading_halted ? <span className="badge bad">{l.halted_reason === "daily_loss" ? "pausada · pérdida diaria" : "pausada"}</span> : <span className="badge ok">activa</span>}</td>
+                  <td>{l.trading_halted && <button className="ghost small-btn" onClick={() => void client!.upsertLimit({ account_id: l.account_id, max_daily_loss: l.max_daily_loss, max_position_size: l.max_position_size, trading_halted: false }).then(() => client!.risk()).then(setRisk).catch((ex) => alert(ex instanceof Error ? ex.message : String(ex)))}>Reanudar</button>}</td></tr>
+              );
+            })}</tbody>
           </table></div>
         )}
       </Card>

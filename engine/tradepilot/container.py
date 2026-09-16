@@ -72,5 +72,8 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
     risk.rules_provider = lambda: replication.rules
     risk.replication = replication
     replication.sync = sync
-    accounts.after_sync = sync.check
+    async def _after_sync() -> None:
+        await sync.check()
+        await risk.check()
+    accounts.after_sync = _after_sync
     return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal)

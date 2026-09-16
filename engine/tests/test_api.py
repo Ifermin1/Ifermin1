@@ -259,3 +259,90 @@ async def test_master_flatten_fills_are_not_copied(client: AsyncClient, containe
     last = (await client.get("/api/audit?limit=1")).json()[0]
     assert last["event_type"] == "SKIPPED" and "cierre de emergencia" in last["message"]
     assert b.positions[("Sim102", "NQ 12-26")] == 0
+
+
+async def test_daily_loss_limit_halts_and_flattens(client: AsyncClient, container):
+    b = container.bridge
+    b.positions[("Sim102", "NQ 12-26")] = 2
+    await client.put("/api/accounts/Sim102/link", json={"master_account": "Sim101"})
+    await client.put("/api/risk/limits", json={"account_id": "Sim102", "max_daily_loss": 500})
+    # 80 % -> aviso; 100 % -> pausa + cierre
+    b.pnl = {"Sim102": -420.0}
+    await container.accounts.sync_once()
+    assert any(a.event_type == "DAILY_LOSS_WARNING" for a in container.audit.recent(5))
+    assert container.risk.limits["Sim102"].trading_halted is False
+    b.pnl = {"Sim102": -510.0}
+    await container.accounts.sync_once()
+    lim = container.risk.limits["Sim102"]
+    assert lim.trading_halted and lim.halted_reason == "daily_loss" and b.flattened == ["Sim102"]
+    assert any(a.event_type == "DAILY_LOSS_LIMIT" for a in container.audit.recent(6))
+    # con el P&L aún por debajo del límite no se puede reanudar
+    r = await client.put("/api/risk/limits", json={"account_id": "Sim102", "max_daily_loss": 500, "trading_halted": False})
+    assert r.status_code == 409 and "no se reanuda" in r.json()["detail"]
+    # sigue bloqueada aunque el P&L mejore; el usuario la reanuda a mano
+    b.pnl = {"Sim102": -100.0}
+    await container.accounts.sync_once()
+    ok, reason = container.risk.allows("Sim102", 1, "NQ 12-26", "BUY")
+    assert not ok and "pérdida diaria" in reason
+    r = await client.put("/api/risk/limits", json={"account_id": "Sim102", "max_daily_loss": 500, "trading_halted": False})
+    assert r.json()["trading_halted"] is False and r.json()["halted_reason"] == ""
+    assert container.risk.allows("Sim102", 1, "NQ 12-26", "BUY")[0]
+
+
+async def test_schedule_window_and_scheduled_flatten(client: AsyncClient, container):
+    from datetime import datetime
+    b = container.bridge
+    b.health.master_account = "Sim101"
+    await client.put("/api/accounts/Sim102/link", json={"master_account": "Sim101"})
+    r = await client.put("/api/risk/schedule", json={"enabled": True, "window_start": "09:30", "flatten_at": "15:55", "include_master": True})
+    assert r.status_code == 200 and r.json()["enabled"] is True
+    fake_now = datetime(2026, 9, 16, 9, 0)
+    container.risk.now = lambda: fake_now
+    ok, reason = container.risk.allows("Sim102", 1)
+    assert not ok and "09:30" in reason
+    fake_now = datetime(2026, 9, 16, 10, 0)
+    assert container.risk.allows("Sim102", 1)[0]
+    # a la hora de cierre: flatten de todas y bloqueo hasta mañana
+    b.positions[("Sim101", "NQ 12-26")] = 1
+    b.positions[("Sim102", "NQ 12-26")] = 1
+    fake_now = datetime(2026, 9, 16, 15, 56)
+    await container.accounts.sync_once()
+    assert sorted(b.flattened) == ["Sim101", "Sim102"]
+    assert any(a.event_type == "SCHEDULED_FLATTEN" for a in container.audit.recent(8))
+    ok, reason = container.risk.allows("Sim102", 1)
+    assert not ok and "sesión cerrada" in reason
+    await container.accounts.sync_once()
+    assert len(b.flattened) == 2, "el cierre programado se repitió"
+    # reabrir a mano
+    r = await client.post("/api/risk/reopen")
+    assert r.json()["session_closed"] is False
+    # al día siguiente dentro de ventana se copia de nuevo
+    fake_now = datetime(2026, 9, 17, 10, 0)
+    assert container.risk.allows("Sim102", 1)[0]
+    r = await client.put("/api/risk/schedule", json={"enabled": True, "flatten_at": "9:5"})
+    assert r.status_code == 422
+
+
+async def test_resulting_exposure_limit(client: AsyncClient, container):
+    b = container.bridge
+    b.positions[("Sim102", "NQ 12-26")] = 2
+    await container.accounts.sync_once()
+    await client.put("/api/risk/limits", json={"account_id": "Sim102", "max_position_size": 3})
+    assert container.risk.allows("Sim102", 1, "NQ 12-26", "BUY")[0]            # 2 -> 3 ok
+    ok, reason = container.risk.allows("Sim102", 2, "NQ 12-26", "BUY")          # 2 -> 4 no
+    assert not ok and "posición resultante 4" in reason
+    assert container.risk.allows("Sim102", 3, "NQ 12-26", "SELL")[0]           # reduce/invierte a -1 ok
+    ok, _ = container.risk.allows("Sim102", 4, "NQ 12-26", "SELL")             # por orden > 3
+    assert not ok
+
+
+async def test_heartbeat_watchdog(container):
+    from datetime import datetime, timedelta
+    container.bridge.health.mode = "ninja"
+    container.bridge.health.last_heartbeat = datetime.now() - timedelta(seconds=60)
+    await container.risk.check()
+    assert container.risk.addon_silent is True
+    assert any(a.event_type == "ADDON_SILENT" for a in container.audit.recent(3))
+    container.bridge.health.last_heartbeat = datetime.now()
+    await container.risk.check()
+    assert container.risk.addon_silent is False

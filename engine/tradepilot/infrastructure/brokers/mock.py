@@ -29,6 +29,7 @@ class MockBridge(BrokerBridge):
         self.positions: dict[tuple[str, str], int] = {}   # (cuenta, símbolo) -> qty con signo
         self.flattened: list[str] = []
         self.fill_orders = True   # las órdenes enviadas actualizan la posición del simulador
+        self.pnl: dict[str, float] = {}   # P&L del día por cuenta (pruebas)
         self.sent_orders: list[dict] = []
         self._task: asyncio.Task | None = None
         self._running = False
@@ -98,7 +99,8 @@ class MockBridge(BrokerBridge):
         self.health.last_sync = datetime.now()
         # pequeño ruido para que el dashboard se mueva
         return [BrokerAccount(account_id=k, balance=round(v + random.uniform(-25, 25), 2),
-                              connected=k not in self.disconnected, connection="Simulación")
+                              connected=k not in self.disconnected, connection="Simulación",
+                              realized_pnl=self.pnl.get(k, 0.0))
                 for k, v in self.accounts.items()]
 
     async def send_order(self, target_account, action, symbol, quantity, order_type, master_order_id,

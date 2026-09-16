@@ -31,6 +31,7 @@ CONNECTION = "MFF"
 MASTER = "Sim101"
 SYMBOL = "NQ 12-26"
 POSITIONS: dict[tuple, int] = {}   # (cuenta, símbolo) -> qty con signo; se actualiza con los fills
+PNL: dict[str, float] = {}         # P&L del día por cuenta (gancho de pruebas SET_PNL|cuenta|valor)
 SEQ = 0
 
 
@@ -83,6 +84,8 @@ while True:
                 print("FLATTEN", acc); rep.send_string(f"OK|{acc}|{n}")
             elif msg.startswith("WATCH|"):
                 rep.send_string("OK|" + msg.split("|", 1)[1])
+            elif msg.startswith("SET_PNL|"):  # gancho de pruebas: SET_PNL|Sim102|-510
+                _, acc, val = msg.split("|"); PNL[acc] = float(val); rep.send_string("OK")
             elif msg.startswith("EMIT|"):   # gancho de pruebas: EMIT|BUY|2
                 _, act, q = msg.split("|")
                 oid = uuid.uuid4().hex[:8]
@@ -99,8 +102,8 @@ while True:
                 else:
                     rep.send_string("ERROR|cuenta desconocida: " + new)
             elif msg == "GET_ACCOUNTS_ALL" and "--old-addon" not in sys.argv:
-                rep.send_string(";".join([f"{a}|{b:.2f}|Connected|{CONNECTION}" for a, b in ACCOUNTS.items()]
-                                         + [f"{a}|{b:.2f}|Disconnected|{CONNECTION}" for a, b in OFFLINE.items()]))
+                rep.send_string(";".join([f"{a}|{b:.2f}|Connected|{CONNECTION}|{PNL.get(a, 0.0):.2f}|0.00" for a, b in ACCOUNTS.items()]
+                                         + [f"{a}|{b:.2f}|Disconnected|{CONNECTION}|0.00|0.00" for a, b in OFFLINE.items()]))
             else:
                 rep.send_string("PONG" if msg == "PING" else "ERROR|unknown request")
         elif sock is sub:

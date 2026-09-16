@@ -199,7 +199,7 @@ class ReplicationService:
                 self.audit.log("SKIPPED", f"Regla {rule.id[:8]}: qty escalada {qty} <= 0",
                                source=event.account, target=rule.follower_account)
                 continue
-            ok, reason = self.risk.allows(rule.follower_account, qty)
+            ok, reason = self.risk.allows(rule.follower_account, qty, event.symbol, event.action)
             if ok and self.accounts is not None and not self.accounts.is_enabled(rule.follower_account):
                 ok, reason = False, f"cuenta {rule.follower_account} desactivada en la consola"
             if ok and self._desync_blocks(rule.follower_account, event):

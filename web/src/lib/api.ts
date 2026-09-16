@@ -17,8 +17,10 @@ export type Rule = { id: string; master_account: string; follower_account: strin
                      symbol_filter: string | null; enabled: boolean };
 export type AuditEvent = { id: number | null; timestamp: string; event_type: string; source_account: string | null;
                            target_account: string | null; message: string; details: Record<string, unknown> | null };
-export type RiskLimit = { account_id: string; max_daily_loss: number; max_position_size: number; trading_halted: boolean };
-export type RiskState = { kill_switch: boolean; kill_switch_reason: string | null; kill_switch_at: string | null; limits: RiskLimit[] };
+export type RiskLimit = { account_id: string; max_daily_loss: number; max_position_size: number; trading_halted: boolean; halted_reason: string; halted_at: string | null };
+export type Schedule = { enabled: boolean; window_start: string; flatten_at: string; include_master: boolean; last_flatten_day: string };
+export type RiskState = { kill_switch: boolean; kill_switch_reason: string | null; kill_switch_at: string | null; limits: RiskLimit[];
+                          schedule: Schedule; session_closed: boolean; addon_silent: boolean };
 
 export type Session = { baseUrl: string; token: string };
 
@@ -68,7 +70,9 @@ export function makeClient(s: Session) {
       req<{ result: string }>(`/api/accounts/${encodeURIComponent(id)}/flatten`, { method: "POST", body: JSON.stringify({ reason }) }),
     resync: (id: string) =>
       req<{ sent: { symbol: string; action: string; quantity: number }[] }>(`/api/accounts/${encodeURIComponent(id)}/resync`, { method: "POST" }),
-    upsertLimit: (l: RiskLimit) => req<RiskLimit>("/api/risk/limits", { method: "PUT", body: JSON.stringify(l) }),
+    upsertLimit: (l: Omit<RiskLimit, "halted_reason" | "halted_at">) => req<RiskLimit>("/api/risk/limits", { method: "PUT", body: JSON.stringify(l) }),
+    setSchedule: (s: Omit<Schedule, "last_flatten_day">) => req<Schedule>("/api/risk/schedule", { method: "PUT", body: JSON.stringify(s) }),
+    reopenSession: () => req<RiskState>("/api/risk/reopen", { method: "POST" }),
     mockEvent: (b: Record<string, unknown> = {}) => req<unknown>("/api/mock/master-event", { method: "POST", body: JSON.stringify(b) }),
     wsUrl: () => `${base.replace(/^http/, "ws")}/api/ws?token=${encodeURIComponent(s.token)}`,
   };

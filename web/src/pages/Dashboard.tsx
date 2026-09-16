@@ -34,6 +34,15 @@ export function Dashboard() {
       {accounts.some((a) => a.desync) && (
         <Card className="alert-card"><strong>Seguidoras desincronizadas:</strong> {accounts.filter((a) => a.desync).map((a) => a.account_id).join(", ")}. Ve a <i>Cuentas</i> para igualarlas o cerrarlas.</Card>
       )}
+      {risk?.addon_silent && (
+        <Card className="alert-card"><strong>Sin heartbeat del addon</strong> desde hace más de 30 s: NinjaTrader no está enviando operaciones. Revisa que esté abierto y el addon cargado.</Card>
+      )}
+      {risk?.session_closed && (
+        <Card className="alert-card"><strong>Sesión cerrada por horario</strong> ({risk.schedule.flatten_at}). No se copia nada hasta mañana; en <i>Riesgo</i> puedes reabrir.</Card>
+      )}
+      {risk?.limits.some((l) => l.trading_halted && l.halted_reason === "daily_loss") && (
+        <Card className="alert-card"><strong>Límite de pérdida diaria alcanzado:</strong> {risk.limits.filter((l) => l.halted_reason === "daily_loss").map((l) => l.account_id).join(", ")}. Cuenta pausada y cerrada; se reanuda a mano en <i>Riesgo</i>.</Card>
+      )}
       {risk?.kill_switch && (
         <Card className="alert-card">
           <strong>Kill switch activo.</strong> No se está replicando ninguna orden. {risk.kill_switch_reason && <>Motivo: {risk.kill_switch_reason}.</>}

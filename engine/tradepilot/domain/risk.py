@@ -9,9 +9,20 @@ from tradepilot.domain import DomainModel
 
 class RiskLimit(DomainModel):
     account_id: str
-    max_daily_loss: float = 0.0       # 0 = sin límite
-    max_position_size: int = 0        # 0 = sin límite
+    max_daily_loss: float = 0.0       # 0 = sin límite (USD, P&L del día realizado + flotante)
+    max_position_size: int = 0        # 0 = sin límite (contratos por orden y de posición resultante)
     trading_halted: bool = False
+    halted_reason: str = ""           # "" manual; "daily_loss" cuando lo pausó el engine
+    halted_at: Optional[datetime] = None
+
+
+class Schedule(DomainModel):
+    """Ventana horaria (hora local del PC del engine)."""
+    enabled: bool = False
+    window_start: str = ""            # "HH:MM": no copiar antes; "" = sin límite
+    flatten_at: str = ""              # "HH:MM": cerrar todo y bloquear hasta el día siguiente; "" = sin cierre
+    include_master: bool = True
+    last_flatten_day: str = ""        # AAAA-MM-DD del último cierre programado ejecutado
 
 
 class RiskState(DomainModel):
@@ -19,6 +30,9 @@ class RiskState(DomainModel):
     kill_switch_reason: Optional[str] = None
     kill_switch_at: Optional[datetime] = None
     limits: list[RiskLimit] = []
+    schedule: Schedule = Schedule()
+    session_closed: bool = False      # cierre programado ejecutado hoy: no se copia hasta mañana
+    addon_silent: bool = False        # sin heartbeat del addon
 
 
 class RiskAlert(DomainModel):

@@ -121,8 +121,10 @@ Documentación interactiva en `/docs` (Swagger) cuando el engine está arrancado
 | Diagnóstico de incidentes | Diario JSONL (`data/journal/AAAA-MM-DD.jsonl`) con cada mensaje recibido y cada orden enviada | `journal.py` |
 | Addon desactualizado sin saberlo | `MIN_ADDON_VERSION`; aviso rojo en *Inicio* | `/api/health.addon_outdated` |
 
-Pendiente (nivel 2): pérdida diaria máxima con el P&L que ya reporta el addon, cierre programado antes del fin de sesión,
-exposición máxima por cuenta, avisos por Telegram.
+Nivel 2 (hecho): pérdida diaria máxima con el P&L real del addon (`DAILY_LOSS_WARNING` al 80 %, `DAILY_LOSS_LIMIT` pausa y
+cierra; no se reanuda mientras el P&L siga por debajo), ventana horaria con cierre programado (`SCHEDULED_FLATTEN`, bloqueo
+hasta el día siguiente, `reopen` manual), tamaño máximo de posición resultante, y vigilancia del heartbeat (`ADDON_SILENT`).
+Pendiente: avisos por Telegram.
 
 ## 7. Próximos pasos sugeridos
 

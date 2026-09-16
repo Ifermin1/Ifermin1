@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from tradepilot.api.auth import require_token
-from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, RuleCreate, RuleUpdate
+from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, RuleCreate, RuleUpdate
 from tradepilot.container import Container
-from tradepilot.domain.risk import RiskLimit
+from tradepilot.domain.risk import RiskLimit, Schedule
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_token)])
 
@@ -151,9 +151,23 @@ async def resync_account(account_id: str, request: Request):
     return {"sent": await c.sync.resync(account_id), "diff": c.sync.diff(account_id)}
 
 
+@router.put("/risk/schedule")
+def set_schedule(body: ScheduleRequest, request: Request):
+    return _c(request).risk.set_schedule(Schedule(**body.model_dump()))
+
+
+@router.post("/risk/reopen")
+def reopen_session(request: Request):
+    _c(request).risk.reopen_session()
+    return _c(request).risk.state()
+
+
 @router.put("/risk/limits")
 def upsert_limit(body: RiskLimitUpsert, request: Request):
-    return _c(request).risk.upsert_limit(RiskLimit(**body.model_dump()))
+    try:
+        return _c(request).risk.upsert_limit(RiskLimit(**body.model_dump()))
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
 
 
 @router.post("/mock/master-event")

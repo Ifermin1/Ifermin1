@@ -87,8 +87,8 @@ button:disabled { opacity: .6; cursor: default; }
 .tag { font-size: 10px; font-weight: 700; letter-spacing: .3px; padding: 2px 6px; border-radius: 4px; background: var(--panel-2); color: var(--muted); white-space: nowrap; }
 .t-REPLICATED, .t-FOLLOWER_FILL, .t-RESYNC { background: rgba(52,211,153,.15); color: var(--ok); }
 .t-MASTER_RECEIVED { background: rgba(34,211,238,.15); color: var(--accent); }
-.t-BLOCKED, .t-ERROR, .t-KILL_SWITCH_ON, .t-FOLLOWER_REJECTED, .t-DESYNC, .t-NAKED_CLOSE, .t-GAP, .t-ADDON_RESTART, .t-FLATTEN, .t-FLATTENED { background: rgba(248,113,113,.15); color: var(--bad); }
-.t-SKIPPED, .t-RISK_LIMIT_SET, .t-NO_RULE, .t-SYNC_ORDER { background: rgba(251,191,36,.15); color: var(--warn); }
+.t-BLOCKED, .t-ERROR, .t-KILL_SWITCH_ON, .t-FOLLOWER_REJECTED, .t-DESYNC, .t-NAKED_CLOSE, .t-GAP, .t-ADDON_RESTART, .t-FLATTEN, .t-FLATTENED, .t-DAILY_LOSS_LIMIT, .t-SCHEDULED_FLATTEN, .t-ADDON_SILENT { background: rgba(248,113,113,.15); color: var(--bad); }
+.t-SKIPPED, .t-RISK_LIMIT_SET, .t-NO_RULE, .t-SYNC_ORDER, .t-DAILY_LOSS_WARNING, .t-SCHEDULE_SET { background: rgba(251,191,36,.15); color: var(--warn); }
 
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; }

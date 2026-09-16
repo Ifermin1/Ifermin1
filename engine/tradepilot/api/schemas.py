@@ -64,3 +64,10 @@ class AccountSettings(BaseModel):
 
 class MasterRequest(BaseModel):
     account: str = Field(min_length=1)
+
+
+class ScheduleRequest(BaseModel):
+    enabled: bool = False
+    window_start: str = Field(default="", pattern=r"^$|^([01]\d|2[0-3]):[0-5]\d$")
+    flatten_at: str = Field(default="", pattern=r"^$|^([01]\d|2[0-3]):[0-5]\d$")
+    include_master: bool = True
