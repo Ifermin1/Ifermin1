@@ -504,3 +504,37 @@ async def test_order_without_confirmation_fails_instead_of_silently_sent():
         assert b.health.orders_retried == 1 and b.health.orders_confirmed == 0
     finally:
         await b.stop()
+
+
+async def test_working_orders_and_pnl_history(client: AsyncClient, container):
+    from tradepilot.domain.accounts import WorkingOrder
+    from tradepilot.infrastructure.brokers.ninja_zmq import NinjaZmqBridge
+
+    parsed = NinjaZmqBridge.parse_orders(
+        "Sim102|k1|m1|SELL|MNQ 12-26|2|0|STOPMARKET|0|24500.25|Working;"
+        "Sim102|k2|m1|SELL|MNQ 12-26|2|0|LIMIT|24600|0|Working;"
+        "malformed|row;"
+        "Sim103|k3|m2|BUY|ES 12-26|1|1|MARKET|0|0|Filled")
+    assert [(acc, o.order_id, o.order_type, o.stop_price) for acc, o in parsed] == [
+        ("Sim102", "k1", "STOPMARKET", 24500.25), ("Sim102", "k2", "LIMIT", 0.0), ("Sim103", "k3", "MARKET", 0.0)]
+
+    bridge = container.bridge
+    bridge.working_orders = parsed[:2]
+    container.accounts.pnl_sample_seconds = 0.0
+    await container.accounts.sync_once()
+    r = await client.get("/api/accounts")
+    by_id = {a["account_id"]: a for a in r.json()}
+    assert [o["order_id"] for o in by_id["Sim102"]["working_orders"]] == ["k1", "k2"]
+    assert by_id["Sim103"]["working_orders"] == []
+
+    bridge.working_orders = []
+    await container.accounts.sync_once()
+    r = await client.get("/api/accounts")
+    assert all(a["working_orders"] == [] for a in r.json())
+
+    r = await client.get("/api/pnl?hours=1")
+    assert r.status_code == 200
+    body = r.json()
+    assert "Sim101" in body and len(body["Sim101"]) >= 1
+    ts, pnl = body["Sim101"][-1]
+    assert isinstance(ts, str) and isinstance(pnl, (int, float))

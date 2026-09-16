@@ -1,32 +1,36 @@
+import { useState } from "react";
 import { useStore } from "../lib/store";
-import { ago, money, time } from "../lib/format";
+import { ago, time } from "../lib/format";
 import { Card, Empty, Stat } from "../components/ui";
+import { AccountPanel } from "../components/AccountPanel";
+import { PnlChart } from "../components/PnlChart";
 
+/** Inicio = sala de control: alertas, P&L del día, cuentas en juego y estado del puente. */
 export function Dashboard() {
-  const { health, accounts, rules, audit, risk } = useStore();
+  const { client, health, accounts, rules, audit, risk, prices, density } = useStore();
+  const [busy, setBusy] = useState<string | null>(null);
   const b = health?.bridge;
-  const total = accounts.reduce((s, a) => s + a.balance, 0);
-  const active = rules.filter((r) => r.enabled).length;
+  const master = b?.master_account ?? null;
+  const limits = new Map((risk?.limits ?? []).map((l) => [l.account_id, l]));
+  const linkOf = (acc: string) => rules.find((r) => master && r.master_account.toLowerCase() === master.toLowerCase() && r.follower_account.toLowerCase() === acc.toLowerCase() && !r.symbol_filter);
+  const masterAcc = accounts.find((a) => a.account_id === master);
+  const copying = accounts.filter((a) => a.enabled && a.account_id !== master && linkOf(a.account_id)?.enabled);
+  const inPlay = [...(masterAcc ? [masterAcc] : []), ...copying];
+  const openPositions = inPlay.reduce((s, a) => s + a.open_positions.length, 0);
+  const lastFill = (acc: string) => audit.find((a) => a.event_type === "FOLLOWER_FILL" && a.target_account === acc);
+  const lastReject = (acc: string) => audit.find((a) => a.event_type === "FOLLOWER_REJECTED" && a.target_account === acc);
+  const flatten = async (acc: string) => {
+    if (!client || !confirm(`¿CERRAR ${acc}?\n\nSe cancelan todas sus órdenes y se cierra la posición a mercado.`)) return;
+    setBusy(acc);
+    try { await client.flatten(acc, "manual desde inicio"); } catch (ex) { alert(ex instanceof Error ? ex.message : String(ex)); } finally { setBusy(null); }
+  };
+  const compact = density === "compact";
+
   return (
     <div className="grid">
-      <div className="stats">
-        <Stat label="Capital total" value={money(total)} />
-        <Stat label="Cuentas" value={accounts.length} />
-        <Stat label="Reglas activas" value={`${active} / ${rules.length}`} tone={active ? "ok" : "muted"} />
-        <Stat label="Órdenes replicadas" value={health?.stats.orders_out ?? 0} />
-        <Stat label="Fills seguidores" value={health?.stats.fills ?? 0} tone={health?.stats.fills ? "ok" : "muted"} />
-        <Stat label="Rechazadas" value={(health?.stats.rejected ?? 0) + (health?.stats.blocked ?? 0)} tone={(health?.stats.rejected || health?.stats.blocked) ? "bad" : "muted"} />
-        <Stat label="Errores" value={health?.stats.errors ?? 0} tone={health?.stats.errors ? "bad" : "ok"} />
-        <Stat label="Latencia copia" value={health?.stats.latency_ms_avg != null ? `${health.stats.latency_ms_avg} ms` : "—"}
-              tone={health?.stats.latency_ms_avg == null ? "muted" : health.stats.latency_ms_avg > 500 ? "warn" : "ok"} />
-        <Stat label="Deslizamiento medio" value={health?.stats.slippage_avg != null ? `${health.stats.slippage_avg > 0 ? "+" : ""}${health.stats.slippage_avg} pts` : "—"}
-              tone={health?.stats.slippage_avg == null ? "muted" : health.stats.slippage_avg > 1 ? "warn" : "ok"} />
-      </div>
-      <p className="muted small">Latencia: desde que el engine recibe el fill del maestro hasta que recibe el fill del seguidor. Deslizamiento: precio del seguidor frente al del maestro, positivo = peor para el seguidor.</p>
-
       {health?.addon_outdated && (
         <Card className="alert-card"><strong>Addon de NinjaTrader desactualizado</strong> ({health.bridge.addon_version ? `v${health.bridge.addon_version}` : "sin versión"}; se requiere v{health.min_addon_version}).
-          Las protecciones (cierre de emergencia, posiciones, detección de pérdidas) no funcionan hasta recompilarlo.</Card>
+          Las protecciones (cierre de emergencia, posiciones, órdenes vivas) no funcionan hasta recompilarlo.</Card>
       )}
       {health?.stats.seq_gaps ? (
         <Card className="alert-card"><strong>Mensajes perdidos del addon:</strong> {health.stats.seq_gaps} en esta sesión. Revisa la sincronización de las seguidoras en <i>Cuentas</i>.</Card>
@@ -52,31 +56,63 @@ export function Dashboard() {
         </Card>
       )}
 
-      <Card title="Puente con el bróker">
-        {b ? (
-          <div className="kv">
-            <div><span>Modo</span><b>{b.mode === "mock" ? "Simulador" : `NinjaTrader (ZMQ)${b.addon_version ? ` · addon v${b.addon_version}` : " · addon antiguo"}`}</b></div>
-            <div><span>Feed maestro (5555)</span><b className={b.master_feed_up ? "ok" : "bad"}>{b.master_feed_up ? "arriba" : "caído"}</b></div>
-            <div><span>Ejecutor (5556)</span><b className={b.follower_feed_up ? "ok" : "bad"}>{b.follower_feed_up ? "arriba" : "caído"}</b></div>
-            <div><span>Sync cuentas (5557)</span><b className={b.sync_up ? "ok" : "bad"}>{b.sync_up ? "arriba" : "caído"}</b></div>
-            <div><span>Heartbeat del addon</span><b>{time(b.last_heartbeat)} <i className="muted">{ago(b.last_heartbeat)}</i></b></div>
-            <div><span>Último evento IN</span><b>{time(b.last_msg_in)} <i className="muted">{ago(b.last_msg_in)}</i></b></div>
-            <div><span>Última orden OUT</span><b>{time(b.last_msg_out)} <i className="muted">{ago(b.last_msg_out)}</i></b></div>
-            <div><span>Errores del puente</span><b className={b.error_count ? "bad" : "ok"}>{b.error_count}</b></div>
-            <div><span>Reinicios del addon (sesión)</span><b className="muted">{health?.stats.addon_restarts ?? 0}</b></div>
-          </div>
-        ) : <Empty>Esperando estado del engine…</Empty>}
+      <div className="stats">
+        <Stat label="Copiando" value={`${copying.length} / ${accounts.filter((a) => a.enabled && a.account_id !== master).length}`} tone={copying.length ? "ok" : "muted"} />
+        <Stat label="Posiciones abiertas" value={openPositions} tone={openPositions ? "warn" : "muted"} />
+        <Stat label="Órdenes replicadas" value={health?.stats.orders_out ?? 0} />
+        <Stat label="Fills seguidores" value={health?.stats.fills ?? 0} tone={health?.stats.fills ? "ok" : "muted"} />
+        <Stat label="Rechazadas · bloqueadas" value={`${health?.stats.rejected ?? 0} · ${health?.stats.blocked ?? 0}`} tone={(health?.stats.rejected || health?.stats.blocked) ? "bad" : "muted"} />
+        <Stat label="Errores" value={health?.stats.errors ?? 0} tone={health?.stats.errors ? "bad" : "ok"} />
+        <Stat label="Latencia copia" value={health?.stats.latency_ms_avg != null ? `${health.stats.latency_ms_avg} ms` : "—"}
+              tone={health?.stats.latency_ms_avg == null ? "muted" : health.stats.latency_ms_avg > 500 ? "warn" : "ok"} />
+        <Stat label="Deslizamiento medio" value={health?.stats.slippage_avg != null ? `${health.stats.slippage_avg > 0 ? "+" : ""}${health.stats.slippage_avg} pts` : "—"}
+              tone={health?.stats.slippage_avg == null ? "muted" : health.stats.slippage_avg > 1 ? "warn" : "ok"} />
+      </div>
+
+      <Card title="P&L del día" right={<span className="muted small">muestras cada 15 s · realizado + flotante según NinjaTrader</span>}>
+        {client ? <PnlChart accounts={accounts} client={client} master={master} compact={compact} /> : null}
       </Card>
 
-      <Card title="Actividad reciente">
-        {audit.length === 0 ? <Empty>Sin actividad todavía.</Empty> : (
-          <ul className="feed">
-            {audit.slice(0, 8).map((a, i) => (
-              <li key={a.id ?? i}><span className="muted">{time(a.timestamp)}</span><span className={`tag t-${a.event_type}`}>{a.event_type}</span><span>{a.message}</span></li>
+      <Card title={`Cuentas en juego · ${inPlay.length}`} right={<span className="muted small">{Object.keys(prices).length ? `precio en vivo: ${Object.values(prices).map((p) => `${p.symbol} ${p.last}`).join(" · ")}` : "sin ticks de precio"}</span>}>
+        {inPlay.length === 0 ? <Empty>{accounts.length ? "Ninguna seguidora está copiando. Actívalas en Cuentas." : "Esperando cuentas del bróker…"}</Empty> : (
+          <div className="panels">
+            {inPlay.map((a) => (
+              <AccountPanel key={a.account_id} a={a} role={a.account_id === master ? "master" : "follower"} link={linkOf(a.account_id)} limit={limits.get(a.account_id)}
+                            lastFill={lastFill(a.account_id)} lastReject={lastReject(a.account_id)} prices={prices} busy={busy === a.account_id} compact
+                            onFlatten={() => void flatten(a.account_id)} />
             ))}
-          </ul>
+          </div>
         )}
       </Card>
+
+      <div className="grid two">
+        <Card title="Puente con el bróker">
+          {b ? (
+            <div className="kv">
+              <div><span>Modo</span><b>{b.mode === "mock" ? "Simulador" : `NinjaTrader${b.addon_version ? ` · addon v${b.addon_version}` : " · addon antiguo"}`}</b></div>
+              <div><span>Feed maestro (5555)</span><b className={b.master_feed_up ? "ok" : "bad"}>{b.master_feed_up ? "arriba" : "caído"}</b></div>
+              <div><span>Ejecutor (5556/5557)</span><b className={b.follower_feed_up ? "ok" : "bad"}>{b.follower_feed_up ? "arriba" : "caído"}</b></div>
+              <div><span>Sync cuentas (5557)</span><b className={b.sync_up ? "ok" : "bad"}>{b.sync_up ? "arriba" : "caído"}</b></div>
+              <div><span>Heartbeat del addon</span><b>{time(b.last_heartbeat)} <i className="muted">{ago(b.last_heartbeat)}</i></b></div>
+              <div><span>Último evento IN</span><b>{time(b.last_msg_in)} <i className="muted">{ago(b.last_msg_in)}</i></b></div>
+              <div><span>Última orden OUT</span><b>{time(b.last_msg_out)} <i className="muted">{ago(b.last_msg_out)}</i></b></div>
+              <div><span>Errores del puente</span><b className={b.error_count ? "bad" : "ok"}>{b.error_count}</b></div>
+              <div><span>Reinicios del addon (sesión)</span><b className="muted">{health?.stats.addon_restarts ?? 0}</b></div>
+            </div>
+          ) : <Empty>Esperando estado del engine…</Empty>}
+          <p className="muted small">Latencia: del fill del maestro al fill del seguidor. Deslizamiento: precio del seguidor frente al del maestro, positivo = peor.</p>
+        </Card>
+
+        <Card title="Actividad reciente">
+          {audit.length === 0 ? <Empty>Sin actividad todavía.</Empty> : (
+            <ul className="feed">
+              {audit.slice(0, compact ? 12 : 8).map((a, i) => (
+                <li key={a.id ?? i}><span className="muted">{time(a.timestamp)}</span><span className={`tag t-${a.event_type}`}>{a.event_type}</span><span>{a.message}</span></li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </div>
     </div>
   );
 }

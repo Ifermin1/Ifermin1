@@ -12,7 +12,8 @@ Uso:  python scripts/fake_ninja.py            (una operación del maestro cada 5
       python scripts/fake_ninja.py --old-addon (imita un addon sin GET_ACCOUNTS_ALL)
       python scripts/fake_ninja.py --manual   (no opera solo; petición "EMIT|BUY|1" por 5557 dispara una operación)
       python scripts/fake_ninja.py --no-fill-limits (las entradas límite quedan trabajando: prueba el fallback del addon)
-  Ganchos por 5557: EMIT|BUY|2, SET_PNL|cuenta|valor, MUTE|segundos (simula un canal de eventos atascado)
+  Ganchos por 5557: EMIT|BUY|2, PENDING|SELL|2|STOPMARKET|19950 (stop/TP del maestro), SET_PNL|cuenta|valor,
+                    MUTE|segundos (simula un canal de eventos atascado)
 """
 import json
 import random
@@ -37,6 +38,7 @@ PNL: dict[str, float] = {}         # P&L del día por cuenta (gancho de pruebas 
 SEQ = 0
 BOOT = uuid.uuid4().hex[:8]        # cambia en cada arranque, como en el addon v1.8
 MUTE_UNTIL = 0.0                   # gancho de pruebas MUTE|N: durante N s publica "al vacío" (canal de eventos atascado)
+ORDERS: dict[str, dict] = {}       # copias pendientes (stop / TP) vivas: fid -> orden (GET_ORDERS, v2.2)
 
 
 def now() -> str:
@@ -80,6 +82,30 @@ def handle_order(raw: str, via: str) -> str:
     is_limit_entry = o.get("entry_mode") == "limit"
     if is_limit_entry:
         print(f"  entrada límite: tolerancia {o.get('tolerance_ticks')} ticks, {o.get('entry_timeout_s')} s, luego {o.get('entry_fallback')}")
+    key = (o["account"], o["master_order_id"])
+    live = next((f for f, w in ORDERS.items() if (w["account"], w["master_order_id"]) == key), None)
+    if o["msg_type"] == "ORDER_MODIFIED":
+        if live:
+            ORDERS[live].update(quantity=o["quantity"], limit_price=o.get("limit_price", 0), stop_price=o.get("stop_price", 0))
+            send({**ORDERS[live], "msg_type": "ORDER_STATUS", "filled": 0, "price": 0, "state": "Working", "error": "", "native_error": "", "timestamp": now()})
+        return "OK|ORDER_MODIFIED" if live else "IGNORED|sin orden trabajando"
+    if o["msg_type"] == "ORDER_CANCELLED":
+        if live:
+            w = ORDERS.pop(live)
+            send({**w, "msg_type": "ORDER_STATUS", "filled": 0, "price": 0, "state": "Cancelled", "error": "", "native_error": "", "timestamp": now()})
+        return "OK|ORDER_CANCELLED" if live else "IGNORED|sin orden viva"
+    if o["msg_type"] == "ORDER_PENDING" and not reject:
+        # stop / TP copiado: queda vivo (no se ejecuta solo) y sale en GET_ORDERS
+        ORDERS[fid] = {**base, "limit_price": o.get("limit_price", 0), "stop_price": o.get("stop_price", 0)}
+        send({**ORDERS[fid], "msg_type": "ORDER_STATUS", "filled": 0, "price": 0, "state": "Working", "error": "", "native_error": ""})
+        return "OK|ORDER_PENDING"
+    if o["msg_type"] == "EXECUTION" and live:
+        # el master ejecutó esa orden: la copia viva se ejecuta también (cancelar + mercado, como el addon v2.0)
+        w = ORDERS.pop(live)
+        send({**w, "msg_type": "ORDER_STATUS", "filled": w["quantity"], "price": price, "state": "Filled", "error": "", "native_error": "", "timestamp": now()})
+        send({**w, "msg_type": "EXECUTION", "price": price, "state": "Filled", "execution_id": "E" + live, "timestamp": now()})
+        apply_fill(w["account"], w["action"], w["symbol"], w["quantity"])
+        return "OK|EXECUTION_RECONCILE"
     if reject:
         send({**base, "msg_type": "ORDER_STATUS", "filled": 0, "price": 0, "limit_price": 0, "stop_price": 0,
               "state": "Rejected", "error": "OrderRejected", "native_error": "Insufficient margin"})
@@ -102,6 +128,9 @@ while True:
                 rep.send_string(";".join(f"{a}|{b:.2f}" for a, b in ACCOUNTS.items()))
             elif msg == "GET_MASTER":
                 rep.send_string(MASTER)
+            elif msg == "GET_ORDERS":
+                rep.send_string(";".join(f"{w['account']}|{f}|{w['master_order_id']}|{w['action']}|{w['symbol']}|{w['quantity']}|0|{w['order_type']}|{w['limit_price']}|{w['stop_price']}|Working"
+                                         for f, w in ORDERS.items()))
             elif msg == "GET_POSITIONS":
                 rep.send_string(";".join(f"{a}|{s_}|{'Long' if q > 0 else 'Short'}|{abs(q)}|{price:.2f}"
                                          for (a, s_), q in POSITIONS.items() if q))
@@ -111,6 +140,8 @@ while True:
                 for k in list(POSITIONS):
                     if k[0] == acc:
                         POSITIONS[k] = 0
+                for f in [f for f, w in ORDERS.items() if w["account"] == acc]:
+                    w = ORDERS.pop(f); send({**w, "msg_type": "ORDER_STATUS", "filled": 0, "price": 0, "state": "Cancelled", "error": "", "native_error": "", "timestamp": now()})
                 send({"msg_type": "FLATTENED", "account": acc, "orders_cancelled": 0, "instruments_closed": n, "timestamp": now()})
                 print("FLATTEN", acc); rep.send_string(f"OK|{acc}|{n}")
             elif msg.startswith("WATCH|"):
@@ -130,11 +161,19 @@ while True:
                       "price": round(price, 2), "order_type": "MARKET", "state": "Filled", "order_id": oid,
                       "execution_id": "E" + oid, "timestamp": now()})
                 apply_fill(MASTER, act, SYMBOL, int(q)); rep.send_string("OK|" + oid)
+            elif msg.startswith("PENDING|"):   # gancho de pruebas: PENDING|SELL|2|STOPMARKET|19950 (stop/TP del maestro)
+                _, act, q, otype, px = msg.split("|")
+                oid = uuid.uuid4().hex[:8]
+                send({"msg_type": "ORDER_PENDING", "account": MASTER, "action": act, "symbol": SYMBOL, "quantity": int(q),
+                      "order_type": otype, "state": "Working", "order_id": oid, "filled": 0, "price": 0,
+                      "limit_price": float(px) if otype.upper() == "LIMIT" else 0, "stop_price": float(px) if otype.upper().startswith("STOP") else 0,
+                      "is_entry": False, "is_exit": True, "timestamp": now()})
+                rep.send_string("OK|" + oid)
             elif msg.startswith("SET_MASTER|") and "--old-addon" not in sys.argv:
                 new = msg.split("|", 1)[1]
                 if new in ACCOUNTS or new in OFFLINE:
                     MASTER = new; print("MASTER CAMBIADA A", MASTER)
-                    send({"msg_type": "HEARTBEAT", "account": MASTER, "version": "1.2", "boot": BOOT, "timestamp": now()})
+                    send({"msg_type": "HEARTBEAT", "account": MASTER, "version": ("1.2" if "--old-addon" in sys.argv else "2.2"), "boot": BOOT, "timestamp": now()})
                     rep.send_string("OK|" + new)
                 else:
                     rep.send_string("ERROR|cuenta desconocida: " + new)
@@ -152,7 +191,7 @@ while True:
               "ask": round(price + 0.25, 2), "timestamp": now()})
         next_price = t + 0.25
     if t >= next_hb:
-        send({"msg_type": "HEARTBEAT", "account": MASTER, "version": "1.2", "boot": BOOT, "timestamp": now()}); next_hb = t + 5
+        send({"msg_type": "HEARTBEAT", "account": MASTER, "version": ("1.2" if "--old-addon" in sys.argv else "2.2"), "boot": BOOT, "timestamp": now()}); next_hb = t + 5
     if t >= next_emit and not manual:
         oid = uuid.uuid4().hex[:8]; action = random.choice(["BUY", "SELL"])
         send({"msg_type": "EXECUTION", "account": MASTER, "action": action, "symbol": SYMBOL, "quantity": 1,

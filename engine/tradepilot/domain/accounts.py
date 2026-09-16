@@ -34,6 +34,20 @@ class PositionSnapshot(DomainModel):
     unrealized_pnl: float = 0.0
 
 
+class WorkingOrder(DomainModel):
+    """Orden viva en el bróker (stop, TP, entrada pendiente). El addon >= 2.2 las reporta con GET_ORDERS."""
+    order_id: str
+    master_order_id: str = ""     # "" en las órdenes propias de la maestra; id de la orden maestra en las copias
+    action: str
+    symbol: str
+    quantity: int
+    filled: int = 0
+    order_type: str = "MARKET"
+    limit_price: float = 0.0
+    stop_price: float = 0.0
+    state: str = "Working"
+
+
 class BrokerAccount(DomainModel):
     """Lo que el bróker reporta de una cuenta en cada sincronización."""
     account_id: str
@@ -57,6 +71,7 @@ class AccountSnapshot(DomainModel):
     net_liquidity: float = 0.0
     daily_pnl: float = 0.0
     open_positions: list[PositionSnapshot] = []
+    working_orders: list[WorkingOrder] = []
     updated_at: datetime
     # gestión desde la consola
     enabled: bool = True               # desactivada = oculta y nunca recibe copias

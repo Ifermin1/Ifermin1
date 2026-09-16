@@ -10,9 +10,14 @@ export type Health = {
            seq_gaps: number; addon_restarts: number; flattens: number }; ws_clients: number;
 };
 export type Position = { account_id: string; symbol: string; quantity: number; avg_price: number; unrealized_pnl: number };
+export type WorkingOrder = { order_id: string; master_order_id: string; action: string; symbol: string; quantity: number; filled: number;
+                             order_type: string; limit_price: number; stop_price: number; state: string };
 export type Account = { account_id: string; balance: number; net_liquidity: number; daily_pnl: number; open_positions: Position[]; updated_at: string;
                         enabled: boolean; enabled_source: "auto" | "user"; alias: string; connected: boolean | null; connection: string; reported: boolean;
-                        realized_pnl: number; unrealized_pnl: number; desync: boolean; desync_detail: string };
+                        realized_pnl: number; unrealized_pnl: number; desync: boolean; desync_detail: string; working_orders: WorkingOrder[] };
+/** Tick de precio del addon (topic market.price), indexado por raíz del símbolo (NQ, MNQ…). */
+export type Price = { symbol: string; last: number; bid: number; ask: number; at: number };
+export type PnlHistory = Record<string, [string, number][]>;
 export type Rule = { id: string; master_account: string; follower_account: string; multiplier: number;
                      symbol_filter: string | null; enabled: boolean; target_root: string | null;
                      entry_mode: "market" | "limit"; tolerance_ticks: number; entry_timeout_s: number; entry_fallback: "market" | "cancel" };
@@ -64,6 +69,7 @@ export function makeClient(s: Session) {
       req<void>(`/api/accounts/${encodeURIComponent(follower)}/link?master_account=${encodeURIComponent(master)}`, { method: "DELETE" }),
     audit: (limit = 100, type?: string) => req<AuditEvent[]>(`/api/audit?limit=${limit}${type ? `&event_type=${type}` : ""}`),
     risk: () => req<RiskState>("/api/risk"),
+    pnl: (hours = 24) => req<PnlHistory>(`/api/pnl?hours=${hours}`),
     killSwitch: (active: boolean, reason?: string, flatten = false, flatten_master = true) =>
       req<RiskState>("/api/risk/kill-switch", { method: "POST", body: JSON.stringify({ active, reason, flatten, flatten_master }) }),
     flattenAll: (include_master: boolean, reason?: string) =>

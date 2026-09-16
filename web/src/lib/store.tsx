@@ -1,18 +1,24 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { makeClient, loadSession, saveSession, type Account, type AuditEvent, type Client, type Health,
+import { makeClient, loadSession, saveSession, type Account, type AuditEvent, type Client, type Health, type Price,
          type RiskState, type Rule, type Session } from "./api";
+import { root } from "./format";
 
 type WsStatus = "connecting" | "open" | "closed";
+export type Density = "cozy" | "compact";
+export type PriceMap = Record<string, Price>;
 
 type Store = {
   session: Session | null; client: Client | null;
   login: (s: Session) => Promise<void>; logout: () => void;
   health: Health | null; accounts: Account[]; rules: Rule[]; audit: AuditEvent[]; risk: RiskState | null;
-  wsStatus: WsStatus; error: string | null;
+  prices: PriceMap; wsStatus: WsStatus; error: string | null;
+  density: Density; setDensity: (d: Density) => void;
   refresh: () => Promise<void>; setRules: (r: Rule[]) => void; setRisk: (r: RiskState) => void;
 };
 
 const Ctx = createContext<Store | null>(null);
+const DENSITY_KEY = "tpx.density";
+const loadDensity = (): Density => { try { return localStorage.getItem(DENSITY_KEY) === "compact" ? "compact" : "cozy"; } catch { return "cozy"; } };
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(() => loadSession());
@@ -22,9 +28,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [rules, setRules] = useState<Rule[]>([]);
   const [audit, setAudit] = useState<AuditEvent[]>([]);
   const [risk, setRisk] = useState<RiskState | null>(null);
+  const [prices, setPrices] = useState<PriceMap>({});
   const [wsStatus, setWsStatus] = useState<WsStatus>("closed");
   const [error, setError] = useState<string | null>(null);
+  const [density, setDensityState] = useState<Density>(loadDensity);
   const wsRef = useRef<WebSocket | null>(null);
+  const priceBuf = useRef<PriceMap>({});   // los ticks llegan varias veces por segundo: se vuelcan al estado cada 400 ms
+
+  const setDensity = useCallback((d: Density) => { setDensityState(d); try { localStorage.setItem(DENSITY_KEY, d); } catch { /* modo privado */ } }, []);
+  useEffect(() => { document.documentElement.dataset.density = density; }, [density]);
 
   const refresh = useCallback(async () => {
     if (!client) return;
@@ -56,16 +68,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         else if (topic === "broker.health") setHealth((h) => (h ? { ...h, bridge: data } : h));
         else if (topic === "risk.state") setRisk(data);
         else if (topic === "audit.event") setAudit((list) => [data, ...list].slice(0, 300));
+        else if (topic === "market.price" && data?.symbol && typeof data.last === "number") {
+          priceBuf.current[root(data.symbol)] = { symbol: data.symbol, last: data.last, bid: data.bid ?? data.last, ask: data.ask ?? data.last, at: Date.now() };
+        }
       };
       ws.onclose = () => { setWsStatus("closed"); window.clearInterval(ping); if (!stopped) timer = window.setTimeout(connect, 2000); };
       ws.onerror = () => ws.close();
     };
     void refresh(); connect();
     const poll = window.setInterval(() => void client.health().then(setHealth).catch(() => {}), 10000);
-    return () => { stopped = true; window.clearTimeout(timer); window.clearInterval(ping); window.clearInterval(poll); wsRef.current?.close(); };
+    const flush = window.setInterval(() => {
+      const buf = priceBuf.current;
+      if (Object.keys(buf).length === 0) return;
+      priceBuf.current = {};
+      setPrices((p) => ({ ...p, ...buf }));
+    }, 400);
+    return () => { stopped = true; window.clearTimeout(timer); window.clearInterval(ping); window.clearInterval(poll); window.clearInterval(flush); wsRef.current?.close(); };
   }, [client, refresh]);
 
-  const value: Store = { session, client, login, logout, health, accounts, rules, audit, risk, wsStatus, error, refresh, setRules, setRisk };
+  const value: Store = { session, client, login, logout, health, accounts, rules, audit, risk, prices, wsStatus, error,
+                         density, setDensity, refresh, setRules, setRisk };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

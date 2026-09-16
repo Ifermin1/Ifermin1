@@ -30,7 +30,7 @@ versión de escritorio).
    - `API_TOKEN=` un token largo tuyo (es la única llave de la consola).
 5. Instalar el addon en NinjaTrader: `scripts\update.ps1` copia `ninjatrader\TradePilotXBridge.cs` a la carpeta de AddOns.
    Después, en NinjaTrader: *New → NinjaScript Editor → F5* (compilar) y **reiniciar NinjaTrader**.
-   En *New → NinjaScript Output* debe aparecer `[TradePilotX] Bridge v2.1 online`.
+   En *New → NinjaScript Output* debe aparecer `[TradePilotX] Bridge v2.2 online`.
 6. Arrancar el engine: `powershell -ExecutionPolicy Bypass -File scripts\run_engine.ps1`. Imprime las URLs de la consola.
 7. (Recomendado) Arranque automático con Windows y reinicio si se cae, PowerShell **como administrador**, una vez:
    ```powershell
@@ -65,6 +65,22 @@ ese paso.
 - **En el teléfono (misma Wi-Fi):** la URL `http://192.168.x.x:8000` que imprime el engine al arrancar. En Android, menú de
   Chrome → *Añadir a pantalla de inicio*; en iOS, compartir en Safari → *Añadir a pantalla de inicio*. Queda como app.
 - Acceso desde fuera de casa: fase posterior (túnel), ver `docs/ARQUITECTURA.md` §2.
+
+### La consola de un vistazo
+
+- **Barra de estado** (arriba en el PC, fija sobre las pestañas en el móvil): P&L del día de las cuentas en juego, cuántas
+  seguidoras copian, posiciones abiertas y el botón **DETENER** (kill switch con cierre de posiciones). El símbolo `≈` indica
+  que el P&L se está estimando con el último precio del addon; sin `≈` es el dato tal cual lo reporta NinjaTrader.
+- **Vista compacta**: el botón ▥ de la esquina superior derecha reduce márgenes y tamaños para ver más cuentas en pantalla
+  (ideal en el teléfono). Se recuerda en ese navegador.
+- **Inicio** es la sala de control: avisos rojos, indicadores del día, el **gráfico de P&L** (una línea por cuenta; rangos
+  `1h`, `4h`, `hoy`; toca el gráfico para ver los valores a una hora; pulsa una cuenta de la leyenda para ocultarla; *Tabla*
+  muestra las mismas cifras cada 5 minutos) y las **cuentas en juego**: maestra y seguidoras que copian, cada una con su P&L,
+  posición (con distancia al mercado en puntos y dólares), **stops y take profits vivos** con su distancia al precio,
+  último fill o rechazo y el botón *Cerrar*.
+- **Cuentas** muestra los mismos paneles con los mandos de copia (multiplicador, interruptor, ⚙ opciones de ejecución).
+- **Auditoría** filtra por texto, cuenta, familia (*Copia*, *Bloqueos*, *Errores*, *Riesgo*, *Sistema*) o *Solo importantes*;
+  *Copiar* y *.txt* exportan exactamente lo filtrado.
 
 ---
 
@@ -101,13 +117,14 @@ ese paso.
 
 ## 5. Operativa diaria
 
-1. Abrir NinjaTrader y conectar la cuenta maestra y las seguidoras. Comprobar en el Output `Bridge v2.1 online`.
-2. Arrancar el engine (`run_engine.ps1`) si no está corriendo. En *Inicio*: modo `NinjaTrader (ZMQ) · addon v2.1`, heartbeat
+1. Abrir NinjaTrader y conectar la cuenta maestra y las seguidoras. Comprobar en el Output `Bridge v2.2 online`.
+2. Arrancar el engine (`run_engine.ps1`) si no está corriendo. En *Inicio*: modo `NinjaTrader (ZMQ) · addon v2.2`, heartbeat
    actualizándose, sin avisos rojos.
 3. En *Cuentas*: las seguidoras que deben copiar con el interruptor encendido y el badge *copiando*.
 4. Operar solo en la cuenta maestra. Todo (entrada, stop, take profit, modificaciones, cancelaciones) se copia.
-5. Vigilar *Inicio*: la fila de *Actividad reciente* debe mostrar, por cada operación, `MASTER_RECEIVED` → `REPLICATED` →
-   `FOLLOWER_FILL`. Las tarjetas de latencia y deslizamiento indican la calidad de la copia.
+5. Vigilar *Inicio*: en *Cuentas en juego* cada seguidora debe tener la misma posición que la maestra (× multiplicador) y sus
+   stops/TPs vivos; la *Actividad reciente* debe mostrar, por cada operación, `MASTER_RECEIVED` → `REPLICATED` →
+   `FOLLOWER_FILL`. Las tarjetas de latencia y deslizamiento indican la calidad de la copia y el gráfico, cómo va el día.
 6. Al terminar: el cierre programado lo hace solo; si no lo usas, comprueba que todas las cuentas están planas antes del
    cierre del prop firm.
 
@@ -155,7 +172,8 @@ ese paso.
 ## 8. Ante un incidente: qué recopilar
 
 1. La captura de *Inicio* y de *Cuentas* de la consola.
-2. La *Auditoría* como texto: en esa pestaña, filtra el tipo si quieres y pulsa **⧉ Copiar** (portapapeles) o **⤓ .txt**
+2. La *Auditoría* como texto: en esa pestaña, filtra si quieres (cuenta, tipo, familia o *Solo importantes*) y pulsa
+   **⧉ Copiar** (portapapeles) o **⤓ .txt**
    (archivo). Sale en orden cronológico con hora, tipo, origen → destino y mensaje. El icono ⧉ de cada fila copia solo
    esa línea.
 3. El *NinjaScript Output* completo desde la última línea `Bridge vX.Y online`.

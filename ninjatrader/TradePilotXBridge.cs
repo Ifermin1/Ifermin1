@@ -10,6 +10,7 @@
 //                                  "GET_MASTER"       -> "Sim101"
 //                                  "SET_MASTER|Sim102" -> "OK|Sim102"  (cambia la master en caliente y la guarda)
 //                                  "GET_POSITIONS"    -> "Sim101|NQ SEP26|Long|2|28936.0;..."  (todas las cuentas)
+//                                  "GET_ORDERS"       -> "acc|orderKey|masterId|action|symbol|qty|filled|type|limit|stop|state;..." (v2.2)
 //                                  "FLATTEN|Sim102"   -> "OK|Sim102|2"  (cancela órdenes y cierra posiciones)
 //                                  "WATCH|Sim102"     -> "OK|Sim102"  (escuchar órdenes/posiciones de un follower)
 //                                  "PING"             -> "PONG|<boot>|<seq>" (v1.8: arranque del addon y último seq publicado)
@@ -44,7 +45,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 {
     public class TradePilotXBridge : AddOnBase
     {
-        private const string BridgeVersion = "2.1";
+        private const string BridgeVersion = "2.2";
 
         // ---- configuración ------------------------------------------------
         private class BridgeConfig
@@ -185,7 +186,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                     foreach (string sym in cfg.PriceInstruments)
                         EnsurePriceFeed(sym);
 
-                    Info(string.Format("Bridge v{0} online. master={1} pub={2} sub={3} sync={4} (v2.1: is_exit, reconciliación segura tras cierre de emergencia)",
+                    Info(string.Format("Bridge v{0} online. master={1} pub={2} sub={3} sync={4} (v2.2: GET_ORDERS)",
                         BridgeVersion, cfg.MasterAccount, cfg.MasterPort, cfg.FollowerPort, cfg.SyncPort));
                 }
                 catch (Exception ex)
@@ -895,6 +896,30 @@ namespace NinjaTrader.NinjaScript.AddOns
             return string.Join(";", parts);
         }
 
+        /// <summary>v2.2: órdenes vivas de todas las cuentas (stops, TPs, entradas pendientes), para la consola.
+        /// acc|orderKey|masterId|action|symbol|qty|filled|type|limit|stop|state;...</summary>
+        private string OrdersReply()
+        {
+            var parts = new List<string>();
+            List<Account> all;
+            lock (Account.All) all = Account.All.ToList();
+            foreach (Account a in all)
+            {
+                List<Order> orders;
+                try { lock (a.Orders) orders = a.Orders.Where(IsLive).ToList(); } catch { continue; }
+                foreach (Order o in orders)
+                {
+                    if (o.Instrument == null) continue;
+                    parts.Add(string.Join("|", new[] {
+                        a.Name, OrderKey(o), MasterIdFromName(o.Name), ActionName(o.OrderAction), o.Instrument.FullName,
+                        o.Quantity.ToString(CultureInfo.InvariantCulture), o.Filled.ToString(CultureInfo.InvariantCulture),
+                        TypeName(o.OrderType), o.LimitPrice.ToString("0.########", CultureInfo.InvariantCulture),
+                        o.StopPrice.ToString("0.########", CultureInfo.InvariantCulture), o.OrderState.ToString() }));
+                }
+            }
+            return string.Join(";", parts);
+        }
+
         private static bool IsWorking(Order o)
         {
             return o.OrderState == OrderState.Working || o.OrderState == OrderState.Accepted
@@ -957,6 +982,10 @@ namespace NinjaTrader.NinjaScript.AddOns
                 else if (request == "GET_POSITIONS")
                 {
                     reply = PositionsReply();
+                }
+                else if (request == "GET_ORDERS")
+                {
+                    reply = OrdersReply();
                 }
                 else if (request.StartsWith("FLATTEN|"))
                 {

@@ -63,6 +63,11 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
             from tradepilot.infrastructure.brokers.mock import MockBridge
             bridge = MockBridge(bus)
     audit = AuditService(store, bus)
+    try:
+        from datetime import datetime, timedelta
+        store.prune_pnl_samples((datetime.now() - timedelta(days=3)).isoformat(timespec="seconds"))
+    except Exception:
+        pass
     accounts = AccountService(bridge, bus, store, interval=cfg.ACCOUNT_SYNC_SECONDS)
     risk = RiskService(store, bus, audit, bridge, accounts)
     journal = Journal(cfg.JOURNAL_DIR or None)

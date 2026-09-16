@@ -44,6 +44,8 @@ class SQLiteStore:
                     trading_halted BOOLEAN
                 );
                 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);
+                CREATE TABLE IF NOT EXISTS pnl_samples (account_id TEXT, ts TEXT, pnl REAL);
+                CREATE INDEX IF NOT EXISTS idx_pnl_acc_ts ON pnl_samples(account_id, ts);
                 CREATE TABLE IF NOT EXISTS accounts (
                     account_id TEXT PRIMARY KEY, enabled BOOLEAN DEFAULT 1, alias TEXT DEFAULT '',
                     first_seen TEXT, last_seen TEXT, last_balance REAL DEFAULT 0
@@ -168,6 +170,23 @@ class SQLiteStore:
     def delete_account(self, account_id: str) -> None:
         with self._lock, self._conn:
             self._conn.execute("DELETE FROM accounts WHERE account_id = ?", (account_id,))
+
+    # ---- curva de P&L ----
+    def add_pnl_samples(self, rows: list[tuple[str, str, float]]) -> None:
+        with self._lock, self._conn:
+            self._conn.executemany("INSERT INTO pnl_samples (account_id, ts, pnl) VALUES (?, ?, ?)", rows)
+
+    def get_pnl_samples(self, since_iso: str) -> dict[str, list[tuple[str, float]]]:
+        with self._lock:
+            rows = self._conn.execute("SELECT account_id, ts, pnl FROM pnl_samples WHERE ts >= ? ORDER BY ts", (since_iso,)).fetchall()
+        out: dict[str, list[tuple[str, float]]] = {}
+        for r in rows:
+            out.setdefault(r["account_id"], []).append((r["ts"], r["pnl"]))
+        return out
+
+    def prune_pnl_samples(self, before_iso: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM pnl_samples WHERE ts < ?", (before_iso,))
 
     def get_kv(self, key: str, default: str | None = None) -> str | None:
         with self._lock:

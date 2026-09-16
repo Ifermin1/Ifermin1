@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
 from tradepilot.core.events import EventBus
-from tradepilot.domain.accounts import BridgeHealth, BrokerAccount, BrokerPosition
+from tradepilot.domain.accounts import BridgeHealth, BrokerAccount, BrokerPosition, WorkingOrder
 
 
 class BrokerBridge(ABC):
@@ -28,6 +28,10 @@ class BrokerBridge(ABC):
 
     async def get_positions(self) -> list[BrokerPosition] | None:
         """Posiciones abiertas de todas las cuentas. None = el puente no lo soporta."""
+        return None
+
+    async def get_orders(self) -> list[tuple[str, WorkingOrder]] | None:
+        """Órdenes vivas de todas las cuentas como (cuenta, orden). None = el puente no lo soporta."""
         return None
 
     async def flatten(self, account: str) -> str:

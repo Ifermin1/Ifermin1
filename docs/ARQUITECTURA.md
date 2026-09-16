@@ -83,8 +83,9 @@ engine/                     Motor Python (instalable, `pip install -e .`)
   tests/                    pytest (dominio + API)
 web/                        Consola PWA (Vite + React + TS)
   src/lib/      api.ts (cliente REST/WS), store.tsx (estado global + WS), format.ts
-  src/pages/    Login, Dashboard, Accounts, Replicator, Risk, Audit
-  src/components/ Shell (navegación), ui
+  src/pages/    Login, Dashboard (sala de control), Accounts, Replicator, Risk, Audit (filtros + exportación)
+  src/components/ Shell (navegación + barra de estado), AccountPanel (posición, P&L en vivo, stops/TPs vivos),
+                  PnlChart (SVG, paleta categórica validada, crosshair, tabla), ui
 legacy_flet/                Código original de escritorio, solo referencia
 docs/                       Este documento y capturas
 scripts/                    Arranque en Windows
@@ -120,6 +121,8 @@ Documentación interactiva en `/docs` (Swagger) cuando el engine está arrancado
 | Mensajes perdidos por ZMQ | Cada mensaje lleva `seq`; el engine audita `GAP` y `ADDON_RESTART` y las posiciones se reconcilian por sondeo | addon v1.5, `_check_seq` |
 | Diagnóstico de incidentes | Diario JSONL (`data/journal/AAAA-MM-DD.jsonl`) con cada mensaje recibido y cada orden enviada | `journal.py` |
 | Addon desactualizado sin saberlo | `MIN_ADDON_VERSION`; aviso rojo en *Inicio* | `/api/health.addon_outdated` |
+| No ver qué stops tiene realmente cada seguidora | `GET_ORDERS` cada 2 s (addon v2.2) → `AccountSnapshot.working_orders`; el panel por cuenta muestra stop/TP con distancia al último tick (`market.price`) | `account_service.apply_orders`, *Inicio* / *Cuentas* |
+| Cómo va el día sin abrir NinjaTrader | Muestra de P&L por cuenta cada 15 s en SQLite (`pnl_samples`, 3 días) y `GET /api/pnl?hours=` para el gráfico | `account_service._sample_pnl`, `PnlChart` |
 
 Nivel 2 (hecho): pérdida diaria máxima con el P&L real del addon (`DAILY_LOSS_WARNING` al 80 %, `DAILY_LOSS_LIMIT` pausa y
 cierra; no se reanuda mientras el P&L siga por debajo), objetivo de ganancia diaria (`DAILY_PROFIT_WARNING` al 80 %,

@@ -72,6 +72,10 @@ class AccountService:
         positions = await self.bridge.get_positions()
         if positions is not None:
             self.apply_positions(positions, now)
+        orders = await self.bridge.get_orders()
+        if orders is not None:
+            self.apply_orders(orders)
+        self._sample_pnl(now)
         if data:
             for acc, snap in self.accounts.items():
                 if acc not in reported:
@@ -119,6 +123,34 @@ class AccountService:
         if self.on_positions_refreshed:
             self.on_positions_refreshed(None)
 
+    def apply_orders(self, orders: list) -> None:
+        """Snapshot completo de órdenes vivas (GET_ORDERS): sustituye lo que teníamos."""
+        by_acc: dict[str, list] = {}
+        for acc, o in orders:
+            by_acc.setdefault(acc, []).append(o)
+        for acc, snap in self.accounts.items():
+            new = by_acc.get(acc, [])
+            if [o.model_dump() for o in snap.working_orders] != [o.model_dump() for o in new]:
+                snap.working_orders = new
+
+    pnl_sample_seconds = 15.0
+    _last_sample: float = 0.0
+
+    def _sample_pnl(self, now: datetime) -> None:
+        """Curva de P&L del día: una muestra por cuenta activa cada pocos segundos (para el gráfico de la consola)."""
+        if not self.store:
+            return
+        import time
+        if time.monotonic() - self._last_sample < self.pnl_sample_seconds:
+            return
+        self._last_sample = time.monotonic()
+        rows = [(a.account_id, now.isoformat(timespec="seconds"), a.daily_pnl) for a in self.accounts.values() if a.enabled and a.reported]
+        if rows:
+            try:
+                self.store.add_pnl_samples(rows)
+            except Exception as exc:
+                logger.warning(f"No se pudo guardar la muestra de P&L: {exc}")
+
     def position(self, account_id: str, symbol: str) -> int:
         snap = self.accounts.get(account_id)
         if not snap:
@@ -129,7 +161,9 @@ class AccountService:
     async def publish_accounts(self, force: bool = False) -> None:
         """Publica el snapshot solo si cambió algo relevante (con cientos de cuentas importa)."""
         sig = tuple((a.account_id, a.balance, a.connected, a.enabled, a.alias, a.reported, a.desync, round(a.daily_pnl),
-                     tuple((p.symbol, p.quantity) for p in a.open_positions)) for a in self.accounts.values())
+                     tuple((p.symbol, p.quantity) for p in a.open_positions),
+                     tuple((o.order_id, o.quantity, o.filled, o.limit_price, o.stop_price, o.state) for o in a.working_orders))
+                    for a in self.accounts.values())
         if force or sig != self._last_signature:
             self._last_signature = sig
             await self.bus.publish(TOPIC_ACCOUNTS, [a.model_dump(mode="json") for a in self.accounts.values()])

@@ -114,6 +114,15 @@ def delete_rule(rule_id: str, request: Request):
         raise HTTPException(404, "Regla no encontrada")
 
 
+@router.get("/pnl")
+def pnl_history(request: Request, hours: float = 24):
+    """Curva de P&L por cuenta: {cuenta: [[ts, pnl], ...]} desde hace `hours` horas (muestras cada 15 s)."""
+    from datetime import datetime, timedelta
+    c = _c(request)
+    since = (datetime.now() - timedelta(hours=max(0.1, min(hours, 96)))).isoformat(timespec="seconds")
+    return {acc: [[ts, pnl] for ts, pnl in rows] for acc, rows in c.store.get_pnl_samples(since).items()}
+
+
 @router.get("/audit")
 def audit(request: Request, limit: int = 100, event_type: str | None = None):
     return _c(request).audit.recent(min(limit, 500), event_type)

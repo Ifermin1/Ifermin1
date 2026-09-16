@@ -12,7 +12,7 @@ funciona también con el addon anterior (solo verá las conectadas y lo avisará
 2. En NinjaTrader: *New → NinjaScript Editor*, carpeta *AddOns*, abre `TradePilotXBridge` (o crea uno con ese nombre).
 3. Sustituye todo el contenido por el de `TradePilotXBridge.cs` y pulsa **F5** (compilar). Debe compilar sin errores.
 4. Reinicia NinjaTrader (o desactiva y activa el addon). En *Tools → Output* debe aparecer
-   `[TradePilotX] Bridge v2.1 online. master=... (v2.1: is_exit, reconciliación segura tras cierre de emergencia)`.
+   `[TradePilotX] Bridge v2.2 online. master=... (v2.2: GET_ORDERS)`.
 
 ## Protocolo (puerto 5557, REQ/REP)
 
@@ -26,12 +26,16 @@ funciona también con el addon anterior (solo verá las conectadas y lo avisará
 | `WATCH\|Sim102` | `OK\|Sim102` suscribe órdenes/ejecuciones/posiciones de esa cuenta (ACK al engine) |
 | `SET_MASTER\|Sim102` | `OK\|Sim102` o `ERROR\|motivo`. Cambia la cuenta maestra en caliente y la guarda en `config.json` |
 | `ORDER\|{json}` | `OK\|tipo`, `IGNORED\|motivo` o `ERROR\|motivo` (v1.9). Mismo JSON que por 5556 |
+| `GET_ORDERS` | `acc\|orderKey\|masterId\|action\|symbol\|qty\|filled\|type\|limit\|stop\|state;...` (v2.2) |
 | `PING` | `PONG\|<boot>\|<seq>` (v1.8; antes `PONG`). `boot` cambia en cada arranque del addon y también viaja en el `HEARTBEAT` |
 
 El campo de estado es el `ConnectionStatus` de NinjaTrader (`Connected`, `Disconnected`, `Connecting`...).
 La cuenta maestra inicial se lee de `Documents\NinjaTrader 8\TradePilotX\config.json` (`MasterAccount`) y se puede cambiar desde la consola (v1.2+).
 
 ## Historial
+
+- **2.2**: `GET_ORDERS` devuelve las órdenes vivas de todas las cuentas (stops, TPs, entradas pendientes) para que la
+  consola las muestre junto a la posición.
 
 - **2.1**: una copia cancelada por un `FLATTEN` (cierre de emergencia) queda marcada: si después llega el fill del master de
   esa misma orden, el addon no lo reconcilia a mercado (el 16/9 a las 12:14 esa reconciliación reabrió +2 tras cerrar la cuenta).

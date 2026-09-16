@@ -18,7 +18,7 @@ from loguru import logger
 
 from tradepilot.core.config import settings
 from tradepilot.core.events import TOPIC_MASTER_EVENT, EventBus
-from tradepilot.domain.accounts import BrokerAccount, BrokerPosition
+from tradepilot.domain.accounts import BrokerAccount, BrokerPosition, WorkingOrder
 from tradepilot.infrastructure.brokers.base import BrokerBridge
 
 
@@ -38,6 +38,8 @@ class NinjaZmqBridge(BrokerBridge):
         self._orders_via_req = True   # se desactiva si el addon no conoce ORDER| (versión antigua)
         self.order_timeout_ms = 3000
         self._supports_all = True   # se desactiva si el addon no conoce GET_ACCOUNTS_ALL
+        self._supports_orders = True   # GET_ORDERS (addon >= 2.2)
+        self._retry_orders_at = 0.0
         self._retry_all_at = 0.0    # cuándo volver a probar GET_ACCOUNTS_ALL (el addon puede actualizarse en caliente)
 
     async def start(self) -> None:
@@ -182,6 +184,36 @@ class NinjaZmqBridge(BrokerBridge):
                 price = 0.0
             if signed:
                 out.append(BrokerPosition(account_id=f[0], symbol=f[1], quantity=signed, avg_price=price))
+        return out
+
+    async def get_orders(self) -> list[tuple[str, WorkingOrder]] | None:
+        if not self._supports_orders:
+            if time.monotonic() < self._retry_orders_at:
+                return None
+            self._supports_orders = True
+        reply = await self.request("GET_ORDERS")
+        if reply is None:
+            return None
+        if reply.startswith("ERROR|"):
+            self._supports_orders = False
+            self._retry_orders_at = time.monotonic() + 60
+            return None
+        return self.parse_orders(reply)
+
+    @staticmethod
+    def parse_orders(reply: str) -> list[tuple[str, WorkingOrder]]:
+        """acc|orderKey|masterId|action|symbol|qty|filled|type|limit|stop|state;..."""
+        out: list[tuple[str, WorkingOrder]] = []
+        for part in reply.split(";"):
+            f = [x.strip() for x in part.split("|")]
+            if len(f) < 11 or not f[0]:
+                continue
+            try:
+                out.append((f[0], WorkingOrder(order_id=f[1], master_order_id=f[2], action=f[3].upper(), symbol=f[4],
+                                              quantity=int(float(f[5])), filled=int(float(f[6] or 0)), order_type=f[7].upper(),
+                                              limit_price=float(f[8] or 0), stop_price=float(f[9] or 0), state=f[10])))
+            except ValueError:
+                continue
         return out
 
     async def flatten(self, account: str) -> str:

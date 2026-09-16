@@ -189,7 +189,10 @@ class ReplicationService:
     # ---- maestro ----
     async def _replicate(self, event: MasterEvent) -> list[ReplicationTask]:
         self.stats["events_in"] += 1
-        self.audit.log("MASTER_RECEIVED", f"[{event.msg_type}] {event.action} {event.quantity} {event.symbol} @ {event.price}",
+        at = (f"@ {event.price}" if event.price else
+              f"stop @ {event.stop_price}" if getattr(event, "stop_price", 0) else
+              f"límite @ {event.limit_price}" if getattr(event, "limit_price", 0) else "")
+        self.audit.log("MASTER_RECEIVED", f"[{event.msg_type}] {event.action} {event.quantity} {event.symbol} {at}".rstrip(),
                        source=event.account, details={"order_id": event.order_id, "state": event.state})
 
         if event.msg_type == "EXECUTION":

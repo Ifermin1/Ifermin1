@@ -11,7 +11,7 @@ from datetime import datetime
 from loguru import logger
 
 from tradepilot.core.events import TOPIC_MASTER_EVENT, EventBus
-from tradepilot.domain.accounts import BrokerAccount, BrokerPosition
+from tradepilot.domain.accounts import BrokerAccount, BrokerPosition, WorkingOrder
 from tradepilot.infrastructure.brokers.base import BrokerBridge
 
 SYMBOLS = ["NQ 12-26", "ES 12-26", "MNQ 12-26", "CL 11-26"]
@@ -32,6 +32,7 @@ class MockBridge(BrokerBridge):
         self.pnl: dict[str, float] = {}   # P&L del día por cuenta (pruebas)
         self.sent_orders: list[dict] = []
         self.watched: list[str] = []      # cuentas por las que el engine pidió WATCH
+        self.working_orders: list[tuple[str, WorkingOrder]] = []   # (cuenta, orden) que reporta GET_ORDERS (pruebas)
         self.boot: str | None = None      # simula el "PONG|boot|seq" del addon >= 1.8 (pruebas)
         self.seq: int | None = None
         self._task: asyncio.Task | None = None
@@ -86,6 +87,9 @@ class MockBridge(BrokerBridge):
 
     async def ping_state(self) -> tuple[bool, str | None, int | None]:
         return True, self.boot, self.seq
+
+    async def get_orders(self) -> list[tuple[str, WorkingOrder]] | None:
+        return list(self.working_orders)
 
     async def get_positions(self) -> list[BrokerPosition] | None:
         return [BrokerPosition(account_id=a, symbol=sym, quantity=q) for (a, sym), q in self.positions.items() if q]

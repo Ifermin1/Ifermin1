@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { useStore } from "../lib/store";
-import { ago, money, time } from "../lib/format";
+import { ago, money } from "../lib/format";
 import { Card, Empty } from "../components/ui";
+import { AccountPanel } from "../components/AccountPanel";
 import type { Account, ExecOptions, Rule } from "../lib/api";
 
-const posText = (a: Account) => a.open_positions.length ? a.open_positions.map((p) => `${p.quantity > 0 ? "L" : "S"}${Math.abs(p.quantity)} ${p.symbol}`).join(", ") : "plana";
 const label = (a: Account) => a.alias ? `${a.alias} · ${a.account_id}` : a.account_id;
 
 function ConnBadge({ a }: { a: Account }) {
@@ -16,7 +16,7 @@ function ConnBadge({ a }: { a: Account }) {
 /** Cuentas: la maestra, las seguidoras activas con su interruptor de copia, y un
  *  panel de gestión con todas las cuentas que NinjaTrader conoce. */
 export function Accounts() {
-  const { client, accounts, rules, setRules, risk, health, audit } = useStore();
+  const { client, accounts, rules, setRules, risk, health, audit, prices } = useStore();
   const detected = health?.bridge.master_account ?? null;
   const [master, setMaster] = useState<string>(detected ?? "");
   const [manage, setManage] = useState(false);
@@ -82,9 +82,9 @@ export function Accounts() {
             {!master && <option value="">Selecciona…</option>}
             {accounts.map((a) => <option key={a.account_id} value={a.account_id}>{label(a)}{a.account_id === detected ? " · maestro del addon" : ""}</option>)}
           </select>
-          {masterAcc && <><ConnBadge a={masterAcc} /><span className="muted">{money(masterAcc.balance)} · {posText(masterAcc)}</span>
-            {masterAcc.open_positions.length > 0 && <button className="danger-solid small-btn" disabled={busy === masterAcc.account_id} onClick={() => void flatten(masterAcc.account_id)}>Cerrar maestra</button>}</>}
         </div>
+        {masterAcc && <div className="panels one"><AccountPanel a={masterAcc} role="master" prices={prices} busy={busy === masterAcc.account_id} limit={limits.get(masterAcc.account_id)}
+                                                       onFlatten={() => void flatten(masterAcc.account_id)} /></div>}
         {detected && master && master !== detected && (
           <p className="error">El addon sigue publicando <b>{detected}</b>; el cambio a {master} no se aplicó.</p>
         )}
@@ -95,43 +95,24 @@ export function Accounts() {
       <Card title={`Seguidoras · ${linked} de ${followers.length} copiando`}
             right={<button className="ghost" onClick={() => setManage(!manage)}>{manage ? "Cerrar gestión" : `Gestionar cuentas${hidden ? ` (${hidden} ocultas)` : ""}`}</button>}>
         {followers.length === 0 ? <Empty>{accounts.length ? "Todas las cuentas están desactivadas. Actívalas en “Gestionar cuentas”." : "Esperando cuentas del bróker…"}</Empty> : (
-          <ul className="acct-list">
+          <div className="panels">
             {followers.map((a) => {
-              const link = linkOf(a.account_id); const l = limits.get(a.account_id);
-              const fill = lastFill(a.account_id); const rej = lastReject(a.account_id); const on = !!link?.enabled;
+              const link = linkOf(a.account_id);
               return (
-                <li key={a.account_id} className={`acct ${on ? "on" : ""} ${a.connected === false ? "offline" : ""}`}>
-                  <div className="acct-main">
-                    <div className="acct-name"><b>{a.alias || a.account_id}</b>{a.alias && <span className="muted small">{a.account_id}</span>}
-                      <ConnBadge a={a} />{l?.trading_halted && <span className="badge bad">pausada</span>}{on && <span className="badge ok">copiando</span>}
-                      {link?.target_root && <span className="chip">→ {link.target_root}</span>}{link?.entry_mode === "limit" && <span className="chip">límite ±{link.tolerance_ticks}</span>}
-                    </div>
-                    <div className="acct-meta"><span>{money(a.balance)}</span>
-                      <span className={a.daily_pnl < 0 ? "bad" : a.daily_pnl > 0 ? "ok" : "muted"}>P&L {money(a.daily_pnl)}</span>
-                      <span className={a.open_positions.length ? "" : "muted"}>{posText(a)}</span><span className="muted">{ago(a.updated_at)}</span></div>
-                    {(fill || rej) && (
-                      <div className="acct-last">
-                        {rej && (!fill || rej.timestamp > fill.timestamp)
-                          ? <span className="bad">Rechazo {time(rej.timestamp)}: {rej.message.replace(`${a.account_id}: `, "")}</span>
-                          : fill && <span className="muted">Último fill {time(fill.timestamp)}: {fill.message.replace(`${a.account_id}: `, "")}</span>}
-                      </div>
-                    )}
-                    {on && a.connected === false && <div className="acct-last warn">Copiando pero desconectada: NinjaTrader rechazará las órdenes hasta que conecte.</div>}
-                    {a.desync && <div className="acct-last bad">DESINCRONIZADA: {a.desync_detail}. Solo se copian salidas hasta igualarla.
-                      <button className="ghost small-btn" disabled={busy === a.account_id} onClick={() => void resync(a.account_id)}>Igualar a la maestra</button></div>}
-                  </div>
-                  <div className="acct-actions">
-                    <label className="mult">x<input type="number" step="0.1" min="0.1" value={link?.multiplier ?? 1} disabled={busy === a.account_id || !master}
-                      onChange={(e) => { const m = Number(e.target.value); if (m > 0 && link) void apply(a.account_id, link.enabled, m); }}
-                      onBlur={(e) => { const m = Number(e.target.value); if (m > 0 && !link) void apply(a.account_id, false, m); }} /></label>
-                    <label className="switch" title={on ? "Dejar de copiar" : "Copiar al maestro"}>
-                      <input type="checkbox" checked={on} disabled={busy === a.account_id || !master}
-                        onChange={(e) => void apply(a.account_id, e.target.checked, link?.multiplier ?? 1)} /><span />
-                    </label>
-                    {link && <button className="ghost danger" disabled={busy === a.account_id} onClick={() => void remove(a.account_id)} title="Quitar vínculo">✕</button>}
-                    {a.open_positions.length > 0 && <button className="danger-solid small-btn" disabled={busy === a.account_id} onClick={() => void flatten(a.account_id)} title="Cancelar órdenes y cerrar posición">Cerrar</button>}
-                    <button className="ghost small-btn" title="Opciones de ejecución" onClick={() => setOpenOpts(openOpts === a.account_id ? null : a.account_id)}>⚙</button>
-                  </div>
+                <AccountPanel key={a.account_id} a={a} role="follower" link={link} limit={limits.get(a.account_id)} prices={prices} busy={busy === a.account_id}
+                              lastFill={lastFill(a.account_id)} lastReject={lastReject(a.account_id)}
+                              onFlatten={() => void flatten(a.account_id)} onResync={() => void resync(a.account_id)}
+                              controls={<>
+                                <label className="mult">x<input type="number" step="0.1" min="0.1" value={link?.multiplier ?? 1} disabled={busy === a.account_id || !master}
+                                  onChange={(e) => { const m = Number(e.target.value); if (m > 0 && link) void apply(a.account_id, link.enabled, m); }}
+                                  onBlur={(e) => { const m = Number(e.target.value); if (m > 0 && !link) void apply(a.account_id, false, m); }} /></label>
+                                <label className="switch" title={link?.enabled ? "Dejar de copiar" : "Copiar al maestro"}>
+                                  <input type="checkbox" checked={!!link?.enabled} disabled={busy === a.account_id || !master}
+                                    onChange={(e) => void apply(a.account_id, e.target.checked, link?.multiplier ?? 1)} /><span />
+                                </label>
+                                {link && <button className="ghost danger small-btn" disabled={busy === a.account_id} onClick={() => void remove(a.account_id)} title="Quitar vínculo">✕</button>}
+                                <button className={`ghost small-btn ${openOpts === a.account_id ? "active" : ""}`} title="Opciones de ejecución" onClick={() => setOpenOpts(openOpts === a.account_id ? null : a.account_id)}>⚙</button>
+                              </>}>
                   {openOpts === a.account_id && (
                     <div className="exec-opts">
                       <label>Símbolo destino<input placeholder="igual que la maestra · ej. MNQ" defaultValue={link?.target_root ?? ""}
@@ -149,10 +130,10 @@ export function Accounts() {
                       <p className="muted small">Las salidas (stops, take profits y cierres) van siempre a mercado o con su propia orden. Símbolo destino: la seguidora opera ese contrato (p. ej. maestra NQ, seguidora MNQ con multiplicador ×10). Requiere addon v1.7 para entradas límite.</p>
                     </div>
                   )}
-                </li>
+                </AccountPanel>
               );
             })}
-          </ul>
+          </div>
         )}
         {err && <p className="error">{err}</p>}
       </Card>
