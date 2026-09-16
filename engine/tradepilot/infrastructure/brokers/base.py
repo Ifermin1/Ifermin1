@@ -38,7 +38,7 @@ class BrokerBridge(ABC):
         """Cancela todas las órdenes y cierra las posiciones de la cuenta. Lanza RuntimeError si falla."""
         raise RuntimeError("este puente no permite cerrar posiciones")
 
-    async def watch(self, account: str) -> None:
+    async def watch(self, account: str) -> bool:
         """Pide al bróker que reporte órdenes/posiciones de esa cuenta (no-op si no aplica)."""
 
     async def ping(self) -> bool:
@@ -76,4 +76,4 @@ class BrokerBridge(ABC):
         limit_price: float = 0.0,
         stop_price: float = 0.0,
         entry: dict | None = None,
-    ) -> None: ...
+    ) -> str | None: ...

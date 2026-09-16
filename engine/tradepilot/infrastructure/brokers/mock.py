@@ -34,6 +34,8 @@ class MockBridge(BrokerBridge):
         self.watched: list[str] = []      # cuentas por las que el engine pidió WATCH
         self.working_orders: list[tuple[str, WorkingOrder]] = []   # (cuenta, orden) que reporta GET_ORDERS (pruebas)
         self.boot: str | None = None      # simula el "PONG|boot|seq" del addon >= 1.8 (pruebas)
+        self.watch_ok = True              # False: el addon no confirma el WATCH (pruebas)
+        self.next_replies: list[str] = []  # respuestas forzadas a las próximas órdenes (pruebas): "IGNORED|...", "OK|EXECUTION_PARTIAL"
         self.seq: int | None = None
         self._task: asyncio.Task | None = None
         self._running = False
@@ -82,8 +84,9 @@ class MockBridge(BrokerBridge):
         self.resubscribes = getattr(self, "resubscribes", 0) + 1
         self.health.resubscribes += 1
 
-    async def watch(self, account: str) -> None:
+    async def watch(self, account: str) -> bool:
         self.watched.append(account)
+        return self.watch_ok
 
     async def ping_state(self) -> tuple[bool, str | None, int | None]:
         return True, self.boot, self.seq
@@ -121,7 +124,11 @@ class MockBridge(BrokerBridge):
                 for k, v in self.accounts.items()]
 
     async def send_order(self, target_account, action, symbol, quantity, order_type, master_order_id,
-                         msg_type="EXECUTION", price=0.0, limit_price=0.0, stop_price=0.0, entry=None) -> None:
+                         msg_type="EXECUTION", price=0.0, limit_price=0.0, stop_price=0.0, entry=None) -> str | None:
+        reply = self.next_replies.pop(0) if self.next_replies else "OK|" + msg_type
+        if reply.startswith("IGNORED|"):
+            logger.info(f"[mock] orden -> {target_account} {action} {quantity} {symbol} ignorada: {reply[8:]}")
+            return reply
         self.sent_orders.append({
             "account": target_account, "action": action, "symbol": symbol, "quantity": quantity,
             "order_type": order_type, "master_order_id": master_order_id, "msg_type": msg_type, "price": price,
@@ -133,3 +140,4 @@ class MockBridge(BrokerBridge):
             sign = 1 if action.upper().startswith("BUY") else -1
             self.positions[k] = self.positions.get(k, 0) + sign * quantity
         logger.info(f"[mock] orden -> {target_account} {action} {quantity} {symbol}")
+        return reply

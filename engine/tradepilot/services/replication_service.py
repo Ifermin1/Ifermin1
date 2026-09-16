@@ -20,6 +20,15 @@ STOP_TYPES = {"STOPMARKET", "STOPLIMIT", "STOP", "MIT"}
 REJECTED_STATES = {"REJECTED", "ERROR"}
 
 
+# Qué hizo el addon con la orden cuando no fue la copia normal (respuesta "OK|<detalle>", addon >= 2.0)
+ADDON_NOTES = {
+    "EXECUTION_RECONCILE": "la copia seguía viva: cancelada y el resto a mercado",
+    "EXECUTION_RECON": "la copia no se había ejecutado: a mercado",
+    "EXECUTION_PARTIAL": "fill parcial del maestro: copia reducida y diferencia a mercado",
+    "ORDER_MODIFIED_RECREATED": "no había copia viva: stop/TP recreado",
+}
+
+
 class ReplicationService:
     """Recibe todo lo que publica el addon de NinjaTrader por 5555 y:
     - replica las órdenes del maestro a los followers según las reglas,
@@ -311,10 +320,18 @@ class ReplicationService:
         symbol = symbol or ev.symbol
         entry = self._entry_params(rule, ev, symbol) if rule else None
         try:
-            await self.bridge.send_order(target_account=task.target_account, action=ev.action, symbol=symbol,
-                                         quantity=task.scaled_quantity, order_type=ev.order_type,
-                                         master_order_id=task.master_order_id, msg_type=ev.msg_type, price=ev.price,
-                                         limit_price=ev.limit_price, stop_price=ev.stop_price, entry=entry)
+            reply = await self.bridge.send_order(target_account=task.target_account, action=ev.action, symbol=symbol,
+                                                 quantity=task.scaled_quantity, order_type=ev.order_type,
+                                                 master_order_id=task.master_order_id, msg_type=ev.msg_type, price=ev.price,
+                                                 limit_price=ev.limit_price, stop_price=ev.stop_price, entry=entry)
+            if isinstance(reply, str) and reply.startswith("IGNORED|"):
+                # El addon recibió la orden pero no la aplicó (copia ya ejecutada, sin orden viva...): no es una réplica.
+                task.status = "IGNORED"
+                self.audit.log("SKIPPED", f"[{ev.msg_type}] {ev.action} {task.scaled_quantity} {symbol} -> {task.target_account}: "
+                                          f"el addon no la aplicó ({reply[8:]})",
+                               source=ev.account, target=task.target_account,
+                               details={"rule_id": task.rule_id, "master_order_id": task.master_order_id, "reply": reply})
+                return
             if self.journal:
                 self.journal.write("out", {"msg_type": ev.msg_type, "account": task.target_account, "action": ev.action,
                                            "symbol": symbol, "quantity": task.scaled_quantity, "order_type": ev.order_type,
@@ -324,9 +341,11 @@ class ReplicationService:
             if ev.msg_type == "ORDER_PENDING":
                 self._remember(self._sent_pending, (task.target_account.lower(), task.master_order_id), task.scaled_quantity)
             how = f" (límite ±{entry['tolerance_ticks']} ticks)" if entry else ""
-            self.audit.log("REPLICATED", f"[{ev.msg_type}] {ev.action} {task.scaled_quantity} {symbol}{how} -> {task.target_account}",
+            detail = reply[3:] if isinstance(reply, str) and reply.startswith("OK|") else ""
+            note = f" · addon: {ADDON_NOTES.get(detail, detail.lower().replace('_', ' '))}" if detail and detail != ev.msg_type else ""
+            self.audit.log("REPLICATED", f"[{ev.msg_type}] {ev.action} {task.scaled_quantity} {symbol}{how} -> {task.target_account}{note}",
                            source=ev.account, target=task.target_account,
-                           details={"rule_id": task.rule_id, "master_order_id": task.master_order_id})
+                           details={"rule_id": task.rule_id, "master_order_id": task.master_order_id, "reply": reply})
         except Exception as exc:
             task.status = "ERROR"
             self.stats["errors"] += 1

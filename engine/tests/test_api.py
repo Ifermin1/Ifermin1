@@ -538,3 +538,39 @@ async def test_working_orders_and_pnl_history(client: AsyncClient, container):
     assert "Sim101" in body and len(body["Sim101"]) >= 1
     ts, pnl = body["Sim101"][-1]
     assert isinstance(ts, str) and isinstance(pnl, (int, float))
+
+
+async def test_addon_reply_is_reflected_in_audit(client: AsyncClient, container):
+    """Si el addon contesta IGNORED la orden no cuenta como replicada (SKIPPED con el motivo); si contesta OK con un
+    detalle (fill parcial, copia recreada) ese detalle queda en la línea REPLICATED."""
+    await client.post("/api/rules", json={"master_account": "Sim101", "follower_account": "Sim102"})
+    b = container.bridge
+    b.next_replies.append("IGNORED|sin orden trabajando")
+    await client.post("/api/mock/master-event", json={"quantity": 1, "symbol": "NQ 12-26", "action": "BUY", "order_id": "ign1"})
+    r = await client.get("/api/audit?limit=5")
+    types = [a["event_type"] for a in r.json()]
+    assert "REPLICATED" not in types
+    skipped = next(a for a in r.json() if a["event_type"] == "SKIPPED")
+    assert "el addon no la aplicó (sin orden trabajando)" in skipped["message"] and skipped["target_account"] == "Sim102"
+    assert b.sent_orders == []
+
+    b.next_replies.append("OK|EXECUTION_PARTIAL")
+    await client.post("/api/mock/master-event", json={"quantity": 2, "symbol": "NQ 12-26", "action": "BUY", "order_id": "part1"})
+    r = await client.get("/api/audit?event_type=REPLICATED")
+    assert "fill parcial del maestro" in r.json()[0]["message"]
+    assert len(b.sent_orders) == 1
+
+
+async def test_watch_is_retried_until_the_addon_confirms(client: AsyncClient, container):
+    b = container.bridge
+    b.watch_ok = False
+    r = await client.put("/api/accounts/Sim102/link", json={"master_account": "Sim101", "multiplier": 1})
+    assert r.status_code == 200, r.text
+    assert b.watched == ["Sim102"] and "Sim102" not in container.accounts._watched
+    await container.accounts.sync_once()
+    assert b.watched == ["Sim102", "Sim102"], "sin confirmación se reintenta en el siguiente sync"
+    b.watch_ok = True
+    await container.accounts.sync_once()
+    assert "Sim102" in container.accounts._watched
+    await container.accounts.sync_once()
+    assert b.watched.count("Sim102") == 3, "una vez confirmado no se insiste"

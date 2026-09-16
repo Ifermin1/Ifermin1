@@ -88,7 +88,16 @@ def handle_order(raw: str, via: str) -> str:
         if live:
             ORDERS[live].update(quantity=o["quantity"], limit_price=o.get("limit_price", 0), stop_price=o.get("stop_price", 0))
             send({**ORDERS[live], "msg_type": "ORDER_STATUS", "filled": 0, "price": 0, "state": "Working", "error": "", "native_error": "", "timestamp": now()})
-        return "OK|ORDER_MODIFIED" if live else "IGNORED|sin orden trabajando"
+            return "OK|ORDER_MODIFIED"
+        # v2.3: sin copia viva pero con posición que proteger -> se recrea (nunca por más de la posición)
+        pos = POSITIONS.get((o["account"], o["symbol"]), 0)
+        protectable = max(0, pos) if o["action"].upper().startswith("SELL") else max(0, -pos)
+        if protectable <= 0 or reject:
+            return "IGNORED|sin orden trabajando"
+        ORDERS[fid] = {**base, "quantity": min(o["quantity"], protectable), "limit_price": o.get("limit_price", 0), "stop_price": o.get("stop_price", 0)}
+        send({**ORDERS[fid], "msg_type": "ORDER_STATUS", "filled": 0, "price": 0, "state": "Working", "error": "", "native_error": ""})
+        print(f"  ORDER_MODIFIED sin copia viva: recreada {ORDERS[fid]['quantity']} (posición {pos})")
+        return "OK|ORDER_MODIFIED_RECREATED"
     if o["msg_type"] == "ORDER_CANCELLED":
         if live:
             w = ORDERS.pop(live)

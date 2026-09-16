@@ -21,6 +21,7 @@ class AccountService:
         self.after_sync = None                 # corrutina a llamar tras cada sincronización (SyncService.check)
         self.on_positions_refreshed = None     # callable(cuenta | None) tras actualizar posiciones (libro de exposición)
         self._watched: set[str] = set()
+        self._watch_pending: set[str] = set()   # WATCH que el addon aún no confirmó: se reintenta en cada sync
         self.accounts: dict[str, AccountSnapshot] = {}
         # Cuentas recordadas de sesiones anteriores: aparecen aunque el bróker aún no las reporte
         for row in (store.get_accounts() if store else []):
@@ -76,6 +77,8 @@ class AccountService:
         if orders is not None:
             self.apply_orders(orders)
         self._sample_pnl(now)
+        for acc in list(self._watch_pending):
+            await self.watch(acc)
         if data:
             for acc, snap in self.accounts.items():
                 if acc not in reported:
@@ -96,16 +99,23 @@ class AccountService:
     def forget_watches(self) -> None:
         """Tras un reinicio del addon hay que volver a pedir WATCH de cada seguidora."""
         self._watched.clear()
+        self._watch_pending.clear()
 
     async def watch(self, account_id: str) -> None:
-        """Pide al addon que reporte esa cuenta (órdenes/posiciones) aunque aún no le hayamos mandado órdenes."""
+        """Pide al addon que reporte esa cuenta (órdenes/posiciones) aunque aún no le hayamos mandado órdenes.
+        Si el addon no lo confirma (recién reiniciado), queda pendiente y se reintenta en cada sync."""
         if account_id in self._watched:
             return
-        self._watched.add(account_id)
         try:
-            await self.bridge.watch(account_id)
+            ok = await self.bridge.watch(account_id)
         except Exception as exc:
             logger.warning(f"watch {account_id}: {exc}")
+            ok = False
+        if ok:
+            self._watched.add(account_id)
+            self._watch_pending.discard(account_id)
+        else:
+            self._watch_pending.add(account_id)
 
     _last_signature: tuple | None = None
 

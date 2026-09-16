@@ -12,7 +12,7 @@ funciona también con el addon anterior (solo verá las conectadas y lo avisará
 2. En NinjaTrader: *New → NinjaScript Editor*, carpeta *AddOns*, abre `TradePilotXBridge` (o crea uno con ese nombre).
 3. Sustituye todo el contenido por el de `TradePilotXBridge.cs` y pulsa **F5** (compilar). Debe compilar sin errores.
 4. Reinicia NinjaTrader (o desactiva y activa el addon). En *Tools → Output* debe aparecer
-   `[TradePilotX] Bridge v2.2 online. master=... (v2.2: GET_ORDERS)`.
+   `[TradePilotX] Bridge v2.3 online. master=... (v2.3: fills parciales del master y stops recreados)`.
 
 ## Protocolo (puerto 5557, REQ/REP)
 
@@ -33,6 +33,11 @@ El campo de estado es el `ConnectionStatus` de NinjaTrader (`Connected`, `Discon
 La cuenta maestra inicial se lee de `Documents\NinjaTrader 8\TradePilotX\config.json` (`MasterAccount`) y se puede cambiar desde la consola (v1.2+).
 
 ## Historial
+
+- **2.3**: un fill **parcial** del master (su stop/TP ejecutó 1 de 2) ya no cancela la copia entera: se reduce en la misma
+  proporción y sólo la diferencia va a mercado (antes el follower quedaba plano o con posición sin stop). `ORDER_MODIFIED`
+  sin copia viva recrea el stop/TP si el follower aún tiene posición que proteger (nunca por más de esa posición).
+  `EXECUTION` del master lleva `order_filled` / `order_quantity`.
 
 - **2.2**: `GET_ORDERS` devuelve las órdenes vivas de todas las cuentas (stops, TPs, entradas pendientes) para que la
   consola las muestre junto a la posición.

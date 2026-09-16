@@ -78,7 +78,7 @@ Si *Cuentas* queda vacío, el addon no está respondiendo en 5557: revisa que Ni
 - **Stop rechazado**: si el bróker rechaza un stop copiado, el engine cierra esa cuenta al instante (`CLOSE_ON_STOP_REJECT=true` en `.env`).
 - **Diario**: `engine\data\journal\AAAA-MM-DD.jsonl` guarda todo lo recibido y enviado. Ante cualquier incidente, ese archivo es lo que hay que revisar.
 
-Todo esto requiere el addon **v2.2**; la consola avisa en rojo si el addon es anterior.
+Todo esto requiere el addon **v2.3**; la consola avisa en rojo si el addon es anterior.
 
 ## Consola
 

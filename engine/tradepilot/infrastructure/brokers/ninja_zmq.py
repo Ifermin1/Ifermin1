@@ -227,8 +227,14 @@ class NinjaZmqBridge(BrokerBridge):
             raise RuntimeError("el addon es antiguo: actualiza a v1.5 para cerrar posiciones desde la consola")
         raise RuntimeError(reply.replace("ERROR|", "El addon respondió: "))
 
-    async def watch(self, account: str) -> None:
-        await self.request(f"WATCH|{account}")
+    async def watch(self, account: str) -> bool:
+        """WATCH con confirmación: si el addon no contesta OK (recién reiniciado, ocupado) se devuelve False y
+        AccountService lo reintenta en cada sync. Sin esto la primera orden tardaba segundos en suscribir la cuenta."""
+        reply = await self.request(f"WATCH|{account}")
+        if reply is None or not reply.startswith("OK|"):
+            logger.warning(f"WATCH {account}: el addon no confirmó ({reply or 'sin respuesta'}); se reintentará")
+            return False
+        return True
 
     async def set_master(self, account: str) -> str:
         reply = await self.request(f"SET_MASTER|{account}")
@@ -367,7 +373,8 @@ class NinjaZmqBridge(BrokerBridge):
                 return None
 
     async def send_order(self, target_account, action, symbol, quantity, order_type, master_order_id,
-                         msg_type="EXECUTION", price=0.0, limit_price=0.0, stop_price=0.0, entry=None) -> None:
+                         msg_type="EXECUTION", price=0.0, limit_price=0.0, stop_price=0.0, entry=None) -> str | None:
+        """Devuelve la respuesta del addon ("OK|tipo", "OK|detalle", "IGNORED|motivo") o None si fue por 5556 sin confirmación."""
         if not self._running:
             raise RuntimeError("Puente ZMQ no iniciado")
         payload = {
@@ -404,8 +411,8 @@ class NinjaZmqBridge(BrokerBridge):
                 if reply.startswith("IGNORED|"):
                     logger.info(f"Orden {action} {quantity} {symbol} -> {target_account} ignorada por el addon: {reply[8:]}")
                 else:
-                    logger.info(f"Orden confirmada -> {target_account} {action} {quantity} {symbol}")
-                return
+                    logger.info(f"Orden confirmada -> {target_account} {action} {quantity} {symbol} ({reply})")
+                return reply
         try:
             await self.pub_socket.send_string(raw)
             self.health.last_msg_out = datetime.now()
@@ -414,3 +421,4 @@ class NinjaZmqBridge(BrokerBridge):
             self.health.error_count += 1
             logger.error(f"Error publicando orden ZMQ: {exc}")
             raise
+        return None

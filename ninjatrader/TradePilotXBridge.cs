@@ -15,6 +15,8 @@
 //                                  "WATCH|Sim102"     -> "OK|Sim102"  (escuchar órdenes/posiciones de un follower)
 //                                  "PING"             -> "PONG|<boot>|<seq>" (v1.8: arranque del addon y último seq publicado)
 //   v2.0: EXECUTION del master lleva is_exit / is_entry (Execution.IsExit / IsEntry del bróker).
+//   v2.3: un fill PARCIAL del master ajusta la copia en proporción (no la cancela entera); ORDER_MODIFIED sin copia viva
+//         recrea el stop/TP si el follower aún tiene posición que proteger; EXECUTION lleva order_filled / order_quantity.
 //                                  "ORDER|{json}"     -> "OK|tipo" / "IGNORED|motivo" / "ERROR|motivo" (v1.9: orden con confirmación;
 //                                                        mismo JSON que por 5556, que sigue aceptándose para engines antiguos)
 //   Todos los mensajes publicados llevan "seq" creciente para detectar pérdidas.
@@ -45,7 +47,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 {
     public class TradePilotXBridge : AddOnBase
     {
-        private const string BridgeVersion = "2.2";
+        private const string BridgeVersion = "2.3";
 
         // ---- configuración ------------------------------------------------
         private class BridgeConfig
@@ -186,7 +188,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                     foreach (string sym in cfg.PriceInstruments)
                         EnsurePriceFeed(sym);
 
-                    Info(string.Format("Bridge v{0} online. master={1} pub={2} sub={3} sync={4} (v2.2: GET_ORDERS)",
+                    Info(string.Format("Bridge v{0} online. master={1} pub={2} sub={3} sync={4} (v2.3: fills parciales del master y stops recreados)",
                         BridgeVersion, cfg.MasterAccount, cfg.MasterPort, cfg.FollowerPort, cfg.SyncPort));
                 }
                 catch (Exception ex)
@@ -345,6 +347,8 @@ namespace NinjaTrader.NinjaScript.AddOns
                     "execution_id", e.Execution.ExecutionId ?? "",
                     "is_exit", e.Execution.IsExit,
                     "is_entry", e.Execution.IsEntry,
+                    "order_filled", order.Filled,
+                    "order_quantity", order.Quantity,
                     "timestamp", e.Time.ToString("o")));
             }
             catch (Exception ex) { Error("OnMasterExecution: " + ex.Message); }
@@ -547,6 +551,38 @@ namespace NinjaTrader.NinjaScript.AddOns
                         {
                             if (IsLive(existing))
                             {
+                                // v2.3: si el fill del master es PARCIAL (su orden sigue viva con resto), la copia NO se cancela:
+                                // se reduce a la misma proporción y sólo la diferencia se cierra a mercado. Incidente 16/9 13:28:
+                                // el stop del master ejecutó 1 de 2, la copia entera se canceló y el follower quedó sin protección.
+                                Order mo = FindMasterOrder(masterOrderId);
+                                if (mo != null && IsLive(mo) && mo.Filled < mo.Quantity)
+                                {
+                                    int masterRemaining = mo.Quantity - mo.Filled;
+                                    int desiredRemaining = (int)Math.Round((double)masterRemaining * existing.Quantity / Math.Max(1, mo.Quantity));
+                                    int copyRemaining = existing.Quantity - existing.Filled;
+                                    int shortfall = copyRemaining - desiredRemaining;
+                                    if (shortfall <= 0)
+                                    {
+                                        Info("Fill parcial del master en " + masterOrderId + " (" + mo.Filled + "/" + mo.Quantity + "): la copia va igual o por delante ("
+                                            + existing.Filled + "/" + existing.Quantity + "), nada que hacer");
+                                        return "IGNORED|fill parcial del master: la copia ya ejecutó lo suyo";
+                                    }
+                                    if (desiredRemaining > 0)
+                                    {
+                                        try
+                                        {
+                                            existing.QuantityChanged = existing.Filled + desiredRemaining;
+                                            existing.LimitPriceChanged = existing.LimitPrice;
+                                            existing.StopPriceChanged = existing.StopPrice;
+                                            account.Change(new[] { existing });
+                                        }
+                                        catch (Exception cx) { Warn("No se pudo reducir la copia " + key + ": " + cx.Message); }
+                                        Warn(string.Format("Fill parcial del master en {0} ({1}/{2}): copia reducida a {3} y {4} a mercado para seguirle",
+                                            masterOrderId, mo.Filled, mo.Quantity, existing.Filled + desiredRemaining, shortfall));
+                                        SubmitNew(account, symbol, Get(m, "action"), OrderType.Market, shortfall, 0, 0, key + "#part" + mo.Filled, masterOrderId);
+                                        return "OK|EXECUTION_PARTIAL";
+                                    }
+                                }
                                 // v2.0: el master ya ejecutó (su stop/TP saltó) pero la copia del follower sigue viva (otro precio,
                                 // cola, cambio rechazado...). Cancelamos la copia y, cuando el bróker confirme la cancelación,
                                 // cerramos a mercado lo que quedó sin ejecutar (ReconcileAfterCancel). Nunca antes: así no hay doble salida.
@@ -590,7 +626,30 @@ namespace NinjaTrader.NinjaScript.AddOns
                         break;
 
                     case "ORDER_MODIFIED":
-                        if (existing == null || !IsWorking(existing)) { Warn("ORDER_MODIFIED sin orden trabajando para " + key); return "IGNORED|sin orden trabajando"; }
+                        if (existing == null || !IsLive(existing))
+                        {
+                            // v2.3: la copia ya no existe (cancelada al reconciliar, rechazada...) pero el master sigue moviendo su
+                            // stop/TP: si el follower aún tiene posición que proteger, se recrea con los nuevos parámetros y nunca
+                            // por más de esa posición (TradePilot ya la recorta a lo que queda por proteger).
+                            int pos = SignedPosition(account, symbol);
+                            bool selling = Get(m, "action").ToUpperInvariant().StartsWith("SELL");
+                            int protectable = selling ? Math.Max(0, pos) : Math.Max(0, -pos);
+                            if (protectable <= 0)
+                            {
+                                Warn("ORDER_MODIFIED sin orden trabajando para " + key + " y sin posición que proteger: ignorada");
+                                return "IGNORED|sin orden trabajando";
+                            }
+                            OrderType rtype = ParseType(Get(m, "order_type"));
+                            double rlimit = NumOr(m, "limit_price", rtype == OrderType.Limit || rtype == OrderType.StopLimit ? price : 0);
+                            double rstop = NumOr(m, "stop_price", rtype == OrderType.StopMarket || rtype == OrderType.StopLimit ? price : 0);
+                            if (rtype == OrderType.Market) rtype = OrderType.Limit;
+                            int rqty = Math.Min(qty, protectable);
+                            pendingCopies[key] = true;
+                            Warn("ORDER_MODIFIED sin copia viva para " + key + ": se recrea " + rqty + " (posición " + pos + ")");
+                            SubmitNew(account, symbol, Get(m, "action"), rtype, rqty, rlimit, rstop, key, masterOrderId);
+                            return "OK|ORDER_MODIFIED_RECREATED";
+                        }
+                        if (!IsWorking(existing)) { Warn("ORDER_MODIFIED con copia en estado " + existing.OrderState + " para " + key + ": ignorada"); return "IGNORED|sin orden trabajando"; }
                         {
                             double limit = NumOr(m, "limit_price", price);
                             double stop = NumOr(m, "stop_price", price);
@@ -819,6 +878,36 @@ namespace NinjaTrader.NinjaScript.AddOns
                     "timestamp", e.Time.ToString("o")));
             }
             catch (Exception ex) { Error("OnFollowerExecution: " + ex.Message); }
+        }
+
+        /// <summary>v2.3: orden del master por su clave, para saber si un fill fue parcial (su orden sigue viva con resto).</summary>
+        private Order FindMasterOrder(string masterOrderId)
+        {
+            Account m = master;
+            if (m == null || string.IsNullOrEmpty(masterOrderId)) return null;
+            try
+            {
+                List<Order> orders;
+                lock (m.Orders) orders = m.Orders.ToList();
+                return orders.FirstOrDefault(o => OrderKey(o) == masterOrderId);
+            }
+            catch { return null; }
+        }
+
+        /// <summary>Posición con signo del follower en ese instrumento (+largo / -corto / 0).</summary>
+        private static int SignedPosition(Account account, string symbol)
+        {
+            try
+            {
+                lock (account.Positions)
+                {
+                    foreach (Position p in account.Positions)
+                        if (p.Instrument != null && p.Instrument.FullName == symbol && p.Quantity != 0)
+                            return p.MarketPosition == MarketPosition.Short ? -p.Quantity : p.Quantity;
+                }
+            }
+            catch { }
+            return 0;
         }
 
         /// <summary>Orden en cualquier estado no terminal (incluye Initialized/Submitted): sirve para no duplicar.</summary>
