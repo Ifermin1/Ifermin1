@@ -25,6 +25,7 @@ export function Accounts() {
   const [filter, setFilter] = useState<"connected" | "enabled" | "all">("connected");
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [msel, setMsel] = useState<Set<string>>(new Set());   // cuentas marcadas en la gestión (acciones en lote)
   useEffect(() => { if (detected && !master) setMaster(detected); }, [detected, master]);
   if (!client) return null;
 
@@ -60,6 +61,24 @@ export function Accounts() {
     if (r.sent.length === 0) alert("Ya coincide con la maestra.");
   });
   const forget = (acc: string) => guard(acc, async () => { if (confirm(`¿Olvidar ${acc}? Volverá a aparecer si NinjaTrader la reporta.`)) await client!.forgetAccount(acc); });
+  const toggleMsel = (id: string) => setMsel((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const bulkAccounts = (action: "enable" | "disable" | "auto" | "forget") => guard("__bulk", async () => {
+    const ids = [...msel].filter((id) => id !== master && (action !== "forget" || !accounts.find((a) => a.account_id === id)?.reported));
+    if (!ids.length) { alert(action === "forget" ? "Solo se pueden olvidar cuentas que NinjaTrader ya no reporta." : "Nada que hacer con las marcadas."); return; }
+    const ask = { enable: `¿Activar ${ids.length} cuentas?`, disable: `¿Desactivar ${ids.length} cuentas? Quedan ocultas y nunca reciben copias.`,
+                  auto: `¿Volver a modo automático ${ids.length} cuentas? (activa = conectada)`, forget: `¿Olvidar ${ids.length} cuentas que NinjaTrader ya no reporta?` }[action];
+    if (!confirm(`${ask}\n\n${ids.join(", ")}`)) return;
+    const errors: string[] = [];
+    for (const id of ids) {
+      try {
+        if (action === "forget") await client!.forgetAccount(id);
+        else if (action === "auto") await client!.setAccount(id, { auto: true });
+        else await client!.setAccount(id, { enabled: action === "enable" });
+      } catch (ex) { errors.push(`${id}: ${ex instanceof Error ? ex.message : String(ex)}`); }
+    }
+    setMsel(new Set());
+    if (errors.length) throw new Error(errors.join("; "));
+  });
 
   const masterAcc = accounts.find((a) => a.account_id.toLowerCase() === master.toLowerCase());
   const followers = accounts.filter((a) => a.account_id.toLowerCase() !== master.toLowerCase() && a.enabled);
@@ -148,11 +167,23 @@ export function Accounts() {
                 <button key={k} className={`chip-btn ${filter === k ? "active" : ""}`} onClick={() => setFilter(k)}>{l}</button>))}
             </div>
           </div>
+          <div className="manage-bar bulk-bar">
+            <span className="muted small">{msel.size ? `${msel.size} marcadas` : "Marca cuentas para actuar sobre varias a la vez"}</span>
+            {msel.size > 0 && <div className="chips">
+              <button className="chip-btn" disabled={busy === "__bulk"} onClick={() => void bulkAccounts("enable")}>Activar marcadas</button>
+              <button className="chip-btn" disabled={busy === "__bulk"} onClick={() => void bulkAccounts("disable")}>Desactivar marcadas</button>
+              <button className="chip-btn" disabled={busy === "__bulk"} onClick={() => void bulkAccounts("auto")}>Modo auto</button>
+              <button className="chip-btn danger" disabled={busy === "__bulk"} onClick={() => void bulkAccounts("forget")} title="Solo las que NinjaTrader ya no reporta">Olvidar marcadas</button>
+              <button className="chip-btn" onClick={() => setMsel(new Set())}>Desmarcar</button>
+            </div>}
+          </div>
           {managed.length === 0 && <Empty>Nada que mostrar con este filtro.</Empty>}
           <div className="table-wrap"><table className="manage">
-            <thead><tr><th>Activa</th><th>Cuenta</th><th>Alias</th><th>Conexión</th><th className="num">Saldo</th><th>Vista</th><th></th></tr></thead>
+            <thead><tr><th><input type="checkbox" title="Marcar las visibles" checked={managed.length > 0 && managed.slice(0, 300).every((a) => msel.has(a.account_id))}
+              onChange={(e) => setMsel(e.target.checked ? new Set(managed.slice(0, 300).map((a) => a.account_id)) : new Set())} /></th><th>Activa</th><th>Cuenta</th><th>Alias</th><th>Conexión</th><th className="num">Saldo</th><th>Vista</th><th></th></tr></thead>
             <tbody>{managed.slice(0, 300).map((a) => (
-              <tr key={a.account_id} className={a.enabled ? "" : "off"}>
+              <tr key={a.account_id} className={`${a.enabled ? "" : "off"} ${msel.has(a.account_id) ? "selected" : ""}`}>
+                <td><input type="checkbox" checked={msel.has(a.account_id)} onChange={() => toggleMsel(a.account_id)} /></td>
                 <td><div className="act-cell"><label className="switch small"><input type="checkbox" checked={a.enabled} disabled={busy === a.account_id || a.account_id === master}
                   onChange={(e) => void setEnabled(a.account_id, e.target.checked)} /><span /></label>
                   {a.enabled_source === "user" ? <button className="link tiny" title="Volver a automático" onClick={() => void setAuto(a.account_id)}>fijada · auto</button> : <span className="muted tiny">auto</span>}</div></td>

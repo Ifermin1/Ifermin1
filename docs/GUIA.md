@@ -113,7 +113,11 @@ ese paso.
      cierre. Pon el drawdown real del prop firm (APEX 50K: 2500) y un colchón (100–200 $): el prop firm mide tick a tick y el engine
      cada 2 s. *El máximo se mide*: "con el flotante" (APEX, MFF, la mayoría) o "solo con lo cerrado" (firms que miden por balance).
      *El suelo se bloquea en*: para reglas tipo APEX en que el suelo deja de subir al llegar a inicial + 100 (50K → 50100); 0 = sube siempre.
-   - La tarjeta **Drawdown dinámico · todas las cuentas** muestra, con o sin límite, cuánto vale cada cuenta, su máximo, el drawdown
+   - **Varias cuentas a la vez**: en la tabla de límites marca las casillas (o la de la cabecera) y usa *Pausar / Reanudar /
+     Quitar marcadas*; el botón *Aplicar a las N marcadas* del formulario guarda los mismos límites en todas las marcadas
+     (sobrescribe todos sus límites). En *Cuentas → Gestionar cuentas* las casillas permiten *Activar / Desactivar / Modo auto /
+     Olvidar marcadas*. El desplegable de cuenta del formulario solo ofrece las activas.
+   - La tarjeta **Drawdown dinámico** muestra por defecto solo las cuentas activas (*Con límite* y *Todas* arriba a la derecha), cuánto vale cada cuenta, su máximo, el drawdown
      actual, el suelo y el margen. *Ajustar máximo* fija el máximo a mano (si el prop firm tiene otro porque la cuenta operó sin el
      engine) o, vacío, lo reinicia al valor actual (evaluación nueva). Cada panel de cuenta en *Inicio* y *Cuentas* lleva la misma fila.
 5. **Riesgo → Horario** (recomendado para prop firms): *Copiar desde* (por ejemplo 09:30) y *Cerrar todo a las* (por ejemplo

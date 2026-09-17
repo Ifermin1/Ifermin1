@@ -276,3 +276,10 @@ tr.fam-errores td:nth-child(6) { color: var(--bad); }
 .meter.warn > i { background: var(--warn); } .meter.bad > i { background: var(--bad); }
 .meter-cell { min-width: 120px; }
 .acct-panel.dd-hot { border-left-color: var(--bad); }
+
+/* acciones en lote (límites y gestión de cuentas) */
+.bulk-bar { margin: 6px 0 8px; min-height: 30px; }
+.chip-btn.danger { color: var(--bad); border-color: rgba(248,113,113,.5); }
+tr.selected td { background: rgba(34,211,238,.06); }
+table.limits th:first-child, table.limits td:first-child, table.manage th:first-child, table.manage td:first-child { width: 28px; padding-right: 0; }
+input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; }
