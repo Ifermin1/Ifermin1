@@ -22,6 +22,7 @@ class AccountService:
         self.on_positions_refreshed = None     # callable(cuenta | None) tras actualizar posiciones (libro de exposición)
         self.limits_provider = lambda: {}      # {cuenta: RiskLimit} (lo inyecta el contenedor) para el drawdown dinámico
         self.eod_time = "17:00"                # hora local del cierre del día para el drawdown EOD (DRAWDOWN_EOD_TIME)
+        self.commissions = None                # CommissionService (lo inyecta el contenedor)
         self.now = datetime.now                # inyectable en pruebas
         # Marca de agua por cuenta: el máximo que llegó a valer (con flotante y solo cerrado). Sobrevive a reinicios.
         self._peaks: dict[str, dict] = store.get_peaks() if store else {}
@@ -70,6 +71,9 @@ class AccountService:
             snap.balance = snap.net_liquidity = info.balance
             snap.realized_pnl, snap.unrealized_pnl = info.realized_pnl, info.unrealized_pnl
             snap.daily_pnl = info.realized_pnl + info.unrealized_pnl
+            if self.commissions is not None:
+                snap.contracts_today, snap.commissions_today = self.commissions.today(info.account_id)
+            snap.net_pnl = round(snap.daily_pnl - snap.commissions_today, 2)
             snap.connected, snap.connection, snap.reported, snap.updated_at = info.connected, info.connection, True, now
             if self.store:
                 self.store.upsert_account_seen(info.account_id, info.balance, now.isoformat(), snap.enabled, info.connected)
@@ -310,7 +314,7 @@ class AccountService:
     async def publish_accounts(self, force: bool = False) -> None:
         """Publica el snapshot solo si cambió algo relevante (con cientos de cuentas importa)."""
         sig = tuple((a.account_id, a.balance, a.connected, a.enabled, a.alias, a.reported, a.desync, round(a.daily_pnl),
-                     round(a.drawdown.peak), a.drawdown.floor, a.drawdown.pct,
+                     round(a.drawdown.peak), a.drawdown.floor, a.drawdown.pct, a.contracts_today,
                      tuple((p.symbol, p.quantity) for p in a.open_positions),
                      tuple((o.order_id, o.quantity, o.filled, o.limit_price, o.stop_price, o.state) for o in a.working_orders))
                     for a in self.accounts.values())

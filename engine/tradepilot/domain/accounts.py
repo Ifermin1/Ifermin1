@@ -85,7 +85,10 @@ class AccountSnapshot(DomainModel):
     account_id: str
     balance: float = 0.0
     net_liquidity: float = 0.0
-    daily_pnl: float = 0.0
+    daily_pnl: float = 0.0             # bruto, tal como lo reporta NinjaTrader (realizado + flotante)
+    contracts_today: int = 0           # contratos ejecutados hoy (cada fill suma su cantidad)
+    commissions_today: float = 0.0     # comisiones del día estimadas por contrato (RiskState.commissions)
+    net_pnl: float = 0.0               # daily_pnl - commissions_today: sobre esto van el objetivo y la pérdida diaria
     drawdown: DrawdownSnapshot = DrawdownSnapshot()
     open_positions: list[PositionSnapshot] = []
     working_orders: list[WorkingOrder] = []

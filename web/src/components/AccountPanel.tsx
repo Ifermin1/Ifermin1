@@ -60,7 +60,9 @@ export function AccountPanel({ a, role, link, limit, lastFill, lastReject, price
   prices: PriceMap; busy?: boolean; onFlatten?: () => void; onResync?: () => void; controls?: ReactNode; children?: ReactNode; compact?: boolean;
 }) {
   const copying = role === "follower" && !!link?.enabled;
-  const pnl = livePnl(a, prices);
+  const gross = livePnl(a, prices);
+  const fees = a.commissions_today || 0;
+  const pnl = { value: gross.value - fees, live: gross.live };     // neto: lo que cuenta para el objetivo del día
   const tone = pnl.value > 0 ? "ok" : pnl.value < 0 ? "bad" : "muted";
   const posOf = (symbol: string) => a.open_positions.filter((p) => root(p.symbol) === root(symbol)).reduce((s, p) => s + p.quantity, 0);
   const orders = [...a.working_orders].sort((x, y) => orderPrice(y) - orderPrice(x));
@@ -87,10 +89,15 @@ export function AccountPanel({ a, role, link, limit, lastFill, lastReject, price
 
       <div className="ap-body">
         <div className="ap-pnl">
-          <span className="stat-label">P&L hoy {pnl.live && <i className="live-dot" title="Estimado con el último precio" />}</span>
+          <span className="stat-label">P&L hoy{fees ? " neto" : ""} {pnl.live && <i className="live-dot" title="Estimado con el último precio" />}</span>
           <span className={`ap-pnl-value ${tone}`}>{pnl.live && "≈ "}{signedMoney(pnl.value)}</span>
           <span className="muted small">{money(a.balance)} · {ago(a.updated_at)}</span>
         </div>
+        {(fees > 0 || a.contracts_today > 0) && (
+          <div className="ap-fees muted small" data-testid="fees" title="Comisiones estimadas: contratos ejecutados hoy × tarifa por contrato y lado (Riesgo → Comisiones)">
+            bruto {signedMoney(gross.value)} · comisiones <span className="bad">−{money(fees)}</span> ({a.contracts_today} contr.)
+          </div>
+        )}
 
         <div className="dd-row" data-testid="dd">
           <div className="dd-line">

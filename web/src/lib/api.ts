@@ -15,7 +15,8 @@ export type WorkingOrder = { order_id: string; master_order_id: string; action: 
 /** Drawdown dinámico (trailing) como lo mide el prop firm: distancia entre el máximo que llegó a valer la cuenta y su valor actual. */
 export type Drawdown = { equity: number; mode: "intraday" | "eod" | "closed"; peak: number; peak_at: string | null; drawdown: number; limit: number;
                          floor: number | null; room: number | null; pct: number | null; buffer: number; locked: boolean };
-export type Account = { account_id: string; balance: number; net_liquidity: number; daily_pnl: number; open_positions: Position[]; updated_at: string;
+export type Account = { account_id: string; balance: number; net_liquidity: number; daily_pnl: number; contracts_today: number; commissions_today: number; net_pnl: number;
+                        open_positions: Position[]; updated_at: string;
                         enabled: boolean; enabled_source: "auto" | "user"; alias: string; connected: boolean | null; connection: string; reported: boolean;
                         realized_pnl: number; unrealized_pnl: number; desync: boolean; desync_detail: string; working_orders: WorkingOrder[]; drawdown: Drawdown };
 /** Tick de precio del addon (topic market.price), indexado por raíz del símbolo (NQ, MNQ…). */
@@ -31,8 +32,9 @@ export type RiskLimit = { account_id: string; max_daily_loss: number; max_daily_
                           max_trailing_drawdown: number; drawdown_mode: "intraday" | "eod" | "closed"; drawdown_floor_cap: number; drawdown_buffer: number;
                           trading_halted: boolean; halted_reason: string; halted_at: string | null };
 export type Schedule = { enabled: boolean; window_start: string; flatten_at: string; include_master: boolean; last_flatten_day: string };
+export type Commissions = { enabled: boolean; default_per_side: number; rates: Record<string, number> };
 export type RiskState = { kill_switch: boolean; kill_switch_reason: string | null; kill_switch_at: string | null; limits: RiskLimit[];
-                          schedule: Schedule; session_closed: boolean; addon_silent: boolean };
+                          schedule: Schedule; session_closed: boolean; addon_silent: boolean; commissions: Commissions };
 
 export type Session = { baseUrl: string; token: string };
 
@@ -89,6 +91,7 @@ export function makeClient(s: Session) {
     setPeak: (id: string, peak: number | null) => req<Account>(`/api/accounts/${encodeURIComponent(id)}/peak`, { method: "PUT", body: JSON.stringify({ peak }) }),
     setSchedule: (s: Omit<Schedule, "last_flatten_day">) => req<Schedule>("/api/risk/schedule", { method: "PUT", body: JSON.stringify(s) }),
     reopenSession: () => req<RiskState>("/api/risk/reopen", { method: "POST" }),
+    setCommissions: (c: Commissions) => req<Commissions>("/api/risk/commissions", { method: "PUT", body: JSON.stringify(c) }),
     mockEvent: (b: Record<string, unknown> = {}) => req<unknown>("/api/mock/master-event", { method: "POST", body: JSON.stringify(b) }),
     wsUrl: () => `${base.replace(/^http/, "ws")}/api/ws?token=${encodeURIComponent(s.token)}`,
   };

@@ -130,7 +130,9 @@ Documentación interactiva en `/docs` (Swagger) cuando el engine está arrancado
 | Cómo va el día sin abrir NinjaTrader | Muestra de P&L por cuenta cada 15 s en SQLite (`pnl_samples`, 3 días) y `GET /api/pnl?hours=` para el gráfico | `account_service._sample_pnl`, `PnlChart` |
 
 Nivel 2 (hecho): pérdida diaria máxima con el P&L real del addon (`DAILY_LOSS_WARNING` al 80 %, `DAILY_LOSS_LIMIT` pausa y
-cierra; no se reanuda mientras el P&L siga por debajo), objetivo de ganancia diaria (`DAILY_PROFIT_WARNING` al 80 %,
+cierra; no se reanuda mientras el P&L siga por debajo), objetivo de ganancia diaria (`DAILY_PROFIT_WARNING` al 80 %, ambos
+medidos en neto: `CommissionService` suma contratos × tarifa por lado en cada fill que ve el engine, `commissions_daily`,
+`PUT /api/risk/commissions`;
 `DAILY_PROFIT_TARGET` pausa y cierra para asegurar la ganancia; misma regla de reanudación), drawdown dinámico del prop firm
 (`DRAWDOWN_WARNING` al 80 %, `DRAWDOWN_LIMIT` pausa y cierra antes del suelo; máximo persistente y ajustable), ventana horaria con cierre programado (`SCHEDULED_FLATTEN`, bloqueo
 hasta el día siguiente, `reopen` manual), tamaño máximo de posición resultante, y vigilancia del heartbeat (`ADDON_SILENT`).

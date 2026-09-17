@@ -88,3 +88,9 @@ class ScheduleRequest(BaseModel):
     window_start: str = Field(default="", pattern=r"^$|^([01]\d|2[0-3]):[0-5]\d$")
     flatten_at: str = Field(default="", pattern=r"^$|^([01]\d|2[0-3]):[0-5]\d$")
     include_master: bool = True
+
+
+class CommissionsRequest(BaseModel):
+    enabled: bool = True
+    default_per_side: float = Field(default=2.0, ge=0)
+    rates: dict[str, float] = {}

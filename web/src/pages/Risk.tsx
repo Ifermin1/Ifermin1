@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useStore } from "../lib/store";
 import { money, time, signedMoney } from "../lib/format";
 import { Card, Empty } from "../components/ui";
-import type { RiskLimit } from "../lib/api";
+import type { Commissions, RiskLimit } from "../lib/api";
 import { DrawdownMeter, ddTone } from "../components/AccountPanel";
 
 const MODE_LABEL: Record<string, string> = { intraday: "dinámico", eod: "EOD", closed: "cerrado" };
@@ -20,7 +20,17 @@ export function Risk() {
   const [halted, setHalted] = useState(false);
   const [sel, setSel] = useState<Set<string>>(new Set());          // límites seleccionados (acciones en lote)
   const [ddFilter, setDdFilter] = useState<"enabled" | "limited" | "all">("enabled");
+  const [fees, setFees] = useState<Commissions>({ enabled: true, default_per_side: 2, rates: {} });
+  const [newRoot, setNewRoot] = useState("");
+  useEffect(() => { if (risk?.commissions) setFees(risk.commissions); }, [risk?.commissions]);
   if (!client) return null;
+  async function saveFees(e: FormEvent) {
+    e.preventDefault();
+    try { await client!.setCommissions(fees); setRisk(await client!.risk()); setMsg("Comisiones guardadas."); }
+    catch (ex) { alert(ex instanceof Error ? ex.message : String(ex)); }
+  }
+  const setRate = (root: string, v: string) => setFees({ ...fees, rates: { ...fees.rates, [root]: Number(v) || 0 } });
+  const dropRate = (root: string) => { const r = { ...fees.rates }; delete r[root]; setFees({ ...fees, rates: r }); };
 
   const [sched, setSched] = useState({ enabled: false, window_start: "", flatten_at: "", include_master: true });
   useEffect(() => { if (risk?.schedule) setSched({ enabled: risk.schedule.enabled, window_start: risk.schedule.window_start, flatten_at: risk.schedule.flatten_at, include_master: risk.schedule.include_master }); }, [risk?.schedule]);
@@ -191,6 +201,20 @@ export function Risk() {
         )}
       </Card>
 
+      <Card title="Comisiones" right={<label className="inline small"><input type="checkbox" checked={fees.enabled} onChange={(e) => setFees({ ...fees, enabled: e.target.checked })} /> descontar comisiones</label>}>
+        <p className="muted small">NinjaTrader reporta el P&L <b>bruto</b> en las cuentas de prop firm. El engine suma, por cada contrato ejecutado (entrada y salida cuentan cada una), la tarifa por contrato y lado del símbolo; el objetivo de ganancia y la pérdida diaria se miden sobre el <b>neto</b>, y cada tarjeta muestra bruto, comisiones y neto. Pon las tarifas de tu bróker (Rithmic/APEX: NQ ≈ 2,0 por lado, MNQ ≈ 0,5). Si NinjaTrader ya descuenta comisiones (plantilla en <i>Tools → Commissions</i>), desmarca "descontar comisiones" para no restarlas dos veces.</p>
+        <form className="fees-form" onSubmit={saveFees}>
+          <label>Por defecto ($/contrato/lado)<input type="number" min="0" step="0.01" value={fees.default_per_side} onChange={(e) => setFees({ ...fees, default_per_side: Number(e.target.value) || 0 })} /></label>
+          {Object.keys(fees.rates).sort().map((root) => (
+            <label key={root}>{root}<span className="fee-row"><input type="number" min="0" step="0.01" value={fees.rates[root]} onChange={(e) => setRate(root, e.target.value)} />
+              <button type="button" className="ghost small-btn" title="Quitar" onClick={() => dropRate(root)}>✕</button></span></label>
+          ))}
+          <label>Añadir símbolo<span className="fee-row"><input value={newRoot} placeholder="p. ej. MES" onChange={(e) => setNewRoot(e.target.value.toUpperCase())} />
+            <button type="button" className="ghost small-btn" onClick={() => { const r = newRoot.trim().toUpperCase(); if (r && !(r in fees.rates)) setRate(r, String(fees.default_per_side)); setNewRoot(""); }}>+</button></span></label>
+          <button className="primary">Guardar comisiones</button>
+        </form>
+      </Card>
+
       <Card title="Límites por cuenta">
         <form className="rule-form" id="limit-form" onSubmit={save}>
           <label>Cuenta<input list="accts2" value={account} onChange={(e) => setAccount(e.target.value)} required /></label>
@@ -221,17 +245,17 @@ export function Risk() {
             </div>}
           </div>
           <div className="table-wrap"><table className="limits">
-            <thead><tr><th><input type="checkbox" checked={allSel} title="Marcar todas" onChange={(e) => setSel(e.target.checked ? new Set(risk.limits.map((l) => l.account_id)) : new Set())} /></th><th>Cuenta</th><th className="num">Pérdida máx.</th><th className="num">Ganancia máx.</th><th className="num">P&L hoy</th><th className="num">Posición máx.</th><th className="num">Drawdown máx.</th><th>Estado</th><th></th></tr></thead>
+            <thead><tr><th><input type="checkbox" checked={allSel} title="Marcar todas" onChange={(e) => setSel(e.target.checked ? new Set(risk.limits.map((l) => l.account_id)) : new Set())} /></th><th>Cuenta</th><th className="num">Pérdida máx.</th><th className="num">Ganancia máx.</th><th className="num">P&L hoy (neto)</th><th className="num">Posición máx.</th><th className="num">Drawdown máx.</th><th>Estado</th><th></th></tr></thead>
             <tbody>{risk.limits.map((l) => {
               const acc = accounts.find((a) => a.account_id === l.account_id);
-              const pnl = acc?.daily_pnl ?? 0;
+              const pnl = acc?.net_pnl ?? acc?.daily_pnl ?? 0;
               const ref = pnl < 0 ? l.max_daily_loss : l.max_daily_profit;
               const pct = ref ? Math.min(100, Math.max(0, (Math.abs(pnl) / ref) * 100)) : 0;
               const cls = !ref ? (pnl < 0 ? "warn" : "ok") : pnl < 0 ? (pct >= 80 ? "bad" : "warn") : (pct >= 80 ? "warn" : "ok");
               const badge = l.halted_reason === "daily_loss" ? "pausada · pérdida diaria" : l.halted_reason === "daily_profit" ? "pausada · objetivo de ganancia" : l.halted_reason === "drawdown" ? "pausada · drawdown" : "pausada";
               return (
                 <tr key={l.account_id} className={sel.has(l.account_id) ? "selected" : ""}><td><input type="checkbox" checked={sel.has(l.account_id)} onChange={() => toggleSel(l.account_id)} /></td><td><b>{l.account_id}</b></td><td className="num">{l.max_daily_loss || "—"}</td><td className="num">{l.max_daily_profit || "—"}</td>
-                  <td className={`num ${cls}`}>{acc ? money(pnl) : "—"}{ref ? <span className="muted small"> ({pct.toFixed(0)} % {pnl < 0 ? "de la pérdida" : "del objetivo"})</span> : null}</td>
+                  <td className={`num ${cls}`}>{acc ? money(pnl) : "—"}{ref ? <span className="muted small"> ({pct.toFixed(0)} % {pnl < 0 ? "de la pérdida" : "del objetivo"})</span> : null}{acc?.commissions_today ? <span className="muted small"> · neto de {money(acc.commissions_today)} de comisiones</span> : null}</td>
                   <td className="num">{l.max_position_size || "—"}</td>
                   <td className="num">{l.max_trailing_drawdown ? <>{l.max_trailing_drawdown}<span className="muted small"> {MODE_LABEL[l.drawdown_mode] ?? l.drawdown_mode}{l.drawdown_floor_cap ? ` · tope ${l.drawdown_floor_cap}` : ""}{l.drawdown_buffer ? ` · colchón ${l.drawdown_buffer}` : ""}</span></> : "—"}</td>
                   <td>{l.trading_halted ? <span className={`badge ${l.halted_reason === "daily_profit" ? "ok" : "bad"}`}>{badge}</span> : <span className="badge ok">activa</span>}</td>

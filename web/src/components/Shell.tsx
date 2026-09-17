@@ -22,7 +22,8 @@ export function StatusStrip({ className = "" }: { className?: string }) {
   const copying = accounts.filter((a) => a.enabled && a.account_id !== master && rules.some((r) => r.enabled && r.follower_account.toLowerCase() === a.account_id.toLowerCase()));
   const inPlay = accounts.filter((a) => a.enabled && (a.account_id === master || copying.includes(a)));
   let total = 0; let est = false;
-  for (const a of inPlay) { const p = livePnl(a, prices); total += p.value; est ||= p.live; }
+  let fees = 0;
+  for (const a of inPlay) { const p = livePnl(a, prices); total += p.value - (a.commissions_today || 0); fees += a.commissions_today || 0; est ||= p.live; }
   const open = inPlay.reduce((s, a) => s + a.open_positions.length, 0);
   async function toggleKill() {
     if (!client) return;
@@ -35,8 +36,8 @@ export function StatusStrip({ className = "" }: { className?: string }) {
   return (
     <div className={`strip ${className}`}>
       <div className="strip-item">
-        <span className="stat-label">P&L hoy</span>
-        <b className={`num ${total > 0 ? "ok" : total < 0 ? "bad" : ""}`}>{est && "≈ "}{signedMoney(total)}</b>
+        <span className="stat-label">P&L hoy{fees ? " neto" : ""}</span>
+        <b className={`num ${total > 0 ? "ok" : total < 0 ? "bad" : ""}`} title={fees ? `comisiones del día: ${fees.toFixed(2)} $` : undefined}>{est && "≈ "}{signedMoney(total)}</b>
       </div>
       <div className="strip-item"><span className="stat-label">Copiando</span><b>{copying.length}</b></div>
       <div className="strip-item"><span className="stat-label">Posiciones</span><b className={open ? "warn" : ""}>{open}</b></div>

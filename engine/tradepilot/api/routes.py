@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from tradepilot.api.auth import require_token
-from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, RuleCreate, RuleUpdate
+from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate
 from tradepilot.container import Container
 from tradepilot.domain.risk import RiskLimit, Schedule
 
@@ -180,6 +180,15 @@ def set_schedule(body: ScheduleRequest, request: Request):
 def reopen_session(request: Request):
     _c(request).risk.reopen_session()
     return _c(request).risk.state()
+
+
+@router.put("/risk/commissions")
+def set_commissions(body: CommissionsRequest, request: Request):
+    """Comisión por contrato y lado por símbolo: el objetivo y la pérdida diaria se miden en neto."""
+    from tradepilot.domain.risk import Commissions
+    if any(v < 0 for v in body.rates.values()):
+        raise HTTPException(422, "las comisiones no pueden ser negativas")
+    return _c(request).risk.set_commissions(Commissions(**body.model_dump()))
 
 
 @router.put("/risk/limits")

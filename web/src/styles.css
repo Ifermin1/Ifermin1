@@ -283,3 +283,9 @@ tr.fam-errores td:nth-child(6) { color: var(--bad); }
 tr.selected td { background: rgba(34,211,238,.06); }
 table.limits th:first-child, table.limits td:first-child, table.manage th:first-child, table.manage td:first-child { width: 28px; padding-right: 0; }
 input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; }
+
+/* comisiones */
+.fees-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; align-items: end; }
+.fees-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.fee-row { display: flex; gap: 4px; align-items: center; } .fee-row input { min-width: 0; flex: 1; }
+.ap-fees { margin-top: -4px; }

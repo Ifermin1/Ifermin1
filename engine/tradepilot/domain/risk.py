@@ -33,6 +33,14 @@ class Schedule(DomainModel):
     last_flatten_day: str = ""        # AAAA-MM-DD del último cierre programado ejecutado
 
 
+class Commissions(DomainModel):
+    """Comisión por contrato y por lado (entrada y salida cuentan cada una), por raíz de símbolo. Ajústalas a tu bróker."""
+    enabled: bool = True
+    default_per_side: float = 2.0
+    rates: dict[str, float] = {"ES": 2.0, "NQ": 2.0, "YM": 2.0, "RTY": 2.0, "MES": 0.5, "MNQ": 0.5, "MYM": 0.5, "M2K": 0.5,
+                               "CL": 2.5, "GC": 2.5, "MCL": 0.75, "MGC": 0.75}
+
+
 class RiskState(DomainModel):
     kill_switch: bool = False
     kill_switch_reason: Optional[str] = None
@@ -41,6 +49,7 @@ class RiskState(DomainModel):
     schedule: Schedule = Schedule()
     session_closed: bool = False      # cierre programado ejecutado hoy: no se copia hasta mañana
     addon_silent: bool = False        # sin heartbeat del addon
+    commissions: Commissions = Commissions()
 
 
 class RiskAlert(DomainModel):

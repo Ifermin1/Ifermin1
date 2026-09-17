@@ -73,6 +73,7 @@ class ReplicationService:
         self.close_on_stop_reject = close_on_stop_reject
         self.audit_lifecycle = False          # auditar también los estados intermedios (AUDIT_ORDER_LIFECYCLE)
         self.sync = None                      # SyncService, lo inyecta el contenedor
+        self.commissions = None               # CommissionService, lo inyecta el contenedor
         self._last_seq: int | None = None
         self._missing_seq: dict[int, float] = {}   # seq que aún no ha llegado -> monotonic en que se echó en falta
         self.seq_grace = 2.0                       # s que se espera un seq atrasado antes de contarlo como perdido
@@ -207,6 +208,9 @@ class ReplicationService:
         if self._is_duplicate(event):
             self.stats["duplicates"] += 1
             return []
+
+        if event.msg_type == "EXECUTION" and self.commissions is not None and event.quantity > 0:
+            self.commissions.note_fill(event.account, event.symbol, event.quantity)   # maestra, seguidoras y fills manuales
 
         if event.is_follower_ack:
             self._on_follower_fill(event)

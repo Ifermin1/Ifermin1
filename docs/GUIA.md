@@ -103,7 +103,14 @@ ese paso.
      firm (MFF: 3 en NQ).
    - *Pérdida diaria máx. ($)*: al llegar, la cuenta se pausa y se cierra sola. Ponlo **por debajo** del límite de la
      evaluación (si la eval permite -1.000, pon 800).
-   - *Ganancia diaria máx. ($)*: al llegar, la cuenta se pausa y se cierra sola para **asegurar la ganancia** (útil para
+   - **Comisiones** (tarjeta *Comisiones* en *Riesgo*): NinjaTrader reporta el P&L **bruto** en las cuentas de prop firm. El
+     engine suma por cada contrato ejecutado (entrada y salida cuentan cada una) la tarifa por contrato y lado del símbolo
+     (por defecto NQ/ES 2,0, MNQ/MES 0,5; pon las de tu bróker y añade símbolos). Cada tarjeta muestra el **P&L neto**, y
+     debajo bruto, comisiones y contratos del día; la barra superior también va en neto. El objetivo de ganancia y la
+     pérdida diaria se miden sobre el neto. Si NinjaTrader ya descuenta comisiones (plantilla en *Tools → Commissions*),
+     desmarca *descontar comisiones* para no restarlas dos veces. El contador se reinicia a la hora de cierre
+     (`DRAWDOWN_EOD_TIME`) y sobrevive a reinicios del engine.
+   - *Ganancia diaria máx. ($)*: se mide en **neto** (bruto − comisiones). Al llegar, la cuenta se pausa y se cierra sola para **asegurar la ganancia** (útil para
      reglas de consistencia del prop firm o para no devolver lo ganado). 0 = sin objetivo. Avisa al 80 % y, como con la
      pérdida, no se reanuda mientras el P&L del día siga por encima del objetivo (súbelo o quítalo si de verdad quieres seguir).
    - *Drawdown máx. del prop firm ($)* y *Tipo de drawdown*. El engine lleva por cada cuenta el **máximo** que llegó a valer
@@ -170,7 +177,7 @@ ese paso.
 | `DRAWDOWN_WARNING` | La cuenta consumió el 80 % del drawdown dinámico permitido: está cerca del suelo que el prop firm usa para cerrarla. | Reducir o cerrar. El engine cerrará solo al llegar al colchón configurado. |
 | **Límite de drawdown alcanzado** (`DRAWDOWN_LIMIT`) | A la cuenta le quedaban el colchón o menos hasta el suelo: se pausó y se cerró antes de que el prop firm la cerrara. | *Reanudar* solo funciona si vuelve a tener margen (sube el límite, baja el colchón o ajusta el máximo si de verdad quieres seguir). |
 | `PEAK_SET` | Alguien fijó o reinició a mano el máximo del drawdown de una cuenta. | Nada; comprobar que coincide con el que tiene el prop firm. |
-| **Objetivo de ganancia diaria alcanzado** | La cuenta se pausó y se cerró con la ganancia asegurada. | Nada hasta mañana. *Reanudar* solo funciona si subes o quitas el objetivo. |
+| **Objetivo de ganancia diaria alcanzado** | La cuenta se pausó y se cerró con la ganancia asegurada (medida en neto: el mensaje trae bruto y comisiones). | Nada hasta mañana. *Reanudar* solo funciona si subes o quitas el objetivo. |
 | **Sesión cerrada por horario** | Se ejecutó el cierre programado. | Nada. Si de verdad hay que seguir hoy, *Reabrir hoy* en *Riesgo*. |
 | **Sin heartbeat del addon** | NinjaTrader no envía eventos desde hace más de 15 s. No se copia. El engine reconecta solo el canal de eventos (`RESUBSCRIBE`); si tampoco responde a comandos aparece `ADDON_DOWN`. | Si no se recupera en un minuto: comprobar NinjaTrader abierto, conectado y el addon cargado (Output). |
 | `ERROR` "NinjaTrader no confirmó la orden" | El addon no respondió a una orden en 6 s (dos intentos). La orden **no** se ejecutó. | Revisar NinjaTrader (addon cargado, Output). Si la maestra tiene posición, la seguidora saldrá DESINCRONIZADA: *Igualar* o *Cerrar*. |

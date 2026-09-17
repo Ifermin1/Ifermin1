@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from loguru import logger
 
 from tradepilot.core.events import TOPIC_RISK, EventBus
-from tradepilot.domain.risk import RiskLimit, RiskState, Schedule
+from tradepilot.domain.risk import Commissions, RiskLimit, RiskState, Schedule
 from tradepilot.infrastructure.persistence.sqlite_store import SQLiteStore
 from tradepilot.services.audit_service import AuditService
 
@@ -21,6 +21,7 @@ class RiskService:
         self.accounts = accounts
         self.rules_provider = lambda: []
         self.replication = None               # lo inyecta el contenedor
+        self.commissions = None               # CommissionService, lo inyecta el contenedor
         self.master_flatten_grace = 20.0      # segundos sin copiar fills de la maestra tras cerrarla
         raw = store.get_kv("schedule")
         self.schedule = Schedule.model_validate(json.loads(raw)) if raw else Schedule()
@@ -47,7 +48,17 @@ class RiskService:
     def state(self) -> RiskState:
         return RiskState(kill_switch=self.kill_switch, kill_switch_reason=self.kill_switch_reason,
                          kill_switch_at=self.kill_switch_at, limits=list(self.limits.values()),
-                         schedule=self.schedule, session_closed=self.session_closed(), addon_silent=self.addon_silent)
+                         schedule=self.schedule, session_closed=self.session_closed(), addon_silent=self.addon_silent,
+                         commissions=self.commissions.config if self.commissions is not None else Commissions())
+
+    def set_commissions(self, cfg: Commissions) -> Commissions:
+        if self.commissions is None:
+            raise RuntimeError("sin servicio de comisiones")
+        cfg = self.commissions.set_config(cfg)
+        self.audit.log("COMMISSIONS_SET", f"Comisiones {'activadas' if cfg.enabled else 'desactivadas'}: {cfg.default_per_side} $/contrato/lado por defecto"
+                       + (", " + ", ".join(f"{k} {v}" for k, v in sorted(cfg.rates.items())) if cfg.rates else ""))
+        self.bus.publish_nowait(TOPIC_RISK, self.state().model_dump(mode="json"))
+        return cfg
 
     def _today(self) -> str:
         return self.now().strftime("%Y-%m-%d")
@@ -188,23 +199,24 @@ class RiskService:
             snap = self.accounts.accounts.get(acc)
             if snap is None or limit.trading_halted:
                 continue
-            pnl = snap.daily_pnl
+            pnl = snap.net_pnl      # neto: bruto de NinjaTrader menos las comisiones estimadas del día
+            fees = f" (bruto {snap.daily_pnl:,.2f}, comisiones {snap.commissions_today:,.2f})" if snap.commissions_today else ""
             if limit.max_daily_loss > 0 and pnl <= -limit.max_daily_loss:
                 await self._halt_daily(limit, snap, "daily_loss", "DAILY_LOSS_LIMIT",
-                                       f"{acc}: P&L del día {pnl:,.2f} alcanzó el límite de -{limit.max_daily_loss:,.2f}. "
+                                       f"{acc}: P&L neto del día {pnl:,.2f}{fees} alcanzó el límite de -{limit.max_daily_loss:,.2f}. "
                                        "Cuenta pausada y cerrada.", "límite de pérdida diaria", limit.max_daily_loss)
             elif limit.max_daily_profit > 0 and pnl >= limit.max_daily_profit:
                 await self._halt_daily(limit, snap, "daily_profit", "DAILY_PROFIT_TARGET",
-                                       f"{acc}: P&L del día {pnl:,.2f} alcanzó el objetivo de +{limit.max_daily_profit:,.2f}. "
+                                       f"{acc}: P&L neto del día {pnl:,.2f}{fees} alcanzó el objetivo de +{limit.max_daily_profit:,.2f}. "
                                        "Cuenta pausada y cerrada para asegurar la ganancia.", "objetivo de ganancia diaria",
                                        limit.max_daily_profit)
             elif limit.max_daily_loss > 0 and pnl <= -0.8 * limit.max_daily_loss and (acc, today, "loss") not in self._warned_80:
                 self._warned_80.add((acc, today, "loss"))
-                self.audit.log("DAILY_LOSS_WARNING", f"{acc}: P&L del día {pnl:,.2f}, al 80 % del límite de -{limit.max_daily_loss:,.2f}",
+                self.audit.log("DAILY_LOSS_WARNING", f"{acc}: P&L neto del día {pnl:,.2f}{fees}, al 80 % del límite de -{limit.max_daily_loss:,.2f}",
                                target=acc)
             elif limit.max_daily_profit > 0 and pnl >= 0.8 * limit.max_daily_profit and (acc, today, "profit") not in self._warned_80:
                 self._warned_80.add((acc, today, "profit"))
-                self.audit.log("DAILY_PROFIT_WARNING", f"{acc}: P&L del día {pnl:,.2f}, al 80 % del objetivo de +{limit.max_daily_profit:,.2f}",
+                self.audit.log("DAILY_PROFIT_WARNING", f"{acc}: P&L neto del día {pnl:,.2f}{fees}, al 80 % del objetivo de +{limit.max_daily_profit:,.2f}",
                                target=acc)
 
     async def _check_drawdown(self) -> None:
@@ -246,7 +258,8 @@ class RiskService:
         acc = limit.account_id
         limit.trading_halted, limit.halted_reason, limit.halted_at = True, reason, datetime.now()
         self.store.save_risk_limit(limit)
-        self.audit.log(event, message, target=acc, details={"pnl": snap.daily_pnl, "limit": value, **(extra or {})})
+        self.audit.log(event, message, target=acc, details={"pnl": snap.net_pnl, "gross_pnl": snap.daily_pnl,
+                                                            "commissions": snap.commissions_today, "limit": value, **(extra or {})})
         self.bus.publish_nowait(TOPIC_RISK, self.state().model_dump(mode="json"))
         if snap.open_positions:
             try:
@@ -346,11 +359,11 @@ class RiskService:
         prev = self.limits.get(limit.account_id)
         snap = self.accounts.accounts.get(limit.account_id) if self.accounts else None
         if prev and prev.trading_halted and not limit.trading_halted and snap:
-            if prev.halted_reason == "daily_loss" and limit.max_daily_loss > 0 and snap.daily_pnl <= -limit.max_daily_loss:
-                raise ValueError(f"{limit.account_id} sigue con P&L {snap.daily_pnl:,.2f}, por debajo del límite de "
+            if prev.halted_reason == "daily_loss" and limit.max_daily_loss > 0 and snap.net_pnl <= -limit.max_daily_loss:
+                raise ValueError(f"{limit.account_id} sigue con P&L neto {snap.net_pnl:,.2f}, por debajo del límite de "
                                  f"-{limit.max_daily_loss:,.2f}: no se reanuda hoy (sube el límite si de verdad quieres seguir)")
-            if prev.halted_reason == "daily_profit" and limit.max_daily_profit > 0 and snap.daily_pnl >= limit.max_daily_profit:
-                raise ValueError(f"{limit.account_id} sigue con P&L {snap.daily_pnl:,.2f}, por encima del objetivo de "
+            if prev.halted_reason == "daily_profit" and limit.max_daily_profit > 0 and snap.net_pnl >= limit.max_daily_profit:
+                raise ValueError(f"{limit.account_id} sigue con P&L neto {snap.net_pnl:,.2f}, por encima del objetivo de "
                                  f"+{limit.max_daily_profit:,.2f}: no se reanuda hoy (sube el objetivo o quítalo si de verdad quieres seguir)")
             if prev.halted_reason == "drawdown" and limit.max_trailing_drawdown > 0:
                 peak = self.accounts.peak_for(limit.account_id, limit.drawdown_mode)

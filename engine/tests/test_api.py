@@ -860,3 +860,47 @@ async def test_eod_drawdown_only_moves_the_floor_at_the_daily_close(client: Asyn
     await client.put("/api/risk/limits", json={"account_id": "Sim102", "max_trailing_drawdown": 2000, "drawdown_mode": "eod"})
     await fresh.sync_once()
     assert fresh.accounts["Sim102"].drawdown.peak == 51_500
+
+
+async def test_commissions_accumulate_per_contract_and_targets_use_net_pnl(client: AsyncClient, container):
+    """El P&L de NinjaTrader es bruto: cada fill (maestra, seguidoras, manual) suma contratos × tarifa por lado, y el
+    objetivo de ganancia / la pérdida diaria se miden en neto (bruto − comisiones)."""
+    b = container.bridge
+    b.noise = 0.0
+    b.health.master_account = "Sim101"
+    await client.put("/api/accounts/Sim102/link", json={"master_account": "Sim101"})
+    r = await client.put("/api/risk/commissions", json={"enabled": True, "default_per_side": 2.0, "rates": {"nq": 2.1, "MNQ": 0.5}})
+    assert r.status_code == 200 and r.json()["rates"]["NQ"] == 2.1
+    assert (await client.get("/api/risk")).json()["commissions"]["rates"]["MNQ"] == 0.5
+    # entrada de 2 NQ copiada (2 contratos maestra + 2 seguidora), salida de 2, y una copia MNQ de 4
+    ev = lambda **kw: {"msg_type": "EXECUTION", "account": "Sim101", "action": "BUY", "symbol": "NQ 12-26", "quantity": 2,
+                       "price": 20000.0, "order_type": "MARKET", "state": "FILLED", **kw}
+    rep = container.replication
+    await rep.process_master_event(ev(order_id="c1", execution_id="c1"))
+    await rep.process_master_event(ev(account="Sim102", order_id="f1", master_order_id="c1", execution_id="f1"))
+    await rep.process_master_event(ev(action="SELL", order_id="c2", execution_id="c2", is_exit=True))
+    await rep.process_master_event(ev(account="Sim102", action="SELL", order_id="f2", master_order_id="c2", execution_id="f2"))
+    await rep.process_master_event(ev(account="Sim102", symbol="MNQ 12-26", quantity=4, order_id="f3", master_order_id="c3", execution_id="f3"))
+    assert container.commissions.today("Sim101") == (4, 8.4) and container.commissions.today("Sim102") == (8, 10.4)
+    # el snapshot lleva contratos, comisiones y neto; el objetivo se mide en neto
+    await client.put("/api/risk/limits", json={"account_id": "Sim102", "max_daily_profit": 1000})
+    b.pnl = {"Sim102": 1005.0}
+    await container.accounts.sync_once()
+    s = container.accounts.accounts["Sim102"]
+    assert s.contracts_today == 8 and s.commissions_today == 10.4 and s.net_pnl == 994.6
+    assert container.risk.limits["Sim102"].trading_halted is False
+    b.pnl = {"Sim102": 1012.0}
+    await container.accounts.sync_once()
+    lim = container.risk.limits["Sim102"]
+    assert lim.trading_halted and lim.halted_reason == "daily_profit"
+    ev_ = next(a for a in container.audit.recent(6) if a.event_type == "DAILY_PROFIT_TARGET")
+    assert "neto" in ev_.message and ev_.details["commissions"] == 10.4
+    # comisiones desactivadas: el neto es el bruto; sobreviven a un reinicio del servicio
+    await client.put("/api/risk/commissions", json={"enabled": False})
+    await container.accounts.sync_once()
+    assert container.accounts.accounts["Sim102"].commissions_today == 0 and container.accounts.accounts["Sim102"].net_pnl == 1012.0
+    from tradepilot.services.commission_service import CommissionService
+    fresh = CommissionService(container.store, "17:00")
+    assert fresh.config.enabled is False and fresh.today("Sim102") == (8, 0.0)
+    fresh.config.enabled = True
+    assert fresh.today("Sim102") == (8, 10.4)

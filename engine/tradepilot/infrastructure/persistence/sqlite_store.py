@@ -50,6 +50,9 @@ class SQLiteStore:
                     account_id TEXT PRIMARY KEY, enabled BOOLEAN DEFAULT 1, alias TEXT DEFAULT '',
                     first_seen TEXT, last_seen TEXT, last_balance REAL DEFAULT 0
                 );
+                CREATE TABLE IF NOT EXISTS commissions_daily (
+                    account_id TEXT, day TEXT, contracts INTEGER, cost REAL, PRIMARY KEY (account_id, day)
+                );
                 CREATE TABLE IF NOT EXISTS account_peaks (
                     account_id TEXT PRIMARY KEY, peak_equity REAL, peak_equity_at TEXT,
                     peak_balance REAL, peak_balance_at TEXT
@@ -211,6 +214,17 @@ class SQLiteStore:
     def delete_peak(self, account_id: str) -> None:
         with self._lock, self._conn:
             self._conn.execute("DELETE FROM account_peaks WHERE account_id = ?", (account_id,))
+
+    # ---- comisiones del día ----
+    def get_commissions(self, day: str) -> dict[str, tuple[int, float]]:
+        with self._lock:
+            rows = self._conn.execute("SELECT account_id, contracts, cost FROM commissions_daily WHERE day = ?", (day,)).fetchall()
+        return {r["account_id"]: (int(r["contracts"] or 0), float(r["cost"] or 0.0)) for r in rows}
+
+    def save_commission(self, account_id: str, day: str, contracts: int, cost: float) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("INSERT OR REPLACE INTO commissions_daily (account_id, day, contracts, cost) VALUES (?, ?, ?, ?)",
+                               (account_id, day, contracts, cost))
 
     # ---- curva de P&L ----
     def add_pnl_samples(self, rows: list[tuple[str, str, float]]) -> None:

@@ -13,6 +13,7 @@ from tradepilot.services.account_service import AccountService
 from tradepilot.services.audit_service import AuditService
 from tradepilot.services.replication_service import ReplicationService
 from tradepilot.services.risk_service import RiskService
+from tradepilot.services.commission_service import CommissionService
 from tradepilot.services.sync_service import SyncService
 
 
@@ -28,6 +29,7 @@ class Container:
     replication: ReplicationService
     sync: SyncService
     journal: Journal
+    commissions: CommissionService | None = None
 
     async def start(self) -> None:
         await self.bridge.start()
@@ -84,6 +86,10 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
     accounts.audit = audit
     accounts.limits_provider = lambda: risk.limits
     accounts.eod_time = cfg.DRAWDOWN_EOD_TIME
+    commissions = CommissionService(store, cfg.DRAWDOWN_EOD_TIME)
+    accounts.commissions = commissions
+    replication.commissions = commissions
+    risk.commissions = commissions
     async def _after_sync() -> None:
         # independientes: un fallo en una vigilancia no debe apagar la otra
         for name, fn in (("sincronización", sync.check), ("riesgo", risk.check)):
@@ -92,4 +98,4 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
             except Exception as exc:
                 logger.exception(f"Error en vigilancia de {name}: {exc}")
     accounts.after_sync = _after_sync
-    return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal)
+    return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal, commissions)
