@@ -106,13 +106,20 @@ ese paso.
    - *Ganancia diaria máx. ($)*: al llegar, la cuenta se pausa y se cierra sola para **asegurar la ganancia** (útil para
      reglas de consistencia del prop firm o para no devolver lo ganado). 0 = sin objetivo. Avisa al 80 % y, como con la
      pérdida, no se reanuda mientras el P&L del día siga por encima del objetivo (súbelo o quítalo si de verdad quieres seguir).
-   - *Drawdown máx. del prop firm ($)*: el **drawdown dinámico (trailing)** de la evaluación. El engine lleva por cada cuenta el
-     **máximo** que llegó a valer (balance + flotante, guardado entre reinicios) y calcula el **suelo** = máximo − drawdown; el
-     suelo sube con cada máximo nuevo y nunca baja. Avisa al 80 % consumido (`DRAWDOWN_WARNING`) y, cuando faltan los dólares de
-     *Cerrar cuando falten* (colchón) para el suelo, pausa y cierra la cuenta (`DRAWDOWN_LIMIT`) **antes** de que el prop firm la
-     cierre. Pon el drawdown real del prop firm (APEX 50K: 2500) y un colchón (100–200 $): el prop firm mide tick a tick y el engine
-     cada 2 s. *El máximo se mide*: "con el flotante" (APEX, MFF, la mayoría) o "solo con lo cerrado" (firms que miden por balance).
-     *El suelo se bloquea en*: para reglas tipo APEX en que el suelo deja de subir al llegar a inicial + 100 (50K → 50100); 0 = sube siempre.
+   - *Drawdown máx. del prop firm ($)* y *Tipo de drawdown*. El engine lleva por cada cuenta el **máximo** que llegó a valer
+     (guardado entre reinicios) y calcula el **suelo** = máximo − drawdown; el suelo nunca baja. Hay dos tipos, elige el de tu
+     evaluación:
+     - **Dinámico (intradía)**: el máximo sube tick a tick con el flotante (APEX trailing, MFF y la mayoría). Si vas +1.000
+       flotante y vuelves a 0, el suelo ya subió 1.000.
+     - **EOD (cierre del día)**: el máximo solo se actualiza con el **balance al cierre del día** (APEX EOD, Topstep MLL).
+       Durante el día el suelo no se mueve aunque la cuenta suba; lo flotante no cuenta para el máximo. La hora de cierre es
+       `DRAWDOWN_EOD_TIME` en `engine\.env` (hora local del PC; por defecto 17:00; APEX y Topstep cierran a las 17:00 hora
+       de Nueva York, ajústala a tu zona).
+     En los dos tipos la **caída se vigila en tiempo real con el flotante**: aviso al 80 % (`DRAWDOWN_WARNING`) y, cuando
+     faltan los dólares de *Cerrar cuando falten* (colchón) para el suelo, pausa y cierre (`DRAWDOWN_LIMIT`) **antes** de que
+     el prop firm cierre la cuenta. Pon el drawdown real del prop firm (APEX 50K: 2500) y un colchón de 100 a 200 $: el prop
+     firm mide tick a tick y el engine cada 2 s. *El suelo se bloquea en*: para planes en que el suelo deja de subir al llegar
+     a inicial + 100 (APEX 50K → 50100); 0 = sube siempre.
    - **Varias cuentas a la vez**: en la tabla de límites marca las casillas (o la de la cabecera) y usa *Pausar / Reanudar /
      Quitar marcadas*; el botón *Aplicar a las N marcadas* del formulario guarda los mismos límites en todas las marcadas
      (sobrescribe todos sus límites). En *Cuentas → Gestionar cuentas* las casillas permiten *Activar / Desactivar / Modo auto /

@@ -83,6 +83,7 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
     accounts.on_positions_refreshed = replication.note_positions_refreshed
     accounts.audit = audit
     accounts.limits_provider = lambda: risk.limits
+    accounts.eod_time = cfg.DRAWDOWN_EOD_TIME
     async def _after_sync() -> None:
         # independientes: un fallo en una vigilancia no debe apagar la otra
         for name, fn in (("sincronización", sync.check), ("riesgo", risk.check)):

@@ -73,6 +73,10 @@ class SQLiteStore:
                 self._conn.execute("ALTER TABLE risk_limits ADD COLUMN halted_at TEXT")
             if "max_daily_profit" not in rcols:
                 self._conn.execute("ALTER TABLE risk_limits ADD COLUMN max_daily_profit REAL DEFAULT 0")
+            pcols = {r["name"] for r in self._conn.execute("PRAGMA table_info(account_peaks)").fetchall()}
+            if "peak_eod" not in pcols:
+                self._conn.execute("ALTER TABLE account_peaks ADD COLUMN peak_eod REAL")
+                self._conn.execute("ALTER TABLE account_peaks ADD COLUMN peak_eod_day TEXT")
             if "max_trailing_drawdown" not in rcols:
                 self._conn.execute("ALTER TABLE risk_limits ADD COLUMN max_trailing_drawdown REAL DEFAULT 0")
                 self._conn.execute("ALTER TABLE risk_limits ADD COLUMN drawdown_mode TEXT DEFAULT 'intraday'")
@@ -196,11 +200,13 @@ class SQLiteStore:
         return {r["account_id"]: dict(r) for r in rows}
 
     def save_peak(self, account_id: str, peak_equity: float, peak_equity_at: str | None,
-                  peak_balance: float, peak_balance_at: str | None) -> None:
+                  peak_balance: float, peak_balance_at: str | None,
+                  peak_eod: float | None = None, peak_eod_day: str | None = None) -> None:
         with self._lock, self._conn:
             self._conn.execute(
-                "INSERT OR REPLACE INTO account_peaks (account_id, peak_equity, peak_equity_at, peak_balance, peak_balance_at) "
-                "VALUES (?, ?, ?, ?, ?)", (account_id, peak_equity, peak_equity_at, peak_balance, peak_balance_at))
+                "INSERT OR REPLACE INTO account_peaks (account_id, peak_equity, peak_equity_at, peak_balance, peak_balance_at, "
+                "peak_eod, peak_eod_day) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (account_id, peak_equity, peak_equity_at, peak_balance, peak_balance_at, peak_eod, peak_eod_day))
 
     def delete_peak(self, account_id: str) -> None:
         with self._lock, self._conn:

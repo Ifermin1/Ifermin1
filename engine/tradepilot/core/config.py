@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     DESYNC_GRACE_SECONDS: float = 6.0     # cuánto puede diferir una seguidora antes de marcar DESYNC
     CLOSE_ON_STOP_REJECT: bool = True     # stop rechazado en una seguidora => cerrar su posición
     AUTO_FIX_OVERCLOSE: bool = True       # seguidora invertida / con posición sin maestra tras una copia => cerrarla sola
+    DRAWDOWN_EOD_TIME: str = "17:00"      # hora local (PC del engine) del cierre del día para el drawdown EOD (APEX/Topstep: 17:00 ET)
     AUDIT_ORDER_LIFECYCLE: bool = False   # auditar también los estados intermedios (Initialized, Submitted, Accepted...)
     MIN_ADDON_VERSION: str = "2.4"
 

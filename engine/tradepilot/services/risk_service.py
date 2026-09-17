@@ -353,7 +353,9 @@ class RiskService:
                 raise ValueError(f"{limit.account_id} sigue con P&L {snap.daily_pnl:,.2f}, por encima del objetivo de "
                                  f"+{limit.max_daily_profit:,.2f}: no se reanuda hoy (sube el objetivo o quítalo si de verdad quieres seguir)")
             if prev.halted_reason == "drawdown" and limit.max_trailing_drawdown > 0:
-                peak = snap.drawdown.peak
+                peak = self.accounts.peak_for(limit.account_id, limit.drawdown_mode)
+                if peak is None:
+                    peak = snap.drawdown.peak
                 floor = peak - limit.max_trailing_drawdown
                 if limit.drawdown_floor_cap > 0:
                     floor = min(floor, limit.drawdown_floor_cap)
@@ -375,7 +377,7 @@ class RiskService:
             self.accounts.refresh_drawdown(limit.account_id)
         self.audit.log("RISK_LIMIT_SET", f"Límites {limit.account_id}: pérdida diaria máx {limit.max_daily_loss}, "
                        f"objetivo de ganancia {limit.max_daily_profit}, tamaño máx {limit.max_position_size}, "
-                       f"drawdown máx {limit.max_trailing_drawdown} ({'con flotante' if limit.drawdown_mode == 'intraday' else 'solo cerrado'}"
+                       f"drawdown máx {limit.max_trailing_drawdown} ({ {'intraday': 'dinámico', 'eod': 'EOD', 'closed': 'solo cerrado'}.get(limit.drawdown_mode, limit.drawdown_mode) }"
                        + (f", suelo bloqueado en {limit.drawdown_floor_cap}" if limit.drawdown_floor_cap else "")
                        + (f", colchón {limit.drawdown_buffer}" if limit.drawdown_buffer else "") + "), "
                        f"halted={limit.trading_halted}", target=limit.account_id)

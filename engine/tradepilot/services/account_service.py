@@ -21,6 +21,8 @@ class AccountService:
         self.after_sync = None                 # corrutina a llamar tras cada sincronización (SyncService.check)
         self.on_positions_refreshed = None     # callable(cuenta | None) tras actualizar posiciones (libro de exposición)
         self.limits_provider = lambda: {}      # {cuenta: RiskLimit} (lo inyecta el contenedor) para el drawdown dinámico
+        self.eod_time = "17:00"                # hora local del cierre del día para el drawdown EOD (DRAWDOWN_EOD_TIME)
+        self.now = datetime.now                # inyectable en pruebas
         # Marca de agua por cuenta: el máximo que llegó a valer (con flotante y solo cerrado). Sobrevive a reinicios.
         self._peaks: dict[str, dict] = store.get_peaks() if store else {}
         self._watched: set[str] = set()
@@ -71,7 +73,7 @@ class AccountService:
             snap.connected, snap.connection, snap.reported, snap.updated_at = info.connected, info.connection, True, now
             if self.store:
                 self.store.upsert_account_seen(info.account_id, info.balance, now.isoformat(), snap.enabled, info.connected)
-            self._track_drawdown(snap, now)
+            self._track_drawdown(snap, self.now())
         if new_hidden:
             logger.info(f"{new_hidden} cuentas nuevas sin conexión quedan ocultas (se activan solas al conectarse)")
         import time as _t
@@ -183,7 +185,8 @@ class AccountService:
         pk = self._peaks.get(snap.account_id)
         if pk is None or pk.get("peak_equity") is None:
             pk = self._peaks[snap.account_id] = {"peak_equity": equity, "peak_equity_at": now.isoformat(timespec="seconds"),
-                                                 "peak_balance": snap.balance, "peak_balance_at": now.isoformat(timespec="seconds")}
+                                                 "peak_balance": snap.balance, "peak_balance_at": now.isoformat(timespec="seconds"),
+                                                 "peak_eod": snap.balance, "peak_eod_day": self._eod_day(now)}
             changed = True
         else:
             changed = False
@@ -191,20 +194,51 @@ class AccountService:
                 pk["peak_equity"], pk["peak_equity_at"], changed = equity, now.isoformat(timespec="seconds"), True
             if snap.balance > (pk.get("peak_balance") or 0.0):
                 pk["peak_balance"], pk["peak_balance_at"], changed = snap.balance, now.isoformat(timespec="seconds"), True
-        if changed and self.store:
-            try:
-                self.store.save_peak(snap.account_id, pk["peak_equity"], pk["peak_equity_at"], pk["peak_balance"], pk["peak_balance_at"])
-            except Exception as exc:
-                logger.warning(f"No se pudo guardar el máximo de {snap.account_id}: {exc}")
+            if pk.get("peak_eod") is None:
+                pk["peak_eod"], pk["peak_eod_day"], changed = snap.balance, self._eod_day(now), True
+        # EOD: al pasar la hora de cierre, el máximo EOD sube al balance de cierre si lo supera (y nunca baja)
+        if self._eod_day(now) != pk.get("peak_eod_day"):
+            pk["peak_eod"], pk["peak_eod_day"], changed = max(pk.get("peak_eod") or 0.0, snap.balance), self._eod_day(now), True
+            logger.info(f"Drawdown EOD {snap.account_id}: cierre del día {pk['peak_eod_day']} con balance {snap.balance:,.2f}; máximo EOD {pk['peak_eod']:,.2f}")
+        if changed:
+            self._save_peak(snap.account_id, pk)
         self._compute_drawdown(snap, pk, equity)
+
+    def _eod_day(self, now: datetime) -> str:
+        """Día de cierre vigente: hasta la hora de cierre es el de ayer; a partir de ella, el de hoy."""
+        from datetime import timedelta
+        day = now.date() if now.strftime("%H:%M") >= self.eod_time else now.date() - timedelta(days=1)
+        return day.isoformat()
+
+    def _save_peak(self, account_id: str, pk: dict) -> None:
+        if not self.store:
+            return
+        try:
+            self.store.save_peak(account_id, pk["peak_equity"], pk["peak_equity_at"], pk["peak_balance"], pk["peak_balance_at"],
+                                 pk.get("peak_eod"), pk.get("peak_eod_day"))
+        except Exception as exc:
+            logger.warning(f"No se pudo guardar el máximo de {account_id}: {exc}")
+
+    def peak_for(self, account_id: str, mode: str) -> float | None:
+        """Máximo vigente de una cuenta según el modo de drawdown (para decidir si se puede reanudar)."""
+        pk = self._peaks.get(account_id)
+        if pk is None:
+            return None
+        return pk.get("peak_eod") if mode == "eod" else pk.get("peak_balance") if mode == "closed" else pk.get("peak_equity")
 
     def _compute_drawdown(self, snap: AccountSnapshot, pk: dict, equity: float) -> None:
         limit = self.limits_provider().get(snap.account_id)
         mode = limit.drawdown_mode if limit else "intraday"
         closed = mode == "closed"
-        peak = pk["peak_balance"] if closed else pk["peak_equity"]
-        peak_at = pk.get("peak_balance_at" if closed else "peak_equity_at")
-        value = snap.balance if closed else equity
+        if mode == "eod":
+            # el suelo se fija con el balance del último cierre; la caída se mide en tiempo real con el flotante
+            peak, peak_at, value = pk.get("peak_eod") or snap.balance, pk.get("peak_eod_day"), equity
+            if peak_at:
+                peak_at = f"{peak_at}T{self.eod_time}:00"
+        else:
+            peak = pk["peak_balance"] if closed else pk["peak_equity"]
+            peak_at = pk.get("peak_balance_at" if closed else "peak_equity_at")
+            value = snap.balance if closed else equity
         dd = DrawdownSnapshot(equity=round(equity, 2), mode=mode, peak=round(peak, 2),
                               peak_at=datetime.fromisoformat(peak_at) if peak_at else None,
                               drawdown=round(max(0.0, peak - value), 2))
@@ -231,13 +265,15 @@ class AccountService:
             raise KeyError(account_id)
         now = datetime.now().isoformat(timespec="seconds")
         equity = snap.balance + snap.unrealized_pnl
+        day = self._eod_day(self.now())
         if peak is None:
-            pk = {"peak_equity": equity, "peak_equity_at": now, "peak_balance": snap.balance, "peak_balance_at": now}
+            pk = {"peak_equity": equity, "peak_equity_at": now, "peak_balance": snap.balance, "peak_balance_at": now,
+                  "peak_eod": snap.balance, "peak_eod_day": day}
         else:
-            pk = {"peak_equity": float(peak), "peak_equity_at": now, "peak_balance": float(peak), "peak_balance_at": now}
+            pk = {"peak_equity": float(peak), "peak_equity_at": now, "peak_balance": float(peak), "peak_balance_at": now,
+                  "peak_eod": float(peak), "peak_eod_day": day}
         self._peaks[account_id] = pk
-        if self.store:
-            self.store.save_peak(account_id, pk["peak_equity"], pk["peak_equity_at"], pk["peak_balance"], pk["peak_balance_at"])
+        self._save_peak(account_id, pk)
         self._compute_drawdown(snap, pk, equity)
         if self.audit is not None:
             self.audit.log("PEAK_SET", f"{account_id}: máximo para el drawdown {'reiniciado al valor actual' if peak is None else 'fijado a mano'}: "

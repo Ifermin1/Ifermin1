@@ -69,7 +69,7 @@ class DrawdownSnapshot(DomainModel):
     """Drawdown dinámico (trailing) de la cuenta, como lo mide un prop firm: la distancia entre el máximo que llegó a
     valer la cuenta (marca de agua) y lo que vale ahora. `equity` = balance + flotante."""
     equity: float = 0.0
-    mode: str = "intraday"                  # "intraday": el máximo cuenta el flotante; "closed": solo el balance (cerrado)
+    mode: str = "intraday"                  # "intraday" (dinámico, con flotante) | "eod" (balance al cierre del día) | "closed"
     peak: float = 0.0                       # máximo alcanzado según el modo
     peak_at: Optional[datetime] = None
     drawdown: float = 0.0                   # peak - valor actual (>= 0)

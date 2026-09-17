@@ -31,6 +31,12 @@ export function DrawdownMeter({ d }: { d: Drawdown }) {
 export function liveDrawdown(a: Account, prices: PriceMap): Drawdown {
   const d = a.drawdown; const pnl = livePnl(a, prices);
   if (!pnl.live || d.mode === "closed") return d;
+  if (d.mode === "eod") {          // el suelo no se mueve intradía: solo se actualiza la equity y la caída
+    const equity = a.balance + (pnl.value - a.realized_pnl);
+    const room = d.floor !== null ? equity - d.floor : null;
+    const pct = d.limit > 0 && room !== null ? Math.min(100, Math.max(0, ((d.limit - room) / d.limit) * 100)) : null;
+    return { ...d, equity, drawdown: Math.max(0, d.peak - equity), room, pct };
+  }
   const equity = a.balance + (pnl.value - a.realized_pnl);
   const peak = Math.max(d.peak, equity);
   let floor = d.floor; let locked = d.locked;
@@ -90,7 +96,7 @@ export function AccountPanel({ a, role, link, limit, lastFill, lastReject, price
           <div className="dd-line">
             <span className="stat-label">Drawdown</span>
             <span className={`num ${dd.drawdown > 0 ? "bad" : "muted"}`}>{dd.drawdown > 0 ? `−${money(dd.drawdown)}` : "0"}</span>
-            <span className="muted">desde el máximo {money(dd.peak)}{dd.peak_at && !compact ? ` (${time(dd.peak_at)})` : ""}</span>
+            <span className="muted">desde el máximo {dd.mode === "eod" ? "EOD " : ""}{money(dd.peak)}{dd.peak_at && !compact && dd.mode !== "eod" ? ` (${time(dd.peak_at)})` : ""}</span>
             {dd.floor !== null && <span className={ddTone(dd)}>· suelo {money(dd.floor)}{dd.locked ? " (bloqueado)" : ""} · quedan {money(dd.room ?? 0)}</span>}
           </div>
           {dd.pct !== null && <DrawdownMeter d={dd} />}

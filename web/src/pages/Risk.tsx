@@ -5,6 +5,8 @@ import { Card, Empty } from "../components/ui";
 import type { RiskLimit } from "../lib/api";
 import { DrawdownMeter, ddTone } from "../components/AccountPanel";
 
+const MODE_LABEL: Record<string, string> = { intraday: "dinámico", eod: "EOD", closed: "cerrado" };
+
 export function Risk() {
   const { client, risk, setRisk, accounts } = useStore();
   const [account, setAccount] = useState("");
@@ -12,7 +14,7 @@ export function Risk() {
   const [maxProfit, setMaxProfit] = useState("0");
   const [maxSize, setMaxSize] = useState("0");
   const [maxDd, setMaxDd] = useState("0");
-  const [ddMode, setDdMode] = useState<"intraday" | "closed">("intraday");
+  const [ddMode, setDdMode] = useState<"intraday" | "eod" | "closed">("intraday");
   const [ddCap, setDdCap] = useState("0");
   const [ddBuffer, setDdBuffer] = useState("0");
   const [halted, setHalted] = useState(false);
@@ -176,7 +178,7 @@ export function Risk() {
               return (
                 <tr key={a.account_id} data-dd={a.account_id}><td><b>{a.alias || a.account_id}</b>{a.alias && <span className="muted small"> {a.account_id}</span>}{!a.reported && <span className="muted small"> · no reportada</span>}</td>
                   <td className="num">{money(d.equity)}{a.unrealized_pnl ? <span className="muted small"> ({signedMoney(a.unrealized_pnl)} flot.)</span> : null}</td>
-                  <td className="num">{money(d.peak)}<span className="muted small"> {d.peak_at ? time(d.peak_at) : ""}</span></td>
+                  <td className="num">{money(d.peak)}<span className="muted small"> {d.mode === "eod" ? `EOD ${d.peak_at ? new Date(d.peak_at).toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit" }) : ""}` : d.peak_at ? time(d.peak_at) : ""}</span></td>
                   <td className={`num ${d.drawdown > 0 ? "bad" : "muted"}`}>{d.drawdown > 0 ? `−${money(d.drawdown)}` : "0"}</td>
                   <td className="num">{d.limit ? money(d.limit) : <span className="muted">— <span className="small">(solo se observa)</span></span>}</td>
                   <td className="num">{d.floor !== null ? <>{money(d.floor)}{d.locked && <span className="chip" title="El suelo llegó al tope configurado y ya no sube"> bloqueado</span>}</> : "—"}</td>
@@ -196,8 +198,8 @@ export function Risk() {
           <label>Ganancia diaria máx. ($)<input type="number" min="0" value={maxProfit} onChange={(e) => setMaxProfit(e.target.value)} /></label>
           <label>Posición máx. (contratos)<input type="number" min="0" value={maxSize} onChange={(e) => setMaxSize(e.target.value)} /></label>
           <label>Drawdown máx. del prop firm ($)<input type="number" min="0" value={maxDd} onChange={(e) => setMaxDd(e.target.value)} title="Cuánto puede caer la cuenta desde el máximo que llegó a valer antes de que el prop firm la cierre (APEX 50K: 2500)" /></label>
-          <label>El máximo se mide<select value={ddMode} onChange={(e) => setDdMode(e.target.value as "intraday" | "closed")}>
-            <option value="intraday">con el flotante (intradía: APEX, MFF…)</option><option value="closed">solo con lo cerrado (balance)</option></select></label>
+          <label>Tipo de drawdown<select value={ddMode} onChange={(e) => setDdMode(e.target.value as "intraday" | "eod" | "closed")} title="Dinámico: el máximo sube tick a tick con el flotante (APEX trailing, MFF). EOD: el máximo solo se actualiza con el balance al cierre del día (APEX EOD, Topstep); la caída se vigila igual en tiempo real">
+            <option value="intraday">Dinámico (intradía, con flotante)</option><option value="eod">EOD (balance al cierre del día)</option><option value="closed">Solo cerrado (balance intradía)</option></select></label>
           <label>El suelo se bloquea en ($)<input type="number" min="0" value={ddCap} onChange={(e) => setDdCap(e.target.value)} title="0 = el suelo sube siempre con el máximo. APEX: balance inicial + 100 (50K → 50100)" /></label>
           <label>Cerrar cuando falten ($)<input type="number" min="0" value={ddBuffer} onChange={(e) => setDdBuffer(e.target.value)} title="Colchón: el engine pausa y cierra la cuenta cuando le quedan estos dólares (o menos) hasta el suelo" /></label>
           <label className="inline"><input type="checkbox" checked={halted} onChange={(e) => setHalted(e.target.checked)} /> Pausar cuenta</label>
@@ -206,7 +208,7 @@ export function Risk() {
           {sel.size > 0 && <button type="button" className="ghost" onClick={() => void bulk("apply")} title="Guarda estos valores en todas las cuentas marcadas de la tabla">Aplicar a las {sel.size} marcadas</button>}
         </form>
         <p className="muted small">0 = sin límite. Al llegar a la pérdida máxima o a la ganancia máxima del día la cuenta se pausa y se cierra sola (la ganancia queda asegurada).
-          El <b>drawdown máx.</b> es el trailing del prop firm: el suelo sube con el máximo de la cuenta y nunca baja; el engine avisa al 80 % y pausa y cierra la cuenta cuando faltan los dólares del colchón (ponle margen: el prop firm mide tick a tick y aquí se mira cada 2 s).</p>
+          El <b>drawdown máx.</b> es el trailing del prop firm: el suelo = máximo − drawdown y nunca baja. <b>Dinámico</b>: el máximo sube tick a tick con el flotante (APEX trailing, MFF). <b>EOD</b>: el máximo solo se actualiza con el balance al cierre del día (APEX EOD, Topstep MLL; hora de cierre en <code>DRAWDOWN_EOD_TIME</code> del .env, por defecto 17:00). En los dos, la caída se vigila en tiempo real con el flotante: aviso al 80 % y pausa y cierre cuando faltan los dólares del colchón (ponle margen: el prop firm mide tick a tick y aquí se mira cada 2 s).</p>
         {!risk || risk.limits.length === 0 ? <Empty>Sin límites configurados (0 = sin límite).</Empty> : (
           <>
           <div className="manage-bar bulk-bar">
@@ -231,7 +233,7 @@ export function Risk() {
                 <tr key={l.account_id} className={sel.has(l.account_id) ? "selected" : ""}><td><input type="checkbox" checked={sel.has(l.account_id)} onChange={() => toggleSel(l.account_id)} /></td><td><b>{l.account_id}</b></td><td className="num">{l.max_daily_loss || "—"}</td><td className="num">{l.max_daily_profit || "—"}</td>
                   <td className={`num ${cls}`}>{acc ? money(pnl) : "—"}{ref ? <span className="muted small"> ({pct.toFixed(0)} % {pnl < 0 ? "de la pérdida" : "del objetivo"})</span> : null}</td>
                   <td className="num">{l.max_position_size || "—"}</td>
-                  <td className="num">{l.max_trailing_drawdown ? <>{l.max_trailing_drawdown}<span className="muted small"> {l.drawdown_mode === "closed" ? "cerrado" : "c/ flotante"}{l.drawdown_floor_cap ? ` · tope ${l.drawdown_floor_cap}` : ""}{l.drawdown_buffer ? ` · colchón ${l.drawdown_buffer}` : ""}</span></> : "—"}</td>
+                  <td className="num">{l.max_trailing_drawdown ? <>{l.max_trailing_drawdown}<span className="muted small"> {MODE_LABEL[l.drawdown_mode] ?? l.drawdown_mode}{l.drawdown_floor_cap ? ` · tope ${l.drawdown_floor_cap}` : ""}{l.drawdown_buffer ? ` · colchón ${l.drawdown_buffer}` : ""}</span></> : "—"}</td>
                   <td>{l.trading_halted ? <span className={`badge ${l.halted_reason === "daily_profit" ? "ok" : "bad"}`}>{badge}</span> : <span className="badge ok">activa</span>}</td>
                   <td className="row-actions">{l.trading_halted && <button className="ghost small-btn" onClick={() => void client!.upsertLimit(body(l, false)).then(() => client!.risk()).then(setRisk).catch((ex) => alert(ex instanceof Error ? ex.message : String(ex)))}>Reanudar</button>}
                     <button className="ghost small-btn" onClick={() => edit(l)} title="Cargar en el formulario para cambiar los límites">Editar</button>

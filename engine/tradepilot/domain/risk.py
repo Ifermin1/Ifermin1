@@ -14,7 +14,9 @@ class RiskLimit(DomainModel):
     max_position_size: int = 0        # 0 = sin límite (contratos por orden y de posición resultante)
     # Drawdown dinámico (trailing) del prop firm: se mide desde el máximo que llegó a valer la cuenta
     max_trailing_drawdown: float = 0.0  # 0 = solo observar; USD que la cuenta puede caer desde su máximo
-    drawdown_mode: str = "intraday"     # "intraday": el máximo incluye el flotante (APEX, MFF…); "closed": solo balance cerrado
+    drawdown_mode: str = "intraday"     # "intraday": dinámico, el máximo sube con el flotante tick a tick (APEX trailing, MFF…);
+                                        # "eod": el máximo solo se actualiza con el balance al cierre del día (APEX EOD, Topstep MLL);
+                                        # "closed": máximo del balance cerrado intradía (antiguo)
     drawdown_floor_cap: float = 0.0     # 0 = el suelo sube siempre; si no, el suelo se bloquea al llegar a este valor (APEX: inicial + 100)
     drawdown_buffer: float = 0.0        # colchón en USD: el engine pausa y cierra cuando faltan <= esto para el suelo
     trading_halted: bool = False

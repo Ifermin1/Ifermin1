@@ -805,3 +805,58 @@ async def test_peak_survives_restart_and_can_be_reset_or_set(client: AsyncClient
     # tras sincronizar, el máximo fijado a mano se conserva (la cuenta vale menos)
     await container.accounts.sync_once()
     assert container.accounts.accounts["Sim102"].drawdown.peak == 31_500
+
+
+async def test_eod_drawdown_only_moves_the_floor_at_the_daily_close(client: AsyncClient, container):
+    """Drawdown EOD (APEX EOD, Topstep MLL): el suelo se fija con el balance del cierre del día y no se mueve intradía
+    aunque la cuenta suba; la caída se vigila en tiempo real con el flotante. Al pasar la hora de cierre, el máximo EOD
+    sube al balance de cierre si lo supera, y nunca baja."""
+    from datetime import datetime
+    b = container.bridge
+    acc = container.accounts
+    b.noise = 0.0
+    b.accounts["Sim102"] = 50_000.0
+    acc.eod_time = "17:00"
+    clock = {"now": datetime(2026, 9, 17, 10, 0)}
+    acc.now = lambda: clock["now"]
+    await acc.sync_once()
+    await acc.set_peak("Sim102", None)
+    await client.put("/api/risk/limits", json={"account_id": "Sim102", "max_trailing_drawdown": 2000, "drawdown_mode": "eod"})
+    await acc.sync_once()
+    dd = acc.accounts["Sim102"].drawdown
+    assert dd.mode == "eod" and dd.peak == 50_000 and dd.floor == 48_000
+    # intradía sube a 51 500 (cerrado) con +800 de flotante: el suelo no se mueve
+    b.accounts["Sim102"] = 51_500.0
+    b.unrealized = {"Sim102": 800.0}
+    clock["now"] = datetime(2026, 9, 17, 14, 0)
+    await acc.sync_once()
+    dd = acc.accounts["Sim102"].drawdown
+    assert dd.peak == 50_000 and dd.floor == 48_000 and dd.drawdown == 0 and dd.room == 4300
+    # la caída sí se mide en tiempo real, con flotante
+    b.unrealized = {"Sim102": -3000.0}
+    await acc.sync_once()
+    dd = acc.accounts["Sim102"].drawdown
+    assert dd.equity == 48_500 and dd.room == 500 and dd.pct == 75
+    # pasa la hora de cierre: el máximo EOD sube al balance de cierre (51 500, sin el flotante) y el suelo con él
+    b.unrealized = {}
+    clock["now"] = datetime(2026, 9, 17, 17, 1)
+    await acc.sync_once()
+    dd = acc.accounts["Sim102"].drawdown
+    assert dd.peak == 51_500 and dd.floor == 49_500 and dd.peak_at is not None and dd.peak_at.hour == 17
+    # otro día con cierre por debajo: el máximo EOD no baja
+    b.accounts["Sim102"] = 50_200.0
+    clock["now"] = datetime(2026, 9, 18, 17, 5)
+    await acc.sync_once()
+    dd = acc.accounts["Sim102"].drawdown
+    assert dd.peak == 51_500 and dd.floor == 49_500 and dd.drawdown == 1300
+    # el modo dinámico sobre la misma cuenta usa el máximo intradía con flotante (52 300 de las 14:00)
+    await client.put("/api/risk/limits", json={"account_id": "Sim102", "max_trailing_drawdown": 2000, "drawdown_mode": "intraday"})
+    assert acc.accounts["Sim102"].drawdown.peak == 52_300
+    # el máximo EOD sobrevive a un reinicio
+    from tradepilot.services.account_service import AccountService
+    fresh = AccountService(b, container.bus, container.store)
+    fresh.limits_provider = lambda: container.risk.limits
+    fresh.now = acc.now
+    await client.put("/api/risk/limits", json={"account_id": "Sim102", "max_trailing_drawdown": 2000, "drawdown_mode": "eod"})
+    await fresh.sync_once()
+    assert fresh.accounts["Sim102"].drawdown.peak == 51_500

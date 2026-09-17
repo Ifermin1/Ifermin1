@@ -49,7 +49,7 @@ class RiskLimitUpsert(BaseModel):
     max_daily_profit: float = Field(default=0.0, ge=0)
     max_position_size: int = Field(default=0, ge=0)
     max_trailing_drawdown: float = Field(default=0.0, ge=0)
-    drawdown_mode: str = Field(default="intraday", pattern="^(intraday|closed)$")
+    drawdown_mode: str = Field(default="intraday", pattern="^(intraday|eod|closed)$")
     drawdown_floor_cap: float = Field(default=0.0, ge=0)
     drawdown_buffer: float = Field(default=0.0, ge=0)
     trading_halted: bool = False

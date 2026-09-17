@@ -13,7 +13,7 @@ export type Position = { account_id: string; symbol: string; quantity: number; a
 export type WorkingOrder = { order_id: string; master_order_id: string; action: string; symbol: string; quantity: number; filled: number;
                              order_type: string; limit_price: number; stop_price: number; state: string };
 /** Drawdown dinámico (trailing) como lo mide el prop firm: distancia entre el máximo que llegó a valer la cuenta y su valor actual. */
-export type Drawdown = { equity: number; mode: "intraday" | "closed"; peak: number; peak_at: string | null; drawdown: number; limit: number;
+export type Drawdown = { equity: number; mode: "intraday" | "eod" | "closed"; peak: number; peak_at: string | null; drawdown: number; limit: number;
                          floor: number | null; room: number | null; pct: number | null; buffer: number; locked: boolean };
 export type Account = { account_id: string; balance: number; net_liquidity: number; daily_pnl: number; open_positions: Position[]; updated_at: string;
                         enabled: boolean; enabled_source: "auto" | "user"; alias: string; connected: boolean | null; connection: string; reported: boolean;
@@ -28,7 +28,7 @@ export type ExecOptions = { target_root?: string | null; entry_mode?: "market" |
 export type AuditEvent = { id: number | null; timestamp: string; event_type: string; source_account: string | null;
                            target_account: string | null; message: string; details: Record<string, unknown> | null };
 export type RiskLimit = { account_id: string; max_daily_loss: number; max_daily_profit: number; max_position_size: number;
-                          max_trailing_drawdown: number; drawdown_mode: "intraday" | "closed"; drawdown_floor_cap: number; drawdown_buffer: number;
+                          max_trailing_drawdown: number; drawdown_mode: "intraday" | "eod" | "closed"; drawdown_floor_cap: number; drawdown_buffer: number;
                           trading_halted: boolean; halted_reason: string; halted_at: string | null };
 export type Schedule = { enabled: boolean; window_start: string; flatten_at: string; include_master: boolean; last_flatten_day: string };
 export type RiskState = { kill_switch: boolean; kill_switch_reason: string | null; kill_switch_at: string | null; limits: RiskLimit[];
