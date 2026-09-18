@@ -554,3 +554,55 @@ async def test_recent_fills_are_not_settled_against_a_lagging_snapshot(container
     rep.settle_margin = 0.0
     await container.accounts.sync_once()
     assert rep.expected_position("Sim102", sym) == -2 and not rep._inflight
+
+
+async def test_master_fill_of_a_pending_copy_tells_the_addon_how_far_the_copy_must_go(container):
+    """17/9: el stop del maestro llenó 1 de 2 y el addon mandó "1 a mercado para seguirle" mientras el stop de la seguidora
+    saltaba a la vez: doble salida. Con el addon 2.6 la copia viva se ejecuta sola; el engine le dice hasta dónde debe
+    llegar (lo ejecutado del maestro, escalado) y solo reconcilia lo que falte pasado el plazo."""
+    rep, b = await _setup(container, follower_pos=4, max_size=8)
+    rep.update_rule(rep.rules[0].id, multiplier=2)
+    sym = "MNQ 12-26"
+    await rep.process_master_event(_event(msg_type="ORDER_PENDING", action="SELL", quantity=2, symbol=sym,
+                                          order_type="STOPMARKET", order_id="S1").model_dump(mode="json"))
+    assert b.sent_orders[-1]["quantity"] == 4 and b.sent_orders[-1]["master_filled_scaled"] is None
+    b.next_replies.append("OK|EXECUTION_WAIT")
+    await rep.process_master_event(_event(action="SELL", quantity=1, symbol=sym, order_id="S1", execution_id="m1",
+                                          is_exit=True, price=20000.0).model_dump(mode="json"))
+    assert b.sent_orders[-1]["quantity"] == 2 and b.sent_orders[-1]["master_filled_scaled"] == 2
+    note = next(a for a in container.audit.recent(3) if a.event_type == "REPLICATED")
+    assert "se ejecuta sola" in note.message
+    await rep.process_master_event(_event(action="SELL", quantity=1, symbol=sym, order_id="S1", execution_id="m2",
+                                          is_exit=True, price=20000.0).model_dump(mode="json"))
+    assert b.sent_orders[-1]["quantity"] == 2 and b.sent_orders[-1]["master_filled_scaled"] == 4
+    # una entrada a mercado del maestro también lo lleva (lo ejecutado de esa orden, escalado), sin estorbar
+    await rep.process_master_event(_event(action="BUY", quantity=1, symbol=sym, order_id="E9", execution_id="e9").model_dump(mode="json"))
+    assert b.sent_orders[-1]["master_filled_scaled"] == 2
+
+
+async def test_account_locked_by_the_prop_firm_is_disabled_and_stops_receiving_copies(container):
+    """17/9: cuatro cuentas APEX pasaron a "Order can be placed by administrators only" a media sesión y el engine les
+    siguió mandando cada copia (y el cierre por stop rechazado, que tampoco entraba). Ahora se desactivan solas."""
+    rep, b = await _setup(container)
+    ts = "2026-09-17T10:00:00.0000000-05:00"
+    await rep.process_master_event({"msg_type": "ORDER_STATUS", "account": "Sim102", "action": "SELL", "quantity": 2,
+                                    "symbol": "NQ 12-26", "order_type": "STOPMARKET", "state": "Rejected", "order_id": "F1",
+                                    "master_order_id": "S1", "error": "OrderRejected",
+                                    "native_error": "Order can be placed by administrators only", "timestamp": ts})
+    await asyncio.sleep(0)
+    snap = container.accounts.accounts["Sim102"]
+    assert snap.enabled is False and snap.enabled_source == "user"
+    types = _types(container, 4)
+    assert "ACCOUNT_LOCKED" in types and "NAKED_CLOSE" not in types
+    n = len(b.sent_orders)
+    await rep.process_master_event(_event(order_id="E2", execution_id="e2").model_dump(mode="json"))
+    assert len(b.sent_orders) == n
+    assert any(a.event_type == "BLOCKED" and "desactivada" in a.message for a in container.audit.recent(3))
+    # un rechazo normal (margen, tamaño) no bloquea la cuenta
+    await container.accounts.set_settings("Sim102", enabled=True)
+    await rep.process_master_event({"msg_type": "ORDER_STATUS", "account": "Sim102", "action": "BUY", "quantity": 2,
+                                    "symbol": "NQ 12-26", "order_type": "MARKET", "state": "Rejected", "order_id": "F2",
+                                    "master_order_id": "E2", "error": "OrderRejected",
+                                    "native_error": "Your maximum order quantity has been met", "timestamp": ts})
+    await asyncio.sleep(0)
+    assert container.accounts.accounts["Sim102"].enabled is True

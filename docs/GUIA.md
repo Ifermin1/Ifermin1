@@ -30,7 +30,7 @@ versión de escritorio).
    - `API_TOKEN=` un token largo tuyo (es la única llave de la consola).
 5. Instalar el addon en NinjaTrader: `scripts\update.ps1` copia `ninjatrader\TradePilotXBridge.cs` a la carpeta de AddOns.
    Después, en NinjaTrader: *New → NinjaScript Editor → F5* (compilar) y **reiniciar NinjaTrader**.
-   En *New → NinjaScript Output* debe aparecer `[TradePilotX] Bridge v2.5 online`.
+   En *New → NinjaScript Output* debe aparecer `[TradePilotX] Bridge v2.6 online`.
    **Quitar los avisos de voz de NinjaTrader**: por defecto reproduce "order filled", "order cancelled"… por cada orden de
    cada cuenta; con varias seguidoras son decenas de avisos por operación y frenan a NinjaTrader. En *Tools → Options →
    General*, apartado *Sounds*, desmarca todos los sonidos de órdenes (order filled, order cancelled, order pending, order
@@ -150,8 +150,8 @@ ese paso.
 
 ## 5. Operativa diaria
 
-1. Abrir NinjaTrader y conectar la cuenta maestra y las seguidoras. Comprobar en el Output `Bridge v2.4 online`.
-2. Arrancar el engine (`run_engine.ps1`) si no está corriendo. En *Inicio*: modo `NinjaTrader · addon v2.4`, heartbeat
+1. Abrir NinjaTrader y conectar la cuenta maestra y las seguidoras. Comprobar en el Output `Bridge v2.6 online`.
+2. Arrancar el engine (`run_engine.ps1`) si no está corriendo. En *Inicio*: modo `NinjaTrader · addon v2.6`, heartbeat
    actualizándose, sin avisos rojos.
 3. En *Cuentas*: las seguidoras que deben copiar con el interruptor encendido y el badge *copiando*.
 4. Operar solo en la cuenta maestra. Todo (entrada, stop, take profit, modificaciones, cancelaciones) se copia.
@@ -169,9 +169,12 @@ ese paso.
 |---|---|---|
 | **DESINCRONIZADA** (Cuentas, rojo) | La seguidora no tiene la posición de la maestra × multiplicador desde hace más de 6 s. Solo se le copian salidas. | Pulsa *Igualar a la maestra* (manda la diferencia a mercado) o *Cerrar* esa cuenta. |
 | `FOLLOWER_REJECTED` | El bróker rechazó una orden copiada; el mensaje trae el motivo (límite de contratos, margen…). | Revisa límites del prop firm y el *Tamaño máx.* en *Riesgo*. Si era un stop, el engine ya cerró la cuenta (`NAKED_CLOSE`). |
+| `FOLLOWER_REJECTED` "maximum order quantity … Rule #4304" | APEX limita a 10 contratos la suma de la orden nueva **más todas las órdenes vivas** de la cuenta. Con varios stops de 2 para una misma posición, cualquier orden extra (incluso un cierre) se rechaza. | Un solo stop y un solo TP por posición en la maestra; pon *Tamaño máx.* en *Riesgo* por debajo del límite del prop firm. |
+| `ACCOUNT_LOCKED` | El bróker rechaza **todas** las órdenes de esa cuenta ("Order can be placed by administrators only"): el prop firm la ha bloqueado. El engine la desactiva para no seguir mandándole copias. | Hablar con el prop firm. Cuando vuelva a aceptar órdenes, activarla de nuevo en *Cuentas* (el interruptor). |
+| `REPLICATED … addon: la copia sigue viva: se ejecuta sola…` | Saltó el stop/TP de la maestra y la seguidora tiene su propia copia al mismo precio, que está saltando en ese instante. El addon 2.6 no manda nada a mercado: la deja ejecutarse. Solo si en 750 ms sigue sin llegar a lo que ejecutó la maestra, la cancela y manda el resto a mercado. | Nada. Es lo normal desde 2.6 (antes mandaba 1 a mercado "para seguirle" y salían dos ventas). |
 | `NAKED_CLOSE` | Un stop copiado fue rechazado y el engine cerró esa cuenta para no dejarla sin protección. | Comprobar en NinjaTrader que quedó plana. |
 | `FOLLOWER_FILL … (maestro 29459.0, +1.0, 176 ms; en bróker 270 ms: engine 6 + addon 14 + bróker 250)` | Copia ejecutada. El primer tiempo es lo que tardó el engine en enterarse (incluye la cola de mensajes); *en bróker* es el tiempo real entre el fill de la maestra y el de la seguidora según el reloj de NinjaTrader, desglosado en lo que tardó el engine en decidir, el addon en enviar y confirmar, y el bróker en llenar. | Si *engine* o *addon* pasan de ~30 ms, avisa (algo va lento en el PC). Si *bróker* pasa de ~300 ms, es la conexión con Rithmic/el bróker: un VPS cerca de Chicago lo baja. |
-| `OVERCLOSE_FIX` | La seguidora quedó con posición contraria (o con posición y la maestra plana) justo después de una copia: el bróker llenó una copia que ya había dado por cancelada. El engine la cerró a mercado (el addon 2.4 lo corrige antes por su cuenta). | Comprobar en NinjaTrader que quedó plana. Si ves varios seguidos, revisa la conexión del bróker. |
+| `OVERCLOSE_FIX` | La seguidora quedó con posición contraria (o con posición y la maestra plana) justo después de una copia: el bróker llenó una copia que ya había dado por cancelada. El engine la cerró a mercado (el addon 2.4 lo corrige antes por su cuenta). | Comprobar en NinjaTrader que quedó plana. Si ves varios seguidos con addon < 2.6, actualiza el addon: era la orden extra "para seguirle" del fill parcial. |
 | `PHANTOM_ORDER` | Una orden viva sin nada por ejecutar (en el gráfico sale con 0 contratos). No protege nada. El addon 2.4 cancela las copias TPX; las de la maestra no se tocan. | Si sigue ahí, cancélala a mano en NinjaTrader. |
 | **Límite de pérdida diaria alcanzado** | La cuenta se pausó y se cerró. | Nada hasta mañana. *Reanudar* solo funciona si el P&L ya no está por debajo del límite. |
 | `DRAWDOWN_WARNING` | La cuenta consumió el 80 % del drawdown dinámico permitido: está cerca del suelo que el prop firm usa para cerrarla. | Reducir o cerrar. El engine cerrará solo al llegar al colchón configurado. |

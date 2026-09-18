@@ -12,7 +12,7 @@ funciona también con el addon anterior (solo verá las conectadas y lo avisará
 2. En NinjaTrader: *New → NinjaScript Editor*, carpeta *AddOns*, abre `TradePilotXBridge` (o crea uno con ese nombre).
 3. Sustituye todo el contenido por el de `TradePilotXBridge.cs` y pulsa **F5** (compilar). Debe compilar sin errores.
 4. Reinicia NinjaTrader (o desactiva y activa el addon). En *Tools → Output* debe aparecer
-   `[TradePilotX] Bridge v2.4 online. master=... (v2.4: doble salida corregida al instante y copias fantasma barridas)`.
+   `[TradePilotX] Bridge v2.6 online. master=... (v2.6: la copia viva se ejecuta sola, sin órdenes extra a mercado; gracia 750 ms)`.
 
 ## Protocolo (puerto 5557, REQ/REP)
 
@@ -34,6 +34,17 @@ El campo de estado es el `ConnectionStatus` de NinjaTrader (`Connected`, `Discon
 La cuenta maestra inicial se lee de `Documents\NinjaTrader 8\TradePilotX\config.json` (`MasterAccount`) y se puede cambiar desde la consola (v1.2+).
 
 ## Historial
+
+- **2.6**: **el fill del maestro con la copia aún viva ya no manda nada a mercado**. El 17/9 el stop de la maestra llenaba
+  1 de 2 y el addon 2.3 "reducía la copia y mandaba 1 a mercado para seguirle" (161 veces en la sesión) justo cuando el
+  stop de la seguidora estaba saltando al mismo precio: se ejecutaban las dos cosas, la seguidora quedaba invertida y el
+  engine la deshacía con un `FIX-*`; el prop firm rechazaba además esas órdenes extra por cantidad máxima (Rule #4304).
+  Ahora la copia no se toca: el engine le dice hasta dónde debe llegar (`master_filled_scaled`, lo ejecutado de esa orden
+  del maestro escalado) y se le dan `ReconcileGraceMs` (750 por defecto, `config.json`) para ejecutarse sola. Solo si sigue
+  viva sin llegar, se cancela y la diferencia va a mercado al confirmarse la cancelación (`OK|EXECUTION_WAIT`; la
+  protección contra doble salida de 2.4 sigue detrás). Además, un stop recreado por `ORDER_MODIFIED` nunca cubre más de
+  lo que las otras copias vivas del mismo tipo dejan sin cubrir (se recreó un tercer stop de 2 con posición 4 y dos stops
+  de 2 vivos), y los instrumentos se cachean por símbolo para enviar más rápido.
 
 - **2.5**: **copias en lote y en paralelo**. `ORDERS|json␟json…` (separador `\x1f`) trae todas las copias de un evento en
   una sola petición y el addon las envía a la vez, una tarea por cuenta (`ParallelSubmit` en `config.json`, por defecto

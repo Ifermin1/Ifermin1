@@ -1,3 +1,4 @@
+import asyncio
 import time
 import uuid
 from collections import OrderedDict
@@ -24,6 +25,11 @@ LIFECYCLE_STATES = {"INITIALIZED", "SUBMITTED", "ACCEPTED", "CHANGEPENDING", "CH
 
 REJECTED_STATES = {"REJECTED", "ERROR"}
 
+# El bróker rechaza TODO lo que se le manda a la cuenta: el prop firm la ha bloqueado (17/9: cuatro cuentas APEX pasaron a
+# "Order can be placed by administrators only" a media sesión y se les siguió mandando cada copia). Se desactiva sola.
+ACCOUNT_LOCKED_PATTERNS = ("administrators only", "account is disabled", "account disabled", "account has been disabled",
+                           "trading is disabled", "trading disabled", "account is locked", "account locked")
+
 # El addon publica desde varios hilos de NinjaTrader: un seq puede llegar unos mensajes tarde sin que se haya perdido nada
 # (16/9 14:11: 15957 -> 15959 -> 15958 se contó como reinicio). Un reinicio real vuelve a empezar desde 1.
 SEQ_REORDER_WINDOW = 20      # seq hasta N por detrás del último: fuera de orden, no reinicio
@@ -35,6 +41,7 @@ ADDON_NOTES = {
     "EXECUTION_RECONCILE": "la copia seguía viva: cancelada y el resto a mercado",
     "EXECUTION_RECON": "la copia no se había ejecutado: a mercado",
     "EXECUTION_PARTIAL": "fill parcial del maestro: copia reducida y diferencia a mercado",
+    "EXECUTION_WAIT": "la copia sigue viva: se ejecuta sola; si no llega en el plazo, se cancela y el resto va a mercado",
     "ORDER_MODIFIED_RECREATED": "no había copia viva: stop/TP recreado",
 }
 
@@ -386,9 +393,14 @@ class ReplicationService:
     def _order_kwargs(self, task: ReplicationTask, rule: ReplicationRule | None, symbol: str) -> tuple[dict, dict | None]:
         ev = task.master_event
         entry = self._entry_params(rule, ev, symbol) if rule else None
+        # addon >= 2.6: si la seguidora tiene viva su propia copia de esa orden (stop/TP), debe llegar a lo ejecutado del
+        # maestro escalado; el addon la deja ejecutarse sola y solo reconcilia lo que falte pasado el plazo
+        owed_total = (rule.scale(self._master_filled.get(ev.order_id, ev.quantity))
+                      if rule is not None and ev.msg_type == "EXECUTION" else None)
         return ({"target_account": task.target_account, "action": ev.action, "symbol": symbol, "quantity": task.scaled_quantity,
                  "order_type": ev.order_type, "master_order_id": task.master_order_id, "msg_type": ev.msg_type,
-                 "price": ev.price, "limit_price": ev.limit_price, "stop_price": ev.stop_price, "entry": entry}, entry)
+                 "price": ev.price, "limit_price": ev.limit_price, "stop_price": ev.stop_price, "entry": entry,
+                 "master_filled_scaled": owed_total}, entry)
 
     async def _execute(self, task: ReplicationTask, rule: ReplicationRule | None = None, symbol: str | None = None) -> None:
         await self._execute_many([(task, rule, symbol or task.master_event.symbol)])
@@ -684,6 +696,8 @@ class ReplicationService:
         if state in REJECTED_STATES:
             self.stats["rejected"] += 1
             self.audit.log("FOLLOWER_REJECTED", f"{account}: {desc} {error} {native}".strip(), target=account, details=details)
+            if self._lock_account_if_needed(account, f"{error} {native}".strip()):
+                return
             order_type = str(data.get("order_type", "")).upper().replace("_", "")
             if order_type in STOP_TYPES and self.close_on_stop_reject:
                 self.bus.publish_nowait("risk.naked", {"account": account, "reason": f"stop rechazado: {error} {native}".strip()})
@@ -697,6 +711,24 @@ class ReplicationService:
             logger.debug(f"{account}: {desc}")       # tránsito: queda en el diario, no en la auditoría
         else:
             self.audit.log("FOLLOWER_STATUS", f"{account}: {desc}", target=account, details=details)
+
+    def _lock_account_if_needed(self, account: str, reason: str) -> bool:
+        """El bróker rechaza todo lo de esa cuenta (bloqueada por el prop firm): se desactiva para no seguir mandándole copias
+        (cada una era un rechazo más, y un cierre por stop rechazado tampoco iba a entrar). Devuelve True si se bloqueó."""
+        low = reason.lower()
+        if not any(p in low for p in ACCOUNT_LOCKED_PATTERNS) or self.accounts is None:
+            return False
+        snap = self.accounts.find(account)
+        if snap is None or not snap.enabled:
+            return True
+        self.audit.log("ACCOUNT_LOCKED", f"{account}: el bróker rechaza todas sus órdenes ({reason}): el prop firm la ha bloqueado. "
+                       "Se desactiva para no seguir mandándole copias. Revísala con el prop firm y actívala de nuevo en Cuentas "
+                       "cuando vuelva a aceptar órdenes", target=account, details={"reason": reason})
+        try:
+            asyncio.get_running_loop().create_task(self.accounts.set_settings(snap.account_id, enabled=False))
+        except RuntimeError:
+            snap.enabled, snap.enabled_source = False, "user"
+        return True
 
     async def _on_position(self, data: dict) -> None:
         if self.accounts is None:

@@ -131,7 +131,8 @@ class MockBridge(BrokerBridge):
         return await super().send_orders(orders)
 
     async def send_order(self, target_account, action, symbol, quantity, order_type, master_order_id,
-                         msg_type="EXECUTION", price=0.0, limit_price=0.0, stop_price=0.0, entry=None) -> str | None:
+                         msg_type="EXECUTION", price=0.0, limit_price=0.0, stop_price=0.0, entry=None,
+                         master_filled_scaled=None) -> str | None:
         reply = self.next_replies.pop(0) if self.next_replies else "OK|" + msg_type
         if reply.startswith("IGNORED|"):
             logger.info(f"[mock] orden -> {target_account} {action} {quantity} {symbol} ignorada: {reply[8:]}")
@@ -139,7 +140,7 @@ class MockBridge(BrokerBridge):
         self.sent_orders.append({
             "account": target_account, "action": action, "symbol": symbol, "quantity": quantity,
             "order_type": order_type, "master_order_id": master_order_id, "msg_type": msg_type, "price": price,
-            "limit_price": limit_price, "stop_price": stop_price, **(entry or {}),
+            "limit_price": limit_price, "stop_price": stop_price, "master_filled_scaled": master_filled_scaled, **(entry or {}),
         })
         self.health.last_msg_out = datetime.now()
         if self.fill_orders and msg_type == "EXECUTION":

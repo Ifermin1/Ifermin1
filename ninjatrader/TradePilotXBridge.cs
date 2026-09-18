@@ -17,6 +17,10 @@
 //   v2.0: EXECUTION del master lleva is_exit / is_entry (Execution.IsExit / IsEntry del bróker).
 //   v2.3: un fill PARCIAL del master ajusta la copia en proporción (no la cancela entera); ORDER_MODIFIED sin copia viva
 //         recrea el stop/TP si el follower aún tiene posición que proteger; EXECUTION lleva order_filled / order_quantity.
+//   v2.6: el fill del master con la copia (stop/TP) aún viva NO manda nada a mercado: la copia salta sola en el mismo
+//         instante (mismo precio). Se le da ReconcileGraceMs y, sólo si sigue viva sin llegar a lo ejecutado del master
+//         (master_filled_scaled), se cancela y el resto va a mercado al confirmarse la cancelación. Un stop recreado por
+//         ORDER_MODIFIED nunca cubre más de lo que las otras copias vivas dejan sin cubrir.
 //                                  "ORDER|{json}"     -> "OK|tipo" / "IGNORED|motivo" / "ERROR|motivo" (v1.9: orden con confirmación;
 //                                                        mismo JSON que por 5556, que sigue aceptándose para engines antiguos)
 //   Todos los mensajes publicados llevan "seq" creciente para detectar pérdidas.
@@ -49,7 +53,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 {
     public class TradePilotXBridge : AddOnBase
     {
-        private const string BridgeVersion = "2.5";
+        private const string BridgeVersion = "2.6";
 
         // ---- configuración ------------------------------------------------
         private class BridgeConfig
@@ -72,6 +76,10 @@ namespace NinjaTrader.NinjaScript.AddOns
             // v2.5: imprimir en el Output también los estados de tránsito (Initialized, Submitted, Accepted, ChangePending...).
             // Imprimirlos línea a línea frenaba el envío; siguen publicándose al engine.
             public bool VerboseOutput = false;
+            // v2.6: ms que se le dan a una copia (stop/TP) viva para ejecutarse sola tras el fill del master antes de
+            // cancelarla y mandar el resto a mercado. 17/9: los stops de las seguidoras saltaban a la vez que el del
+            // master; mandar 1 a mercado "para seguirle" ejecutaba las dos cosas y la cuenta quedaba invertida.
+            public int ReconcileGraceMs = 750;
         }
 
         private static readonly string ConfigDir = Path.Combine(Core.Globals.UserDataDir, "TradePilotX");
@@ -102,8 +110,14 @@ namespace NinjaTrader.NinjaScript.AddOns
         private readonly ConcurrentDictionary<string, bool> pendingPublished = new ConcurrentDictionary<string, bool>();
         // Cantidad ya copiada a mercado para cubrir lo que la orden del follower NO ejecutó (rechazo/cancelación)
         private readonly ConcurrentDictionary<string, int> reconciledQty = new ConcurrentDictionary<string, int>();
-        // v2.0: fills del master pendientes de reconciliar mientras se cancela la copia viva del follower (clave -> qty)
-        private readonly ConcurrentDictionary<string, int> reconcileRequested = new ConcurrentDictionary<string, int>();
+        // v2.6 (sustituye al reconcile inmediato de v2.0): clave -> ejecutado acumulado que la copia debe alcanzar (lo ejecutado
+        // del master, escalado por el engine). Mientras la copia siga viva se espera ReconcileGraceMs a que lo alcance sola;
+        // si no, se cancela y la diferencia va a mercado al confirmarse la cancelación (ReconcileAfterCancel).
+        private readonly ConcurrentDictionary<string, int> reconcileTarget = new ConcurrentDictionary<string, int>();
+        private class Deferred { public Account Account; public Order Order; public DateTime Deadline; public string MasterId; }
+        private readonly ConcurrentDictionary<string, Deferred> deferredReconciles = new ConcurrentDictionary<string, Deferred>();
+        // v2.6: Instrument.GetInstrument por cada copia costaba tiempo con 11 seguidoras: caché por símbolo
+        private readonly ConcurrentDictionary<string, Instrument> instrumentCache = new ConcurrentDictionary<string, Instrument>();
         // v2.1: copias canceladas por un FLATTEN: un fill posterior del master en esa orden no debe reabrir posición
         private readonly ConcurrentDictionary<string, bool> flattenedKeys = new ConcurrentDictionary<string, bool>();
         // v2.4: doble salida. Cuando una copia parcialmente ejecutada se cancela para mandar el resto a mercado, NinjaTrader
@@ -188,7 +202,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                     };
 
                     priceTimer = new NetMQTimer(TimeSpan.FromMilliseconds(Math.Max(50, cfg.PriceThrottleMs)));
-                    priceTimer.Elapsed += (s, e) => { FlushPrices(); CheckEntryTimeouts(); SweepPhantoms(); };
+                    priceTimer.Elapsed += (s, e) => { FlushPrices(); CheckEntryTimeouts(); CheckDeferredReconciles(); SweepPhantoms(); };
                     heartbeatTimer = new NetMQTimer(TimeSpan.FromMilliseconds(Math.Max(1000, cfg.HeartbeatMs)));
                     heartbeatTimer.Elapsed += (s, e) =>
                     {
@@ -207,8 +221,8 @@ namespace NinjaTrader.NinjaScript.AddOns
                     foreach (string sym in cfg.PriceInstruments)
                         EnsurePriceFeed(sym);
 
-                    Info(string.Format("Bridge v{0} online. master={1} pub={2} sub={3} sync={4} (v2.5: copias en lote y en paralelo, Output asíncrono)",
-                        BridgeVersion, cfg.MasterAccount, cfg.MasterPort, cfg.FollowerPort, cfg.SyncPort));
+                    Info(string.Format("Bridge v{0} online. master={1} pub={2} sub={3} sync={4} (v2.6: la copia viva se ejecuta sola, sin órdenes extra a mercado; gracia {5} ms)",
+                        BridgeVersion, cfg.MasterAccount, cfg.MasterPort, cfg.FollowerPort, cfg.SyncPort, cfg.ReconcileGraceMs));
                 }
                 catch (Exception ex)
                 {
@@ -602,46 +616,28 @@ namespace NinjaTrader.NinjaScript.AddOns
                         {
                             if (IsLive(existing))
                             {
-                                // v2.3: si el fill del master es PARCIAL (su orden sigue viva con resto), la copia NO se cancela:
-                                // se reduce a la misma proporción y sólo la diferencia se cierra a mercado. Incidente 16/9 13:28:
-                                // el stop del master ejecutó 1 de 2, la copia entera se canceló y el follower quedó sin protección.
-                                Order mo = FindMasterOrder(masterOrderId);
-                                if (mo != null && IsLive(mo) && mo.Filled < mo.Quantity)
+                                // v2.6: la copia (stop/TP al mismo precio que la del master) está saltando en este mismo instante:
+                                // el 17/9 mandar "1 a mercado para seguirle" o cancelarla ejecutaba las dos cosas (161 veces) y las
+                                // seguidoras quedaban invertidas, con un FIX detrás. Ahora NO se toca: se anota hasta dónde debe llegar
+                                // (lo ejecutado del master, escalado) y se le dan ReconcileGraceMs. Sólo si sigue viva sin llegar se
+                                // cancela y la diferencia va a mercado al confirmarse la cancelación (nunca antes: sin doble salida).
+                                int target = (int)NumOr(m, "master_filled_scaled", existing.Filled + qty);
+                                target = Math.Min(target, existing.Quantity);
+                                int prevTarget;
+                                if (reconcileTarget.TryGetValue(key, out prevTarget) && prevTarget > target) target = prevTarget;
+                                if (existing.Filled >= target)
                                 {
-                                    int masterRemaining = mo.Quantity - mo.Filled;
-                                    int desiredRemaining = (int)Math.Round((double)masterRemaining * existing.Quantity / Math.Max(1, mo.Quantity));
-                                    int copyRemaining = existing.Quantity - existing.Filled;
-                                    int shortfall = copyRemaining - desiredRemaining;
-                                    if (shortfall <= 0)
-                                    {
-                                        Info("Fill parcial del master en " + masterOrderId + " (" + mo.Filled + "/" + mo.Quantity + "): la copia va igual o por delante ("
-                                            + existing.Filled + "/" + existing.Quantity + "), nada que hacer");
-                                        return "IGNORED|fill parcial del master: la copia ya ejecutó lo suyo";
-                                    }
-                                    if (desiredRemaining > 0)
-                                    {
-                                        try
-                                        {
-                                            existing.QuantityChanged = existing.Filled + desiredRemaining;
-                                            existing.LimitPriceChanged = existing.LimitPrice;
-                                            existing.StopPriceChanged = existing.StopPrice;
-                                            account.Change(new[] { existing });
-                                        }
-                                        catch (Exception cx) { Warn("No se pudo reducir la copia " + key + ": " + cx.Message); }
-                                        Warn(string.Format("Fill parcial del master en {0} ({1}/{2}): copia reducida a {3} y {4} a mercado para seguirle",
-                                            masterOrderId, mo.Filled, mo.Quantity, existing.Filled + desiredRemaining, shortfall));
-                                        SubmitNew(account, symbol, Get(m, "action"), OrderType.Market, shortfall, 0, 0, key + "#part" + mo.Filled, masterOrderId);
-                                        return "OK|EXECUTION_PARTIAL";
-                                    }
+                                    Info("Fill del master en " + masterOrderId + ": la copia de " + accountName + " ya lleva " + existing.Filled + "/" + existing.Quantity
+                                        + " (debía llegar a " + target + "), nada que hacer");
+                                    return "IGNORED|fill del master: la copia ya ejecutó lo suyo";
                                 }
-                                // v2.0: el master ya ejecutó (su stop/TP saltó) pero la copia del follower sigue viva (otro precio,
-                                // cola, cambio rechazado...). Cancelamos la copia y, cuando el bróker confirme la cancelación,
-                                // cerramos a mercado lo que quedó sin ejecutar (ReconcileAfterCancel). Nunca antes: así no hay doble salida.
-                                reconcileRequested.AddOrUpdate(key, qty, (k, v) => v + qty);
-                                try { account.Cancel(new[] { existing }); }
-                                catch (Exception cx) { Warn("No se pudo cancelar la copia viva " + key + ": " + cx.Message); }
-                                Info("Fill del master en " + masterOrderId + " con la copia del follower aún viva: cancelando y cerrando a mercado lo pendiente");
-                                return "OK|EXECUTION_RECONCILE";
+                                reconcileTarget[key] = target;
+                                if (!deferredReconciles.ContainsKey(key))
+                                    deferredReconciles[key] = new Deferred { Account = account, Order = existing, MasterId = masterOrderId,
+                                        Deadline = DateTime.Now.AddMilliseconds(Math.Max(0, cfg.ReconcileGraceMs)) };
+                                Info(string.Format("Fill del master en {0}: la copia de {1} sigue viva ({2}/{3}, estado {4}); debe llegar a {5}. Se le dan {6} ms para ejecutarse sola",
+                                    masterOrderId, accountName, existing.Filled, existing.Quantity, existing.OrderState, target, cfg.ReconcileGraceMs));
+                                return "OK|EXECUTION_WAIT";
                             }
                             if (flattenedKeys.ContainsKey(key))
                             {
@@ -671,6 +667,8 @@ namespace NinjaTrader.NinjaScript.AddOns
                             double limit = NumOr(m, "limit_price", type == OrderType.Limit || type == OrderType.StopLimit ? price : 0);
                             double stop = NumOr(m, "stop_price", type == OrderType.StopMarket || type == OrderType.StopLimit ? price : 0);
                             if (type == OrderType.Market) type = OrderType.Limit;
+                            // Cuánto proteger lo decide el engine (libro de exposición, que cuenta las entradas en vuelo): aquí la
+                            // posición del bróker puede ir por detrás del fill de la entrada y recortar un stop legítimo.
                             pendingCopies[key] = true;
                             SubmitNew(account, symbol, Get(m, "action"), type, qty, limit, stop, key, masterOrderId);
                         }
@@ -695,8 +693,17 @@ namespace NinjaTrader.NinjaScript.AddOns
                             double rstop = NumOr(m, "stop_price", rtype == OrderType.StopMarket || rtype == OrderType.StopLimit ? price : 0);
                             if (rtype == OrderType.Market) rtype = OrderType.Limit;
                             int rqty = Math.Min(qty, protectable);
+                            // v2.6: ni por más de lo que las otras copias vivas del mismo tipo dejan sin cubrir (17/9: se recreó un tercer
+                            // stop de 2 con posición 4 y dos stops de 2 ya vivos)
+                            int covered = LiveCopyCover(account, symbol, selling, rtype == OrderType.StopMarket || rtype == OrderType.StopLimit, masterOrderId);
+                            if (rqty > protectable - covered) rqty = protectable - covered;
+                            if (rqty <= 0)
+                            {
+                                Warn("ORDER_MODIFIED sin copia viva para " + key + ": la posición " + pos + " ya está cubierta por otras copias vivas (" + covered + "): no se recrea");
+                                return "IGNORED|posición ya cubierta por otras copias vivas";
+                            }
                             pendingCopies[key] = true;
-                            Warn("ORDER_MODIFIED sin copia viva para " + key + ": se recrea " + rqty + " (posición " + pos + ")");
+                            Warn("ORDER_MODIFIED sin copia viva para " + key + ": se recrea " + rqty + " (posición " + pos + ", otras copias vivas " + covered + ")");
                             SubmitNew(account, symbol, Get(m, "action"), rtype, rqty, rlimit, rstop, key, masterOrderId);
                             return "OK|ORDER_MODIFIED_RECREATED";
                         }
@@ -728,9 +735,41 @@ namespace NinjaTrader.NinjaScript.AddOns
             catch (Exception ex) { Error("OnFollowerMessage: " + ex.Message + " | " + raw); return "ERROR|" + ex.Message; }
         }
 
+        private Instrument GetInstrumentCached(string symbol)
+        {
+            Instrument i;
+            if (instrumentCache.TryGetValue(symbol, out i)) return i;
+            i = Instrument.GetInstrument(symbol);
+            if (i != null) instrumentCache[symbol] = i;
+            return i;
+        }
+
+        /// <summary>v2.6: contratos sin ejecutar de las copias TPX vivas de la cuenta en ese símbolo que cierran en la misma
+        /// dirección y son del mismo tipo (stop o límite), sin contar la de `excludeMasterId`.</summary>
+        private int LiveCopyCover(Account account, string symbol, bool selling, bool stopKind, string excludeMasterId)
+        {
+            int total = 0;
+            try
+            {
+                List<Order> orders;
+                lock (account.Orders) orders = account.Orders.Where(IsLive).ToList();
+                foreach (Order o in orders)
+                {
+                    if (!(o.Name ?? "").StartsWith("TPX ") || o.Instrument == null || o.Instrument.FullName != symbol) continue;
+                    if (o.OrderType == OrderType.Market || MasterIdFromName(o.Name) == excludeMasterId) continue;
+                    bool oSelling = o.OrderAction == OrderAction.Sell || o.OrderAction == OrderAction.SellShort;
+                    bool oStop = o.OrderType == OrderType.StopMarket || o.OrderType == OrderType.StopLimit;
+                    if (oSelling != selling || oStop != stopKind) continue;
+                    total += Math.Max(0, o.Quantity - o.Filled);
+                }
+            }
+            catch { }
+            return total;
+        }
+
         private void SubmitNew(Account account, string symbol, string action, OrderType type, int qty, double limit, double stop, string key, string masterOrderId)
         {
-            Instrument instrument = Instrument.GetInstrument(symbol);
+            Instrument instrument = GetInstrumentCached(symbol);
             if (instrument == null) { Warn("Instrumento desconocido: " + symbol); return; }
             if (qty <= 0) { Warn("Cantidad inválida para " + key); return; }
             AttachFollower(account);
@@ -746,7 +785,7 @@ namespace NinjaTrader.NinjaScript.AddOns
         private void SubmitLimitEntry(Account account, string symbol, string action, int qty, double refPrice, int ticks,
             int timeoutS, string fallback, string key, string masterOrderId)
         {
-            Instrument instrument = Instrument.GetInstrument(symbol);
+            Instrument instrument = GetInstrumentCached(symbol);
             if (instrument == null) { Warn("Instrumento desconocido: " + symbol); return; }
             if (qty <= 0) { Warn("Cantidad inválida para " + key); return; }
             OrderAction oa = ParseAction(action);
@@ -891,23 +930,57 @@ namespace NinjaTrader.NinjaScript.AddOns
             catch (Exception ex) { Error("OnFollowerOrder: " + ex.Message); }
         }
 
-        /// <summary>v2.0: la copia viva se canceló porque el master ya ejecutó esa orden: cerrar a mercado lo que quedó
-        /// sin ejecutar, nunca más de lo pedido ni de lo que faltaba. Si la copia se ejecutó antes de cancelarse, nada.</summary>
+        /// <summary>v2.6: la copia de un stop/TP que el master ya ejecutó sigue viva pasado el plazo: se cancela. Cuando el bróker
+        /// confirme la cancelación, ReconcileAfterCancel cierra a mercado lo que falte. Si mientras tanto ejecutó sola, nada.</summary>
+        private void CheckDeferredReconciles()
+        {
+            if (deferredReconciles.IsEmpty) return;
+            DateTime now = DateTime.Now;
+            foreach (var kv in deferredReconciles.ToList())
+            {
+                Deferred d = kv.Value;
+                Order o = d.Order;
+                Deferred gone;
+                int target;
+                reconcileTarget.TryGetValue(kv.Key, out target);
+                if (!IsLive(o))
+                {
+                    deferredReconciles.TryRemove(kv.Key, out gone);   // estado final: OnFollowerOrder ya reconcilió (o lo hará)
+                    continue;
+                }
+                if (o.Filled >= target)
+                {
+                    deferredReconciles.TryRemove(kv.Key, out gone);
+                    reconcileTarget.TryRemove(kv.Key, out target);
+                    Info("Copia " + kv.Key + " ejecutó sola " + o.Filled + "/" + o.Quantity + " tras el fill del master: nada que reconciliar");
+                    continue;
+                }
+                if (now < d.Deadline) continue;
+                deferredReconciles.TryRemove(kv.Key, out gone);
+                Warn(string.Format("Fill del master en {0}: la copia de {1} sigue viva tras {2} ms con {3}/{4} (debía llegar a {5}): cancelando y el resto a mercado al confirmarse",
+                    d.MasterId, d.Account.Name, cfg.ReconcileGraceMs, o.Filled, o.Quantity, target));
+                try { d.Account.Cancel(new[] { o }); }
+                catch (Exception cx) { Warn("No se pudo cancelar la copia viva " + kv.Key + ": " + cx.Message); }
+            }
+        }
+
+        /// <summary>v2.0/v2.6: la copia llegó a un estado final con un objetivo pendiente (el master ejecutó esa orden): cerrar a
+        /// mercado lo que falte hasta el objetivo, nunca más de lo que la copia tenía. Si la copia se ejecutó sola, nada.</summary>
         private void ReconcileAfterCancel(Order order, string accountName)
         {
             string masterId = MasterIdFromName(order.Name);
             string key = accountName + "|" + masterId;
-            int requested;
-            if (!reconcileRequested.TryRemove(key, out requested)) return;
+            int target;
+            if (!reconcileTarget.TryRemove(key, out target)) return;
+            Deferred gone; deferredReconciles.TryRemove(key, out gone);
             if (flattenedKeys.ContainsKey(key)) { Info("Copia " + key + " cancelada por cierre de emergencia: nada que reconciliar"); return; }
-            if (order.OrderState == OrderState.Filled) { Info("Copia " + key + " se ejecutó antes de cancelarse: nada que reconciliar"); return; }
-            int remaining = order.Quantity - order.Filled;
+            if (order.OrderState == OrderState.Filled) { Info("Copia " + key + " se ejecutó sola: nada que reconciliar"); return; }
             int already = reconciledQty.GetOrAdd(key, 0);
-            int toSend = Math.Min(requested, remaining - already);
+            int toSend = Math.Min(target, order.Quantity) - order.Filled - already;
             if (toSend <= 0) return;
             reconciledQty[key] = already + toSend;
-            Warn(string.Format("Copia {0} cancelada con {1}/{2} ejecutados: cerrando {3} a mercado para seguir al master",
-                masterId, order.Filled, order.Quantity, toSend));
+            Warn(string.Format("Copia {0} quedó {1} con {2}/{3} ejecutados (debía llegar a {4}): cerrando {5} a mercado para seguir al master",
+                masterId, order.OrderState, order.Filled, order.Quantity, target, toSend));
             SubmitNew(order.Account, order.Instrument.FullName, ActionName(order.OrderAction), OrderType.Market, toSend, 0, 0,
                 key + "#recon" + already, masterId);
             // v2.4: si la original ejecuta más después de "cancelarse", habrá que deshacerlo (ver SettleExcess)
@@ -1074,7 +1147,8 @@ namespace NinjaTrader.NinjaScript.AddOns
         private string Flatten(string accountName)
         {
             // un cierre de emergencia manda: nada pendiente de reconciliar debe reabrir posición después
-            foreach (string k in reconcileRequested.Keys) { int d; if (k.StartsWith(accountName + "|")) reconcileRequested.TryRemove(k, out d); }
+            foreach (string k in reconcileTarget.Keys) { int d; if (k.StartsWith(accountName + "|")) reconcileTarget.TryRemove(k, out d); }
+            foreach (string k in deferredReconciles.Keys) { Deferred d; if (k.StartsWith(accountName + "|")) deferredReconciles.TryRemove(k, out d); }
             Account account;
             lock (Account.All) account = Account.All.FirstOrDefault(a => a.Name == accountName);
             if (account == null) return "ERROR|cuenta desconocida: " + accountName;
@@ -1419,6 +1493,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                     c.AccountFilter = ParseList(Get(m, "AccountFilter"));
                 if (m.ContainsKey("ParallelSubmit")) c.ParallelSubmit = Get(m, "ParallelSubmit").ToLowerInvariant() != "false";
                 if (m.ContainsKey("VerboseOutput")) c.VerboseOutput = Get(m, "VerboseOutput").ToLowerInvariant() == "true";
+                if (m.ContainsKey("ReconcileGraceMs")) c.ReconcileGraceMs = (int)Num(m, "ReconcileGraceMs");
                 Info("Config cargada: " + ConfigPath);
             }
             catch (Exception ex) { Error("No se pudo leer config.json, usando defaults: " + ex.Message); }
@@ -1460,7 +1535,8 @@ namespace NinjaTrader.NinjaScript.AddOns
                 + "  \"PriceInstruments\": " + JsonList(c.PriceInstruments) + ",\n"
                 + "  \"AccountFilter\": " + JsonList(c.AccountFilter) + ",\n"
                 + "  \"ParallelSubmit\": " + (c.ParallelSubmit ? "true" : "false") + ",\n"
-                + "  \"VerboseOutput\": " + (c.VerboseOutput ? "true" : "false") + "\n"
+                + "  \"VerboseOutput\": " + (c.VerboseOutput ? "true" : "false") + ",\n"
+                + "  \"ReconcileGraceMs\": " + c.ReconcileGraceMs + "\n"
                 + "}\n";
         }
 

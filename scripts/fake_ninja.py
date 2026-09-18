@@ -109,12 +109,13 @@ def handle_order(raw: str, via: str) -> str:
         send({**ORDERS[fid], "msg_type": "ORDER_STATUS", "filled": 0, "price": 0, "state": "Working", "error": "", "native_error": ""})
         return "OK|ORDER_PENDING"
     if o["msg_type"] == "EXECUTION" and live:
-        # el master ejecutó esa orden: la copia viva se ejecuta también (cancelar + mercado, como el addon v2.0)
+        # el master ejecutó esa orden: la copia viva salta sola al mismo precio (addon v2.6: no se manda nada a mercado;
+        # si no llegara a master_filled_scaled en el plazo, el addon la cancelaría y mandaría el resto a mercado)
         w = ORDERS.pop(live)
         send({**w, "msg_type": "ORDER_STATUS", "filled": w["quantity"], "price": price, "state": "Filled", "error": "", "native_error": "", "timestamp": now()})
         send({**w, "msg_type": "EXECUTION", "price": price, "state": "Filled", "execution_id": "E" + live, "timestamp": now()})
         apply_fill(w["account"], w["action"], w["symbol"], w["quantity"])
-        return "OK|EXECUTION_RECONCILE"
+        return "OK|EXECUTION_WAIT"
     if reject:
         send({**base, "msg_type": "ORDER_STATUS", "filled": 0, "price": 0, "limit_price": 0, "stop_price": 0,
               "state": "Rejected", "error": "OrderRejected", "native_error": "Insufficient margin"})
@@ -187,7 +188,7 @@ while True:
                 new = msg.split("|", 1)[1]
                 if new in ACCOUNTS or new in OFFLINE:
                     MASTER = new; print("MASTER CAMBIADA A", MASTER)
-                    send({"msg_type": "HEARTBEAT", "account": MASTER, "version": ("1.2" if "--old-addon" in sys.argv else "2.2"), "boot": BOOT, "timestamp": now()})
+                    send({"msg_type": "HEARTBEAT", "account": MASTER, "version": ("1.2" if "--old-addon" in sys.argv else "2.6"), "boot": BOOT, "timestamp": now()})
                     rep.send_string("OK|" + new)
                 else:
                     rep.send_string("ERROR|cuenta desconocida: " + new)
@@ -205,7 +206,7 @@ while True:
               "ask": round(price + 0.25, 2), "timestamp": now()})
         next_price = t + 0.25
     if t >= next_hb:
-        send({"msg_type": "HEARTBEAT", "account": MASTER, "version": ("1.2" if "--old-addon" in sys.argv else "2.2"), "boot": BOOT, "timestamp": now()}); next_hb = t + 5
+        send({"msg_type": "HEARTBEAT", "account": MASTER, "version": ("1.2" if "--old-addon" in sys.argv else "2.6"), "boot": BOOT, "timestamp": now()}); next_hb = t + 5
     if t >= next_emit and not manual:
         oid = uuid.uuid4().hex[:8]; action = random.choice(["BUY", "SELL"])
         send({"msg_type": "EXECUTION", "account": MASTER, "action": action, "symbol": SYMBOL, "quantity": 1,

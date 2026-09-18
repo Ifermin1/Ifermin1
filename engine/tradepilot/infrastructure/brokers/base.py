@@ -76,6 +76,7 @@ class BrokerBridge(ABC):
         limit_price: float = 0.0,
         stop_price: float = 0.0,
         entry: dict | None = None,
+        master_filled_scaled: int | None = None,
     ) -> str | None: ...
 
     async def send_orders(self, orders: list[dict]) -> list:
