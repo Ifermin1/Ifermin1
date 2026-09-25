@@ -74,6 +74,8 @@ class AccountService:
             if self.commissions is not None:
                 snap.contracts_today, snap.commissions_today = self.commissions.today(info.account_id)
             snap.net_pnl = round(snap.daily_pnl - snap.commissions_today, 2)
+            if self.performance is not None and snap.enabled:
+                self.performance.note_daily_pnl(info.account_id, snap.daily_pnl, self.now())
             snap.connected, snap.connection, snap.reported, snap.updated_at = info.connected, info.connection, True, now
             if self.store:
                 self.store.upsert_account_seen(info.account_id, info.balance, now.isoformat(), snap.enabled, info.connected)
@@ -145,6 +147,8 @@ class AccountService:
     def apply_positions(self, positions: list, now: datetime, as_of: float | None = None) -> None:
         """Snapshot completo de posiciones del bróker (GET_POSITIONS): sustituye lo que teníamos. `as_of` es el monotonic
         en que se pidió la foto: un fill posterior a ese instante no está reflejado en ella."""
+        if self.performance is not None:
+            self.performance.seed_open_positions(positions)
         by_acc: dict[str, list[PositionSnapshot]] = {}
         for p in positions:
             by_acc.setdefault(p.account_id, []).append(
@@ -158,6 +162,7 @@ class AccountService:
             self.on_positions_refreshed(None, as_of)
 
     audit = None                 # AuditService, lo inyecta el contenedor
+    performance = None           # PerformanceService (calendario), lo inyecta el contenedor
     _phantoms_seen: set = set()  # (cuenta, id de orden) ya avisadas
 
     def apply_orders(self, orders: list) -> None:

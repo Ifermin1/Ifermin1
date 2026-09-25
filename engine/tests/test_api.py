@@ -924,3 +924,17 @@ async def test_execution_quality_endpoint_and_entry_preset(client: AsyncClient, 
     assert r.status_code == 200 and r.json()[0]["entry_mode"] == "limit" and r.json()[0]["tolerance_ticks"] == 0
     r = await client.put("/api/rules/entry", json={"entry_mode": "bogus"})
     assert r.status_code == 422
+
+
+async def test_stats_month_endpoint(client: AsyncClient, container):
+    from datetime import datetime
+    p = container.performance
+    p.note_fill("Sim102", "NQ 12-26", "BUY", 1, 20000.0, datetime(2026, 9, 10, 10, 0))
+    p.note_fill("Sim102", "NQ 12-26", "SELL", 1, 20010.0, datetime(2026, 9, 10, 10, 5))
+    r = await client.get("/api/stats/month?month=2026-09")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["from"] == "2026-09-01" and body["days"][0]["day"] == "2026-09-10" and body["days"][0]["pnl"] == 200.0 and len(body["trades"]) == 1
+    assert (await client.get("/api/stats/month?month=2026-09&account=Sim999")).json()["days"] == []
+    assert (await client.get("/api/stats/month?month=2026-13")).status_code == 422
+    assert (await client.get("/api/stats/month")).status_code == 200

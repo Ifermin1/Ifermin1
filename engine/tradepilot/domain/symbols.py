@@ -8,6 +8,18 @@ TICK_SIZES: dict[str, float] = {
 }
 
 
+# Valor en dólares de un punto, para el P&L por operación calculado a partir de los fills (el del bróker manda en el día).
+POINT_VALUES: dict[str, float] = {
+    "ES": 50, "MES": 5, "NQ": 20, "MNQ": 2, "YM": 5, "MYM": 0.5, "RTY": 50, "M2K": 5, "CL": 1000, "MCL": 100, "QM": 500,
+    "GC": 100, "MGC": 10, "SI": 5000, "SIL": 1000, "NG": 10000, "QG": 2500, "ZB": 1000, "ZN": 1000, "ZF": 1000,
+    "ZC": 50, "ZS": 50, "ZW": 50, "6E": 125000, "6J": 12500000, "6B": 62500, "M6E": 12500, "BTC": 5, "MBT": 0.1,
+}
+
+
+def point_value(symbol: str) -> float:
+    return POINT_VALUES.get(symbol_root(symbol), 1.0)
+
+
 def symbol_root(symbol: str) -> str:
     return (symbol or "").split(" ")[0].upper()
 

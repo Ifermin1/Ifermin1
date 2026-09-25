@@ -36,7 +36,7 @@ button:disabled { opacity: .6; cursor: default; }
 .topbar-title { font-weight: 600; font-size: 16px; }
 .topbar-status { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .content { padding: 16px; padding-bottom: calc(76px + 58px + var(--sab)); }
-.tabbar { position: fixed; bottom: 0; left: 0; right: 0; display: grid; grid-template-columns: repeat(5, 1fr); background: var(--panel); border-top: 1px solid var(--line); padding-bottom: var(--sab); z-index: 5; }
+.tabbar { position: fixed; bottom: 0; left: 0; right: 0; display: grid; grid-template-columns: repeat(6, 1fr); background: var(--panel); border-top: 1px solid var(--line); padding-bottom: var(--sab); z-index: 5; }
 .tabbar button { background: none; border: none; border-radius: 0; padding: 8px 2px 6px; display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 11px; color: var(--muted); }
 .tabbar button.active { color: var(--accent); }
 .nav-icon { font-size: 18px; line-height: 1; }
@@ -285,6 +285,53 @@ table.chart-table td, table.chart-table th { font-size: 12px; white-space: nowra
 .exec-row .meter > i.near { background: var(--ok); }
 .exec-row .meter > i.far { background: var(--warn); }
 table.exec-table td.ok { color: var(--ok); } table.exec-table td.warn { color: var(--warn); } table.exec-table td.bad { color: var(--bad); }
+
+/* calendario de rendimiento */
+.perf-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: space-between; }
+.perf-bar .month-nav { display: flex; align-items: center; gap: 4px; }
+.perf-bar .month-nav b { min-width: 150px; text-align: center; text-transform: capitalize; font-size: 15px; }
+.perf-bar select { width: auto; padding: 8px 10px; }
+.kpis { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+@media (min-width: 640px) { .kpis { grid-template-columns: repeat(4, 1fr); } }
+@media (min-width: 1100px) { .kpis { grid-template-columns: repeat(8, 1fr); } }
+.kpi { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); min-width: 0; }
+.kpi span { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
+.kpi b { font-size: 18px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (min-width: 640px) { .kpi b { font-size: var(--stat); } }
+.kpi i { font-size: 11px; color: var(--muted); font-style: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+@media (min-width: 900px) { .cal.with-weeks { grid-template-columns: repeat(7, minmax(0, 1fr)) minmax(0, 1.1fr); } }
+.cal .dow { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; text-align: center; padding: 2px 0; }
+.cal .week-total { display: none; }
+@media (min-width: 900px) { .cal.with-weeks .week-total { display: flex; } }
+.day-cell { position: relative; display: flex; flex-direction: column; gap: 2px; min-height: 58px; padding: 4px 3px 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); cursor: pointer; text-align: left; font: inherit; color: inherit; min-width: 0; }
+@media (min-width: 900px) { .day-cell { min-height: 78px; padding: 8px; } }
+.day-cell.pad { background: transparent; border-color: transparent; cursor: default; }
+.day-cell.empty { cursor: default; }
+.day-cell .dnum { font-size: 11px; color: var(--muted); }
+.day-cell .dpnl { font-weight: 700; font-size: 10.5px; letter-spacing: -.3px; white-space: nowrap; overflow: hidden; text-overflow: clip; }
+.day-cell .dwin { display: none; }
+@media (min-width: 600px) { .day-cell .dwin { display: inline; } .day-cell .dpnl { font-size: 13px; letter-spacing: 0; font-variant-numeric: tabular-nums; } }
+@media (min-width: 900px) { .day-cell .dpnl { font-size: 15px; } }
+.day-cell .dmeta { font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.day-cell.g1 { background: rgba(52,211,153,.10); border-color: rgba(52,211,153,.25); } .day-cell.g2 { background: rgba(52,211,153,.20); border-color: rgba(52,211,153,.4); } .day-cell.g3 { background: rgba(52,211,153,.34); border-color: rgba(52,211,153,.6); }
+.day-cell.r1 { background: rgba(248,113,113,.10); border-color: rgba(248,113,113,.25); } .day-cell.r2 { background: rgba(248,113,113,.20); border-color: rgba(248,113,113,.4); } .day-cell.r3 { background: rgba(248,113,113,.34); border-color: rgba(248,113,113,.6); }
+.day-cell.g1 .dpnl, .day-cell.g2 .dpnl, .day-cell.g3 .dpnl { color: var(--ok); } .day-cell.r1 .dpnl, .day-cell.r2 .dpnl, .day-cell.r3 .dpnl { color: var(--bad); }
+.day-cell.today { outline: 1px dashed var(--accent); outline-offset: 1px; }
+.day-cell.selected { box-shadow: 0 0 0 2px var(--accent); }
+.day-cell.week-total { background: var(--panel); border-style: dashed; cursor: default; }
+.perf-chart .bar { fill: var(--ok); opacity: .8; } .perf-chart .bar.neg { fill: var(--bad); }
+.perf-chart .cum { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+.perf-chart .cum-dot { fill: var(--accent); stroke: var(--panel); stroke-width: 2; }
+.day-detail { display: grid; gap: 10px; }
+.day-detail .day-head { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.day-detail .day-head h3 { font-size: 14px; text-transform: capitalize; }
+.by-account { display: flex; gap: 6px; flex-wrap: wrap; }
+.by-account .chip b { margin-left: 4px; }
+table.trades td, table.trades th { font-size: 12px; white-space: nowrap; }
+.side-long { color: var(--ok); } .side-short { color: var(--bad); }
+.cal-legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 11px; color: var(--muted); align-items: center; }
+.cal-legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1px solid var(--line); vertical-align: -2px; margin-right: 3px; }
 
 /* auditoría: filtros */
 .filters { display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr); margin-bottom: 10px; }

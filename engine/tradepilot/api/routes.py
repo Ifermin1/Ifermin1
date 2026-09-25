@@ -130,6 +130,23 @@ def execution_quality(request: Request, limit: int = 40):
     return _c(request).replication.recent_executions(min(max(1, limit), 300))
 
 
+@router.get("/stats/month")
+def stats_month(request: Request, month: str | None = None, account: str | None = None):
+    """Calendario: días (P&L del bróker o suma de operaciones, comisiones, operaciones, aciertos) y operaciones del mes.
+    `month` = AAAA-MM (por defecto el actual); `account` vacío = todas las cuentas."""
+    from datetime import datetime
+    c = _c(request)
+    if c.performance is None:
+        raise HTTPException(503, "rendimiento no disponible")
+    try:
+        y, m = (int(x) for x in (month or datetime.now().strftime("%Y-%m")).split("-"))
+        if not 1 <= m <= 12:
+            raise ValueError
+    except ValueError:
+        raise HTTPException(422, "month debe ser AAAA-MM")
+    return c.performance.month(y, m, account or None)
+
+
 @router.delete("/rules/{rule_id}", status_code=204)
 def delete_rule(rule_id: str, request: Request):
     if not _c(request).replication.delete_rule(rule_id):

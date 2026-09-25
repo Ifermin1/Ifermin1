@@ -14,6 +14,7 @@ from tradepilot.services.audit_service import AuditService
 from tradepilot.services.replication_service import ReplicationService
 from tradepilot.services.risk_service import RiskService
 from tradepilot.services.commission_service import CommissionService
+from tradepilot.services.performance_service import PerformanceService
 from tradepilot.services.sync_service import SyncService
 
 
@@ -30,6 +31,7 @@ class Container:
     sync: SyncService
     journal: Journal
     commissions: CommissionService | None = None
+    performance: PerformanceService | None = None
 
     async def start(self) -> None:
         await self.bridge.start()
@@ -91,6 +93,14 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
     accounts.commissions = commissions
     replication.commissions = commissions
     risk.commissions = commissions
+    performance = PerformanceService(store, commissions, cfg.DRAWDOWN_EOD_TIME)
+    accounts.performance = performance
+    replication.performance = performance
+    if cfg.ENGINE_MODE != "ninja" and cfg.MOCK_DEMO_HISTORY and cfg.DB_PATH != ":memory:":
+        try:
+            performance.seed_demo(list(getattr(bridge, "accounts", {}).keys()) or ["Sim101", "Sim102"])
+        except Exception as exc:
+            logger.warning(f"No se pudo generar el histórico de demostración: {exc}")
     async def _after_sync() -> None:
         # independientes: un fallo en una vigilancia no debe apagar la otra
         for name, fn in (("sincronización", sync.check), ("riesgo", risk.check)):
@@ -99,4 +109,4 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
             except Exception as exc:
                 logger.exception(f"Error en vigilancia de {name}: {exc}")
     accounts.after_sync = _after_sync
-    return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal, commissions)
+    return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal, commissions, performance)

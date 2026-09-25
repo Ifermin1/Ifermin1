@@ -43,6 +43,14 @@ export type Execution = { order_id: string; at: string; symbol: string; action: 
                           quantity: number; price: number; tick: number; followers: ExecFollower[] };
 export type EntryPreset = { entry_mode: "market" | "limit"; tolerance_ticks?: number; entry_timeout_s?: number; entry_fallback?: "market" | "cancel" };
 
+/** Calendario de rendimiento: un día (P&L del bróker si lo hay, si no la suma de operaciones) y las operaciones cerradas. */
+export type DayStat = { day: string; pnl: number; net: number; pnl_broker: number | null; pnl_trades: number; trades: number; wins: number; losses: number;
+                        best: number; worst: number; commissions: number; contracts: number;
+                        accounts: Record<string, { pnl_trades: number; trades: number; pnl_broker: number | null }> };
+export type Trade = { id: number; account_id: string; day: string; symbol: string; side: "long" | "short"; quantity: number; entry_price: number;
+                      exit_price: number; pnl: number; commissions: number; opened_at: string | null; closed_at: string; fills: number };
+export type MonthStats = { from: string; to: string; days: DayStat[]; trades: Trade[]; accounts: string[] };
+
 export type Session = { baseUrl: string; token: string };
 
 const KEY = "tpx.session";
@@ -85,6 +93,8 @@ export function makeClient(s: Session) {
     risk: () => req<RiskState>("/api/risk"),
     pnl: (hours = 24) => req<PnlHistory>(`/api/pnl?hours=${hours}`),
     execution: (limit = 40) => req<Execution[]>(`/api/execution?limit=${limit}`),
+    /** Calendario: `month` = AAAA-MM; `account` vacío = todas. */
+    month: (month: string, account = "") => req<MonthStats>(`/api/stats/month?month=${month}${account ? `&account=${encodeURIComponent(account)}` : ""}`),
     /** Mismo modo de entrada para todas las seguidoras de la maestra actual. */
     setEntryForAll: (p: EntryPreset) => req<Rule[]>("/api/rules/entry", { method: "PUT", body: JSON.stringify(p) }),
     killSwitch: (active: boolean, reason?: string, flatten = false, flatten_master = true) =>

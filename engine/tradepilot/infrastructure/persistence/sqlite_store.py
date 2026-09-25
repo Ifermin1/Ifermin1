@@ -57,6 +57,15 @@ class SQLiteStore:
                     account_id TEXT PRIMARY KEY, peak_equity REAL, peak_equity_at TEXT,
                     peak_balance REAL, peak_balance_at TEXT
                 );
+                CREATE TABLE IF NOT EXISTS trades (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, account_id TEXT, day TEXT, symbol TEXT, side TEXT,
+                    quantity INTEGER, entry_price REAL, exit_price REAL, pnl REAL, commissions REAL,
+                    opened_at TEXT, closed_at TEXT, fills INTEGER
+                );
+                CREATE INDEX IF NOT EXISTS idx_trades_acc_day ON trades(account_id, day);
+                CREATE TABLE IF NOT EXISTS daily_stats (
+                    account_id TEXT, day TEXT, pnl REAL, updated_at TEXT, PRIMARY KEY (account_id, day)
+                );
                 """
             )
             # migraciones ligeras
@@ -225,6 +234,53 @@ class SQLiteStore:
         with self._lock, self._conn:
             self._conn.execute("INSERT OR REPLACE INTO commissions_daily (account_id, day, contracts, cost) VALUES (?, ?, ?, ?)",
                                (account_id, day, contracts, cost))
+
+    # ---- rendimiento: operaciones cerradas y P&L diario del bróker ----
+    def save_trade(self, t: dict) -> int:
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "INSERT INTO trades (account_id, day, symbol, side, quantity, entry_price, exit_price, pnl, commissions, opened_at, closed_at, fills) "
+                "VALUES (:account_id, :day, :symbol, :side, :quantity, :entry_price, :exit_price, :pnl, :commissions, :opened_at, :closed_at, :fills)", t)
+            return int(cur.lastrowid)
+
+    def get_trades(self, day_from: str, day_to: str, account_id: str | None = None) -> list[dict]:
+        sql = "SELECT * FROM trades WHERE day >= ? AND day <= ?"
+        args: list = [day_from, day_to]
+        if account_id:
+            sql += " AND account_id = ?"
+            args.append(account_id)
+        with self._lock:
+            rows = self._conn.execute(sql + " ORDER BY closed_at", args).fetchall()
+        return [dict(r) for r in rows]
+
+    def count_trades(self) -> int:
+        with self._lock:
+            return int(self._conn.execute("SELECT COUNT(*) FROM trades").fetchone()[0])
+
+    def save_daily_pnl(self, account_id: str, day: str, pnl: float, updated_at: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("INSERT OR REPLACE INTO daily_stats (account_id, day, pnl, updated_at) VALUES (?, ?, ?, ?)",
+                               (account_id, day, pnl, updated_at))
+
+    def get_daily_pnl(self, day_from: str, day_to: str, account_id: str | None = None) -> list[dict]:
+        sql = "SELECT account_id, day, pnl FROM daily_stats WHERE day >= ? AND day <= ?"
+        args: list = [day_from, day_to]
+        if account_id:
+            sql += " AND account_id = ?"
+            args.append(account_id)
+        with self._lock:
+            rows = self._conn.execute(sql + " ORDER BY day", args).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_commissions_range(self, day_from: str, day_to: str, account_id: str | None = None) -> list[dict]:
+        sql = "SELECT account_id, day, contracts, cost FROM commissions_daily WHERE day >= ? AND day <= ?"
+        args: list = [day_from, day_to]
+        if account_id:
+            sql += " AND account_id = ?"
+            args.append(account_id)
+        with self._lock:
+            rows = self._conn.execute(sql, args).fetchall()
+        return [dict(r) for r in rows]
 
     # ---- curva de P&L ----
     def add_pnl_samples(self, rows: list[tuple[str, str, float]]) -> None:

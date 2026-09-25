@@ -4,10 +4,11 @@ import { Badge } from "./ui";
 import { livePnl } from "./AccountPanel";
 import { signedMoney } from "../lib/format";
 
-export type Route = "dashboard" | "accounts" | "replicator" | "risk" | "audit";
+export type Route = "dashboard" | "performance" | "accounts" | "replicator" | "risk" | "audit";
 
 const NAV: { id: Route; label: string; icon: string }[] = [
   { id: "dashboard", label: "Inicio", icon: "▦" },
+  { id: "performance", label: "Calendario", icon: "▤" },
   { id: "accounts", label: "Cuentas", icon: "◎" },
   { id: "replicator", label: "Copiar", icon: "⧉" },
   { id: "risk", label: "Riesgo", icon: "⚠" },

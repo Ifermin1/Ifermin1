@@ -86,6 +86,14 @@ ese paso.
   **cuentas en juego**: maestra y seguidoras que copian, cada una con su P&L,
   posición (con distancia al mercado en puntos y dólares), **stops y take profits vivos** con su distancia al precio,
   último fill o rechazo y el botón *Cerrar*.
+- **Calendario** es el historial de rendimiento: un mes de un vistazo con el P&L de cada día (verde/rojo, más intenso cuanto
+  mayor), el número de operaciones y el % de ganadoras; totales por semana; indicadores del mes (P&L neto, días verdes y
+  rojos, operaciones y % ganadoras, factor de beneficio, media ganadora y perdedora, mejor y peor día, racha); toca un día
+  para ver sus operaciones cerradas (entrada, salida, lado, contratos, precios, P&L, comisiones, duración) y el reparto por
+  cuenta; abajo, la evolución del mes (barras diarias y acumulado). El selector *Cuenta* filtra una sola cuenta. El P&L
+  del día es el que reporta el bróker (NinjaTrader); las operaciones se reconstruyen con los fills que ve el engine
+  (maestra, seguidoras y manuales), así que solo hay operaciones desde que el engine está en marcha. La sesión que abre a
+  la hora de cierre (17:00 por defecto, `DRAWDOWN_EOD_TIME`) cuenta como el día siguiente, como en CME.
 - **Cuentas** muestra los mismos paneles con los mandos de copia (multiplicador, interruptor, ⚙ opciones de ejecución).
 - **Auditoría** filtra por texto, cuenta, familia (*Copia*, *Bloqueos*, *Errores*, *Riesgo*, *Sistema*) o *Solo importantes*;
   *Copiar* y *.txt* exportan exactamente lo filtrado.

@@ -16,6 +16,9 @@ from tradepilot.domain.symbols import tick_size
 from tradepilot.infrastructure.brokers.base import BrokerBridge
 
 SYMBOLS = ["NQ 12-26", "ES 12-26", "MNQ 12-26", "CL 11-26"]
+# Precio de partida por símbolo: el simulador lo mueve como un paseo aleatorio (antes cada operación salía entre 15.000 y
+# 21.000 al azar y el P&L por operación del calendario era disparatado)
+START_PRICES = {"NQ 12-26": 20000.0, "ES 12-26": 5600.0, "MNQ 12-26": 20000.0, "CL 11-26": 75.0}
 
 
 class MockBridge(BrokerBridge):
@@ -43,6 +46,7 @@ class MockBridge(BrokerBridge):
         # Modo demo: cada copia a mercado devuelve el fill de la seguidora (como el addon) con un deslizamiento de 0-2 ticks
         # y 80-300 ms de "bróker", para que la latencia, el deslizamiento y "Calidad de ejecución" se vean sin NinjaTrader.
         self.ack_fills = False
+        self._px: dict[str, float] = dict(START_PRICES)
         self.seq: int | None = None
         self._task: asyncio.Task | None = None
         self._running = False
@@ -71,13 +75,17 @@ class MockBridge(BrokerBridge):
 
     async def emit_master_event(self, **overrides) -> dict:
         master = next(iter(self.accounts))
+        symbol = overrides.get("symbol") or random.choice(SYMBOLS)
+        px = self._px.get(symbol, 20000.0)
+        px = round(px * (1 + random.gauss(0, 0.0006)), 2)
+        self._px[symbol] = px
         event = {
             "msg_type": "EXECUTION",
             "account": master,
             "action": random.choice(["BUY", "SELL"]),
-            "symbol": random.choice(SYMBOLS),
+            "symbol": symbol,
             "quantity": random.choice([1, 2, 3]),
-            "price": round(random.uniform(15_000, 21_000), 2),
+            "price": px,
             "order_type": "MARKET",
             "state": "FILLED",
             "order_id": uuid.uuid4().hex[:10],

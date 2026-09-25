@@ -6,6 +6,8 @@ export const ago = (iso: string | null | undefined) => {
   return s < 60 ? `hace ${s}s` : s < 3600 ? `hace ${Math.round(s / 60)}m` : `hace ${Math.round(s / 3600)}h`;
 };
 export const signedMoney = (n: number) => (n > 0 ? "+" : "") + money(n);
+/** Importe compacto para indicadores: sin céntimos a partir de 100 $ ("+15.478 $"), con signo. */
+export const moneyShort = (n: number) => (n > 0 ? "+" : n < 0 ? "−" : "") + Math.abs(n).toLocaleString("es-ES", { maximumFractionDigits: Math.abs(n) >= 100 ? 0 : 2, minimumFractionDigits: 0 }) + " $";
 export const pts = (n: number, decimals = 2) => (n > 0 ? "+" : "") + n.toFixed(decimals);
 /** Raíz del contrato: "MNQ 12-26" -> "MNQ". */
 export const root = (symbol: string) => symbol.split(" ")[0].toUpperCase();
