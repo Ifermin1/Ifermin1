@@ -4,10 +4,11 @@ import { ago, time } from "../lib/format";
 import { Card, Empty, Stat } from "../components/ui";
 import { AccountPanel } from "../components/AccountPanel";
 import { PnlChart } from "../components/PnlChart";
+import { ExecutionQuality } from "../components/ExecutionQuality";
 
 /** Inicio = sala de control: alertas, P&L del día, cuentas en juego y estado del puente. */
 export function Dashboard() {
-  const { client, health, accounts, rules, audit, risk, prices, density } = useStore();
+  const { client, health, accounts, rules, audit, risk, prices, density, setRules } = useStore();
   const [busy, setBusy] = useState<string | null>(null);
   const b = health?.bridge;
   const master = b?.master_account ?? null;
@@ -77,6 +78,12 @@ export function Dashboard() {
 
       <Card title="P&L del día" right={<span className="muted small">muestras cada 15 s · realizado + flotante según NinjaTrader</span>}>
         {client ? <PnlChart accounts={accounts} client={client} master={master} compact={compact} /> : null}
+      </Card>
+
+      <Card title="Calidad de ejecución" right={<span className="muted small">¿entran todas al precio del maestro? · últimas 40 operaciones</span>}>
+        {client ? <ExecutionQuality client={client} accounts={accounts} rules={rules} master={master} compact={compact}
+                                    lastFillId={audit.find((a) => a.event_type === "FOLLOWER_FILL" || a.event_type === "ENTRY_MODE_SET")?.id ?? null}
+                                    onRules={(updated) => setRules(rules.map((r) => updated.find((u) => u.id === r.id) ?? r))} /> : null}
       </Card>
 
       <Card title={`Cuentas en juego · ${inPlay.length}`} right={<span className="muted small">{Object.keys(prices).length ? `precio en vivo: ${Object.values(prices).map((p) => `${p.symbol} ${p.last}`).join(" · ")}` : "sin ticks de precio"}</span>}>

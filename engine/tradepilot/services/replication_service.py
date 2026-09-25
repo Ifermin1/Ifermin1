@@ -10,6 +10,7 @@ from tradepilot.core.enums import (MSG_HEARTBEAT, MSG_ORDER_STATUS, MSG_POSITION
                                    REPLICABLE_MSG_TYPES)
 from tradepilot.core.events import TOPIC_MASTER_EVENT, TOPIC_PRICE, EventBus
 from tradepilot.domain.replication import MasterEvent, ReplicationRule, ReplicationTask
+from tradepilot.domain.symbols import tick_size
 from tradepilot.infrastructure.brokers.base import BrokerBridge
 from tradepilot.infrastructure.persistence.sqlite_store import SQLiteStore
 from tradepilot.services.account_service import AccountService
@@ -103,6 +104,9 @@ class ReplicationService:
         # alguien a mano en esa cuenta (no la toca).
         self.last_copy_activity: dict[tuple, float] = {}
         self.last_manual_fill: dict[tuple, float] = {}
+        # Calidad de ejecución: por cada orden del maestro que se copió, su precio medio y el fill de cada seguidora
+        # (precio, deslizamiento en ticks, latencia). Es lo que la consola pinta en "Calidad de ejecución".
+        self.executions: OrderedDict[str, dict] = OrderedDict()
 
     async def start(self) -> None:
         self.bus.subscribe(TOPIC_MASTER_EVENT, self.process_master_event)
@@ -360,9 +364,77 @@ class ReplicationService:
             tasks.append(task)
             if task.status == "SENT":
                 self._note_sent(fl, root, event, task.scaled_quantity, exit_)
+        if event.msg_type == "EXECUTION" and accepted:
+            self._note_execution(event, [(t, e) for t, _, _, _, _, e in accepted])
         if matched == 0:
             self._explain_no_match(event)
         return tasks
+
+    # ---- calidad de ejecución ----
+    def _note_execution(self, event: MasterEvent, accepted: list[tuple]) -> None:
+        rec = self.executions.get(event.order_id)
+        if rec is None:
+            exit_ = event.is_exit if event.is_exit is not None else any(e for _, e in accepted)
+            rec = {"order_id": event.order_id, "at": event.timestamp.isoformat(timespec="milliseconds"), "symbol": event.symbol,
+                   "action": event.action, "order_type": event.order_type, "kind": "exit" if exit_ else "entry",
+                   "quantity": 0, "price": 0.0, "tick": tick_size(event.symbol), "followers": {}}
+            self._remember(self.executions, event.order_id, rec, limit=300)
+        q0, q1 = rec["quantity"], event.quantity
+        rec["price"] = round((rec["price"] * q0 + event.price * q1) / max(1, q0 + q1), 6)
+        rec["quantity"] = q0 + q1
+        for task, _ in accepted:
+            if task.status != "SENT":
+                continue
+            f = rec["followers"].setdefault(task.target_account.lower(), self._new_follower_fill(task.target_account))
+            f["expected"] += task.scaled_quantity
+
+    @staticmethod
+    def _new_follower_fill(name: str) -> dict:
+        return {"name": name, "expected": 0, "filled": 0, "price": None, "slip": None, "slip_ticks": None,
+                "latency_ms": None, "broker_ms": None}
+
+    def _note_follower_fill(self, event: MasterEvent, latency_ms: int | None, broker_ms: int | None) -> None:
+        rec = self.executions.get(event.master_order_id)
+        if rec is None:
+            return
+        f = rec["followers"].setdefault(event.account.lower(), self._new_follower_fill(event.account))
+        q0, q1 = f["filled"], event.quantity
+        f["price"] = round(((f["price"] or 0.0) * q0 + event.price * q1) / max(1, q0 + q1), 6)
+        f["filled"] = q0 + q1
+        worse = f["price"] - rec["price"] if rec["action"].upper().startswith("BUY") else rec["price"] - f["price"]
+        f["slip"] = round(worse, 6)
+        f["slip_ticks"] = round(worse / rec["tick"], 2)
+        if latency_ms is not None:
+            f["latency_ms"] = latency_ms
+        if broker_ms is not None:
+            f["broker_ms"] = broker_ms
+
+    def recent_executions(self, limit: int = 40) -> list[dict]:
+        """Las últimas operaciones del maestro copiadas, la más reciente primero, con el fill de cada seguidora."""
+        out = []
+        for rec in reversed(self.executions.values()):
+            out.append({**rec, "followers": sorted(rec["followers"].values(), key=lambda f: f["name"].lower())})
+            if len(out) >= limit:
+                break
+        return out
+
+    def set_entry_for_all(self, master: str | None, **opts) -> list[ReplicationRule]:
+        """Aplica el mismo modo de entrada (mercado / límite al precio del maestro) a todas las reglas de la maestra."""
+        changes = {k: v for k, v in opts.items() if v is not None}
+        updated = []
+        for r in list(self.rules):
+            if master and not r.master_matches(master):
+                continue
+            u = self.update_rule(r.id, **changes)
+            if u is not None:
+                updated.append(u)
+        if updated:
+            how = ("límite al precio del maestro ±" + str(changes.get("tolerance_ticks", updated[0].tolerance_ticks)) + " ticks, "
+                   + str(changes.get("entry_timeout_s", updated[0].entry_timeout_s)) + " s, luego "
+                   + ("a mercado" if changes.get("entry_fallback", updated[0].entry_fallback) == "market" else "cancelar")
+                   if changes.get("entry_mode") == "limit" else "a mercado")
+            self.audit.log("ENTRY_MODE_SET", f"Entradas de {len(updated)} seguidoras: {how}", source=master or None)
+        return updated
 
     def _explain_no_match(self, event: MasterEvent) -> None:
         """Deja en la auditoría por qué no se replicó, para no fallar en silencio."""
@@ -648,6 +720,7 @@ class ReplicationService:
         msg = f"{event.account}: {event.action} {event.quantity} {event.symbol} @ {event.price}"
         details: dict = {"master_order_id": event.master_order_id, "order_id": event.order_id}
         ref = self._master_execs.get(event.master_order_id)
+        latency_ms = broker_ms = None
         if ref:
             m_price, m_at, m_action, m_ts = ref
             latency_ms = round((time.monotonic() - m_at) * 1000)
@@ -678,6 +751,7 @@ class ReplicationService:
             self.stats["latency_ms_last"], self.stats["slippage_last"] = latency_ms, slip
             self.stats["latency_ms_avg"] = round(_ema(self.stats["latency_ms_avg"], latency_ms))
             self.stats["slippage_avg"] = round(_ema(self.stats["slippage_avg"], slip), 4)
+        self._note_follower_fill(event, latency_ms, broker_ms)
         self.audit.log("FOLLOWER_FILL", msg, target=event.account, details=details)
 
     def _on_follower_status(self, data: dict) -> None:

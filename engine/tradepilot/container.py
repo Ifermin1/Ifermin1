@@ -64,6 +64,7 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
         else:
             from tradepilot.infrastructure.brokers.mock import MockBridge
             bridge = MockBridge(bus)
+            bridge.ack_fills = True     # demo: las seguidoras devuelven fills con deslizamiento y latencia simulados
     audit = AuditService(store, bus)
     try:
         from datetime import datetime, timedelta

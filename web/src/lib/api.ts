@@ -36,6 +36,13 @@ export type Commissions = { enabled: boolean; default_per_side: number; rates: R
 export type RiskState = { kill_switch: boolean; kill_switch_reason: string | null; kill_switch_at: string | null; limits: RiskLimit[];
                           schedule: Schedule; session_closed: boolean; addon_silent: boolean; commissions: Commissions };
 
+/** Calidad de ejecución: una orden del maestro copiada y el fill de cada seguidora (deslizamiento en ticks, positivo = peor). */
+export type ExecFollower = { name: string; expected: number; filled: number; price: number | null; slip: number | null; slip_ticks: number | null;
+                             latency_ms: number | null; broker_ms: number | null };
+export type Execution = { order_id: string; at: string; symbol: string; action: string; order_type: string; kind: "entry" | "exit";
+                          quantity: number; price: number; tick: number; followers: ExecFollower[] };
+export type EntryPreset = { entry_mode: "market" | "limit"; tolerance_ticks?: number; entry_timeout_s?: number; entry_fallback?: "market" | "cancel" };
+
 export type Session = { baseUrl: string; token: string };
 
 const KEY = "tpx.session";
@@ -77,6 +84,9 @@ export function makeClient(s: Session) {
     audit: (limit = 100, type?: string) => req<AuditEvent[]>(`/api/audit?limit=${limit}${type ? `&event_type=${type}` : ""}`),
     risk: () => req<RiskState>("/api/risk"),
     pnl: (hours = 24) => req<PnlHistory>(`/api/pnl?hours=${hours}`),
+    execution: (limit = 40) => req<Execution[]>(`/api/execution?limit=${limit}`),
+    /** Mismo modo de entrada para todas las seguidoras de la maestra actual. */
+    setEntryForAll: (p: EntryPreset) => req<Rule[]>("/api/rules/entry", { method: "PUT", body: JSON.stringify(p) }),
     killSwitch: (active: boolean, reason?: string, flatten = false, flatten_master = true) =>
       req<RiskState>("/api/risk/kill-switch", { method: "POST", body: JSON.stringify({ active, reason, flatten, flatten_master }) }),
     flattenAll: (include_master: boolean, reason?: string) =>

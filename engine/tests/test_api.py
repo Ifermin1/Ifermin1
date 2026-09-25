@@ -904,3 +904,23 @@ async def test_commissions_accumulate_per_contract_and_targets_use_net_pnl(clien
     assert fresh.config.enabled is False and fresh.today("Sim102") == (8, 0.0)
     fresh.config.enabled = True
     assert fresh.today("Sim102") == (8, 10.4)
+
+
+async def test_execution_quality_endpoint_and_entry_preset(client: AsyncClient, container):
+    container.bridge.health.master_account = "Sim101"
+    r = await client.put("/api/accounts/Sim102/link", json={"master_account": "Sim101"})
+    assert r.status_code == 200, r.text
+    r = await client.get("/api/execution")
+    assert r.status_code == 200 and r.json() == []
+    await container.replication.process_master_event({"msg_type": "EXECUTION", "account": "Sim101", "action": "BUY", "symbol": "NQ 12-26",
+                                                      "quantity": 2, "price": 20000.0, "order_type": "MARKET", "state": "FILLED",
+                                                      "order_id": "E1", "execution_id": "e1"})
+    await container.replication.process_master_event({"msg_type": "EXECUTION", "account": "Sim102", "action": "BUY", "symbol": "NQ 12-26",
+                                                      "quantity": 2, "price": 20000.25, "order_type": "MARKET", "state": "Filled",
+                                                      "order_id": "F1", "master_order_id": "E1", "execution_id": "f1"})
+    body = (await client.get("/api/execution?limit=5")).json()
+    assert len(body) == 1 and body[0]["followers"][0]["slip_ticks"] == 1.0 and body[0]["followers"][0]["name"] == "Sim102"
+    r = await client.put("/api/rules/entry", json={"entry_mode": "limit", "tolerance_ticks": 0, "entry_timeout_s": 2, "entry_fallback": "market"})
+    assert r.status_code == 200 and r.json()[0]["entry_mode"] == "limit" and r.json()[0]["tolerance_ticks"] == 0
+    r = await client.put("/api/rules/entry", json={"entry_mode": "bogus"})
+    assert r.status_code == 422

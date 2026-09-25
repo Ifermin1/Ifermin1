@@ -2,7 +2,7 @@
 
 Replicador de órdenes para NinjaTrader con consola **web y móvil**. El motor corre junto a NinjaTrader; la consola se abre desde cualquier navegador o instalada como app en el teléfono.
 
-Guía paso a paso (instalar, actualizar, operar, emergencias): [`docs/GUIA.md`](docs/GUIA.md). Diseño: [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md).
+Guía paso a paso (instalar, actualizar, operar, emergencias): [`docs/GUIA.md`](docs/GUIA.md). Diseño: [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md). Cómo conseguir que todas las seguidoras entren al mismo precio y dónde se va el tiempo: [`docs/PLAN_MISMO_PRECIO.md`](docs/PLAN_MISMO_PRECIO.md).
 
 | Móvil | Escritorio |
 |---|---|

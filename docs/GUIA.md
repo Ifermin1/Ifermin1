@@ -79,7 +79,11 @@ ese paso.
   (ideal en el teléfono). Se recuerda en ese navegador.
 - **Inicio** es la sala de control: avisos rojos, indicadores del día, el **gráfico de P&L** (una línea por cuenta; rangos
   `1h`, `4h`, `hoy`; toca el gráfico para ver los valores a una hora; pulsa una cuenta de la leyenda para ocultarla; *Tabla*
-  muestra las mismas cifras cada 5 minutos) y las **cuentas en juego**: maestra y seguidoras que copian, cada una con su P&L,
+  muestra las mismas cifras cada 5 minutos), la tarjeta **Calidad de ejecución** (¿entran todas las seguidoras al precio del
+  maestro? porcentaje al mismo precio, deslizamiento medio en ticks, tiempo en bróker, la peor seguidora; un gráfico por
+  operación con un punto por seguidora y otro por seguidora con su media; los botones *Entrar al precio del maestro* /
+  *Entrar a mercado* cambian de golpe el modo de entrada de todas las seguidoras; ver `docs/PLAN_MISMO_PRECIO.md`) y las
+  **cuentas en juego**: maestra y seguidoras que copian, cada una con su P&L,
   posición (con distancia al mercado en puntos y dólares), **stops y take profits vivos** con su distancia al precio,
   último fill o rechazo y el botón *Cerrar*.
 - **Cuentas** muestra los mismos paneles con los mandos de copia (multiplicador, interruptor, ⚙ opciones de ejecución).
@@ -194,6 +198,7 @@ ese paso.
 | **Addon desactualizado** | El addon compilado es anterior al que exige el engine. | Paso 2 (actualizar y compilar). |
 | `ENTRY_MISSED` | Una entrada límite con tolerancia no se llenó en el plazo y estaba configurada para cancelar. La seguidora no tiene esa operación. | Decidir si entrar a mano o subir la tolerancia / usar "a mercado lo que falte". |
 | `SKIPPED` "cierre de emergencia de la maestra" | Durante 20 s tras cerrar la maestra por emergencia, sus fills no se copian. | Nada; es la protección contra salidas dobles. |
+| `ENTRY_MODE_SET` | Alguien pulsó *Entrar al precio del maestro* o *Entrar a mercado* en *Inicio*: cambió el modo de entrada de todas las seguidoras. | Nada. Comprueba en *Cuentas → ⚙* si quieres afinar tolerancia o espera por cuenta. |
 
 ---
 

@@ -12,6 +12,7 @@ from loguru import logger
 
 from tradepilot.core.events import TOPIC_MASTER_EVENT, EventBus
 from tradepilot.domain.accounts import BrokerAccount, BrokerPosition, WorkingOrder
+from tradepilot.domain.symbols import tick_size
 from tradepilot.infrastructure.brokers.base import BrokerBridge
 
 SYMBOLS = ["NQ 12-26", "ES 12-26", "MNQ 12-26", "CL 11-26"]
@@ -39,6 +40,9 @@ class MockBridge(BrokerBridge):
         self.boot: str | None = None      # simula el "PONG|boot|seq" del addon >= 1.8 (pruebas)
         self.watch_ok = True              # False: el addon no confirma el WATCH (pruebas)
         self.next_replies: list[str] = []  # respuestas forzadas a las próximas órdenes (pruebas): "IGNORED|...", "OK|EXECUTION_PARTIAL"
+        # Modo demo: cada copia a mercado devuelve el fill de la seguidora (como el addon) con un deslizamiento de 0-2 ticks
+        # y 80-300 ms de "bróker", para que la latencia, el deslizamiento y "Calidad de ejecución" se vean sin NinjaTrader.
+        self.ack_fills = False
         self.seq: int | None = None
         self._task: asyncio.Task | None = None
         self._running = False
@@ -77,6 +81,8 @@ class MockBridge(BrokerBridge):
             "order_type": "MARKET",
             "state": "FILLED",
             "order_id": uuid.uuid4().hex[:10],
+            "execution_id": "E" + uuid.uuid4().hex[:8],
+            "timestamp": datetime.now().astimezone().isoformat(timespec="microseconds"),
         }
         event.update(overrides)
         self.health.last_msg_in = datetime.now()
@@ -147,5 +153,22 @@ class MockBridge(BrokerBridge):
             k = (target_account, symbol)
             sign = 1 if action.upper().startswith("BUY") else -1
             self.positions[k] = self.positions.get(k, 0) + sign * quantity
+            if self.ack_fills:
+                asyncio.get_running_loop().create_task(self._ack_fill(target_account, action, symbol, quantity, price, master_order_id))
         logger.info(f"[mock] orden -> {target_account} {action} {quantity} {symbol}")
         return reply
+
+    async def _ack_fill(self, account: str, action: str, symbol: str, quantity: int, ref_price: float, master_order_id: str) -> None:
+        """Fill de la seguidora un instante después, como lo publicaría el addon (EXECUTION con master_order_id)."""
+        delay = random.uniform(0.08, 0.30)
+        await asyncio.sleep(delay)
+        if not self._running:
+            return
+        ticks = random.choice([0, 0, 0, 0, 1, 1, 2]) * tick_size(symbol)
+        price = round((ref_price or 20000.0) + (ticks if action.upper().startswith("BUY") else -ticks), 6)
+        await self.bus.publish(TOPIC_MASTER_EVENT, {
+            "msg_type": "EXECUTION", "account": account, "action": action, "symbol": symbol, "quantity": quantity,
+            "price": price, "order_type": "MARKET", "state": "Filled", "order_id": "F" + uuid.uuid4().hex[:8],
+            "master_order_id": master_order_id, "execution_id": "E" + uuid.uuid4().hex[:8],
+            "timestamp": datetime.now().astimezone().isoformat(timespec="microseconds"),
+        })

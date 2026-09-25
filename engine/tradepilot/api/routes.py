@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from tradepilot.api.auth import require_token
-from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate
+from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset
 from tradepilot.container import Container
 from tradepilot.domain.risk import RiskLimit, Schedule
 
@@ -115,6 +115,19 @@ def update_rule(rule_id: str, body: RuleUpdate, request: Request):
     if rule is None:
         raise HTTPException(404, "Regla no encontrada")
     return rule
+
+
+@router.put("/rules/entry")
+def set_entry_for_all(body: EntryPreset, request: Request):
+    """Mismo modo de entrada para todas las seguidoras de la maestra actual (p. ej. "límite al precio del maestro ±0")."""
+    c = _c(request)
+    return c.replication.set_entry_for_all(c.bridge.health.master_account, **body.model_dump(exclude_unset=True))
+
+
+@router.get("/execution")
+def execution_quality(request: Request, limit: int = 40):
+    """Últimas operaciones copiadas con el fill de cada seguidora: precio, deslizamiento en ticks y tiempos."""
+    return _c(request).replication.recent_executions(min(max(1, limit), 300))
 
 
 @router.delete("/rules/{rule_id}", status_code=204)

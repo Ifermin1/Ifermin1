@@ -19,6 +19,14 @@ class RuleCreate(ExecutionOptions):
     enabled: bool = True
 
 
+class EntryPreset(BaseModel):
+    """Mismo modo de entrada para todas las seguidoras de la maestra (botones de "Calidad de ejecución")."""
+    entry_mode: str = Field(pattern="^(market|limit)$")
+    tolerance_ticks: Optional[int] = Field(default=None, ge=0, le=50)
+    entry_timeout_s: Optional[int] = Field(default=None, ge=1, le=120)
+    entry_fallback: Optional[str] = Field(default=None, pattern="^(market|cancel)$")
+
+
 class RuleUpdate(ExecutionOptions):
     master_account: Optional[str] = None
     follower_account: Optional[str] = None

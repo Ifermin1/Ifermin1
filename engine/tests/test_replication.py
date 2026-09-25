@@ -606,3 +606,45 @@ async def test_account_locked_by_the_prop_firm_is_disabled_and_stops_receiving_c
                                     "native_error": "Your maximum order quantity has been met", "timestamp": ts})
     await asyncio.sleep(0)
     assert container.accounts.accounts["Sim102"].enabled is True
+
+
+async def test_execution_quality_records_master_price_and_each_follower_slippage(container):
+    """"Calidad de ejecución": por cada orden copiada, el precio medio del maestro y el fill de cada seguidora con su
+    deslizamiento en ticks (positivo = peor) y sus tiempos; un fill de una orden que no se copió (FIX/SYNC) no cuenta."""
+    rep, b = await _setup(container)
+    ts = "2026-09-25T10:00:00.0000000-05:00"
+    await rep.process_master_event(_event(action="BUY", quantity=1, price=20000.0, order_id="E1", execution_id="e1", timestamp=ts).model_dump(mode="json"))
+    await rep.process_master_event(_event(action="BUY", quantity=1, price=20001.0, order_id="E1", execution_id="e2", timestamp=ts).model_dump(mode="json"))
+    await rep.process_master_event(_event(account="Sim102", action="BUY", quantity=2, price=20001.0, order_id="F1",
+                                          master_order_id="E1", execution_id="f1", timestamp="2026-09-25T10:00:00.2500000-05:00").model_dump(mode="json"))
+    await rep.process_master_event(_event(account="Sim102", action="BUYTOCOVER", quantity=1, price=20005.0, order_id="F9",
+                                          master_order_id="FIX-abc", execution_id="f9", timestamp=ts).model_dump(mode="json"))
+    recs = rep.recent_executions()
+    assert len(recs) == 1
+    r = recs[0]
+    assert r["order_id"] == "E1" and r["quantity"] == 2 and r["price"] == 20000.5 and r["kind"] == "entry" and r["tick"] == 0.25
+    f = r["followers"][0]
+    assert f["name"] == "Sim102" and f["expected"] == 2 and f["filled"] == 2 and f["price"] == 20001.0
+    assert f["slip"] == 0.5 and f["slip_ticks"] == 2.0 and f["broker_ms"] == 250 and f["latency_ms"] is not None
+    # una venta que sale peor es un precio más bajo
+    await rep.process_master_event(_event(action="SELL", quantity=2, price=20010.0, order_id="X1", execution_id="x1", is_exit=True, timestamp=ts).model_dump(mode="json"))
+    await rep.process_master_event(_event(account="Sim102", action="SELL", quantity=2, price=20009.75, order_id="F2",
+                                          master_order_id="X1", execution_id="f2", timestamp=ts).model_dump(mode="json"))
+    r = rep.recent_executions(limit=1)[0]
+    assert r["order_id"] == "X1" and r["kind"] == "exit" and r["followers"][0]["slip_ticks"] == 1.0
+
+
+async def test_entry_preset_applies_to_every_rule_of_the_master(container):
+    rep = container.replication
+    container.bridge.health.master_account = "Sim101"
+    rep.add_rule("Sim101", "Sim102")
+    rep.add_rule("Sim101", "Sim103", multiplier=2)
+    rep.add_rule("Otra", "Sim104")
+    updated = rep.set_entry_for_all("Sim101", entry_mode="limit", tolerance_ticks=0, entry_timeout_s=2, entry_fallback="market")
+    assert sorted(u.follower_account for u in updated) == ["Sim102", "Sim103"]
+    assert all(r.entry_mode == "limit" and r.tolerance_ticks == 0 and r.entry_timeout_s == 2 for r in rep.rules if r.master_account == "Sim101")
+    assert next(r for r in rep.rules if r.follower_account == "Sim104").entry_mode == "market"
+    assert next(r for r in rep.rules if r.follower_account == "Sim103").multiplier == 2
+    assert "ENTRY_MODE_SET" in _types(container, 2)
+    rep.set_entry_for_all("Sim101", entry_mode="market")
+    assert all(r.entry_mode == "market" for r in rep.rules)
