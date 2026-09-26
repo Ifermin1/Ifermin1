@@ -6,7 +6,12 @@ Set-Location "$root\engine"
 
 if (-not (Test-Path ".venv")) {
     python -m venv .venv
+}
+# Reinstala las dependencias si pyproject.toml cambió desde la última instalación (p. ej. httpx para los avisos por Telegram)
+$stamp = ".venv\deps.stamp"
+if (-not (Test-Path $stamp) -or (Get-Item "pyproject.toml").LastWriteTime -gt (Get-Item $stamp).LastWriteTime) {
     .\.venv\Scripts\pip install -e "."
+    New-Item -ItemType File -Path $stamp -Force | Out-Null
 }
 if (-not (Test-Path ".env")) {
     Copy-Item .env.example .env
