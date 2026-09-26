@@ -938,3 +938,19 @@ async def test_stats_month_endpoint(client: AsyncClient, container):
     assert (await client.get("/api/stats/month?month=2026-09&account=Sim999")).json()["days"] == []
     assert (await client.get("/api/stats/month?month=2026-13")).status_code == 422
     assert (await client.get("/api/stats/month")).status_code == 200
+
+
+async def test_copy_map_layout_is_persisted_and_links_deduplicated(client: AsyncClient, container):
+    r = await client.get("/api/ui/copy-map")
+    assert r.status_code == 200 and r.json() == {"view": "flow", "positions": {}, "links": [], "show_offline": False}
+    body = {"view": "cables", "positions": {"cables": {"Sim101": {"x": 40, "y": 60}, "Sim102": {"x": 400, "y": 60}}},
+            "links": [{"a": "Sim101", "b": "Sim104"}, {"a": "Sim104", "b": "Sim101"}, {"a": "Sim101", "b": "Sim101"}, {"a": "", "b": "X"}], "show_offline": True}
+    r = await client.put("/api/ui/copy-map", json=body)
+    assert r.status_code == 200
+    saved = r.json()
+    assert saved["view"] == "cables" and saved["positions"]["cables"]["Sim102"] == {"x": 400, "y": 60} and saved["show_offline"] is True
+    assert saved["links"] == [{"a": "Sim101", "b": "Sim104"}]
+    assert (await client.get("/api/ui/copy-map")).json() == saved
+    assert (await client.put("/api/ui/copy-map", json={"view": "bogus"})).status_code == 422
+    # las reglas de copia no cambian por guardar el mapa
+    assert (await client.get("/api/rules")).json() == []

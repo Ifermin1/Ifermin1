@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from tradepilot.api.auth import require_token
-from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest
+from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CopyMapLayout
 from tradepilot.container import Container
 from tradepilot.domain.risk import RiskLimit, Schedule
 
@@ -174,6 +174,42 @@ async def discover_chat(body: DiscoverChatRequest, request: Request):
     if c.notify is None:
         raise HTTPException(503, "avisos no disponibles")
     return await c.notify.discover_chat(body.bot_token)
+
+
+COPY_MAP_KEY = "ui.copy_map"
+
+
+@router.get("/ui/copy-map")
+def get_copy_map(request: Request):
+    """Disposición guardada del mapa de cuentas (o la vacía si nunca se guardó)."""
+    import json
+    raw = _c(request).store.get_kv(COPY_MAP_KEY)
+    if not raw:
+        return CopyMapLayout().model_dump()
+    try:
+        return CopyMapLayout.model_validate(json.loads(raw)).model_dump()
+    except Exception:
+        return CopyMapLayout().model_dump()
+
+
+@router.put("/ui/copy-map")
+def put_copy_map(body: CopyMapLayout, request: Request):
+    """Guarda la disposición del mapa (compartida entre tus dispositivos). Los vínculos entre maestras se guardan sin
+    duplicados ni auto-vínculos; nunca crean reglas de copia."""
+    seen: set[tuple[str, str]] = set()
+    links = []
+    for l in body.links:
+        a, b = str(l.get("a", "")).strip(), str(l.get("b", "")).strip()
+        if not a or not b or a.lower() == b.lower():
+            continue
+        key = tuple(sorted((a.lower(), b.lower())))
+        if key in seen:
+            continue
+        seen.add(key)
+        links.append({"a": a, "b": b})
+    body.links = links
+    _c(request).store.set_kv(COPY_MAP_KEY, body.model_dump_json())
+    return body.model_dump()
 
 
 @router.get("/news")

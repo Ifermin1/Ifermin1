@@ -214,7 +214,16 @@ Hay dos vías, y se pueden usar las dos a la vez (*Riesgo → Avisos al teléfon
      manda la entrada como límite al precio de fill del maestro más la tolerancia; si no se llena en la *Espera*, "A mercado
      lo que falte" o "Cancelar (no entrar)". Con "Cancelar", la seguidora puede quedarse fuera de una operación (aparece
      `ENTRY_MISSED`). Las salidas van siempre a mercado o con su propia orden. Requiere addon v1.7.
-7. **Copiar** (pestaña): solo para reglas finas con filtro de símbolo (por ejemplo copiar únicamente `NQ`).
+7. **Copiar** (pestaña): el **mapa de cuentas**. Cada cuenta es una tarjeta; las líneas son las reglas de copia (verde:
+   copiando; gris discontinua: pausada; ámbar punteada: regla de una maestra que no es la activa, no replica). Arrastra una
+   seguidora sobre una maestra para que copie a esa maestra (crea o cambia su regla con el multiplicador que tuviera);
+   toca una tarjeta para abrir su panel (maestra, multiplicador, símbolo destino, entrada, pausar, desconectar). Arrastra
+   una maestra sobre otra para **agruparlas**: la segunda hereda la configuración de la primera (se pide confirmación) y
+   quedan unidas por una línea azul; nunca se copian entre sí. *Flujo* ordena de izquierda a derecha con curvas; *Cables*
+   dibuja una red con líneas ortogonales; la vista y las posiciones se guardan en el engine y se ven igual en el
+   teléfono. Con el teclado: Enter abre el panel, las flechas mueven la tarjeta y Supr desconecta. *Pausar copia* es el
+   kill switch sin cerrar posiciones. Las reglas con filtro de símbolo (solo `NQ`, por ejemplo) están en *Reglas
+   avanzadas*. Nada de lo que se hace en el mapa envía órdenes: solo cambia reglas.
 
 ---
 

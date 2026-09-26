@@ -2,9 +2,13 @@ import { useState, type FormEvent } from "react";
 import { useStore } from "../lib/store";
 import { time } from "../lib/format";
 import { Card, Empty } from "../components/ui";
+import { CopyMap } from "../components/CopyMap";
 
+/** Copiar: mapa de cuentas (maestras y seguidoras unidas por sus reglas). Debajo, reglas avanzadas con filtro de
+ *  símbolo y el flujo de replicación en vivo. */
 export function Replicator() {
   const { client, rules, setRules, accounts, audit, health } = useStore();
+  const [advanced, setAdvanced] = useState(false);
   const [master, setMaster] = useState("");
   const [follower, setFollower] = useState("");
   const [mult, setMult] = useState("1");
@@ -30,44 +34,46 @@ export function Replicator() {
   }
 
   const ids = accounts.map((a) => a.account_id);
-  const feed = audit.filter((a) => ["MASTER_RECEIVED", "REPLICATED", "BLOCKED", "SKIPPED", "ERROR", "FOLLOWER_FILL", "FOLLOWER_REJECTED", "NO_RULE", "ACCOUNT_FILL", "DESYNC", "RESYNC", "SYNC_ORDER", "FLATTEN", "FLATTENED", "NAKED_CLOSE", "ACCOUNT_LOCKED", "GAP", "ADDON_RESTART", "DAILY_LOSS_LIMIT", "DAILY_LOSS_WARNING", "SCHEDULED_FLATTEN", "ADDON_SILENT", "ADDON_BACK", "RESUBSCRIBE", "ADDON_RECOVERY", "ENTRY_MISSED", "TRIMMED", "DAILY_PROFIT_TARGET", "DAILY_PROFIT_WARNING"].includes(a.event_type)).slice(0, 25);
+  const filtered = rules.filter((r) => r.symbol_filter);
+  const feed = audit.filter((a) => ["MASTER_RECEIVED", "REPLICATED", "BLOCKED", "SKIPPED", "ERROR", "FOLLOWER_FILL", "FOLLOWER_REJECTED", "NO_RULE", "ACCOUNT_FILL", "DESYNC", "RESYNC", "SYNC_ORDER", "FLATTEN", "FLATTENED", "NAKED_CLOSE", "ACCOUNT_LOCKED", "GAP", "ADDON_RESTART", "DAILY_LOSS_LIMIT", "DAILY_LOSS_WARNING", "SCHEDULED_FLATTEN", "ADDON_SILENT", "ADDON_BACK", "RESUBSCRIBE", "ADDON_RECOVERY", "ENTRY_MISSED", "TRIMMED", "DAILY_PROFIT_TARGET", "DAILY_PROFIT_WARNING", "RULE_ADDED", "RULE_UPDATED", "RULE_DELETED"].includes(a.event_type)).slice(0, 25);
 
   return (
     <div className="grid">
-      <Card title="Nueva regla de copia">
-        <form className="rule-form" onSubmit={add}>
-          <label>Maestro<input list="accts" value={master} onChange={(e) => setMaster(e.target.value)} placeholder="Sim101" required /></label>
-          <label>Seguidor<input list="accts" value={follower} onChange={(e) => setFollower(e.target.value)} placeholder="Sim102" required /></label>
-          <label>Multiplicador<input type="number" step="0.1" min="0.1" value={mult} onChange={(e) => setMult(e.target.value)} /></label>
-          <label>Símbolo (opcional)<input value={symbol} onChange={(e) => setSymbol(e.target.value)} placeholder="Todos · ej. NQ" /></label>
-          <datalist id="accts">{ids.map((i) => <option key={i} value={i} />)}</datalist>
-          <button className="primary">Añadir</button>
-        </form>
-        {err && <p className="error">{err}</p>}
+      <Card title="Mapa de cuentas" icon="copy" right={<div className="chips">
+        {health?.mode === "mock" && <button className="ghost small-btn" onClick={() => client.mockEvent()}>Simular operación del maestro</button>}
+        <button className="chip-btn" onClick={() => setAdvanced(!advanced)} data-testid="toggle-advanced">{advanced ? "Ocultar reglas avanzadas" : `Reglas avanzadas${filtered.length ? ` · ${filtered.length}` : ""}`}</button></div>}>
+        <CopyMap />
       </Card>
 
-      <Card title="Reglas" right={health?.mode === "mock" && (
-        <button className="ghost" onClick={() => client.mockEvent()}>Simular operación del maestro</button>)}>
-        {rules.length === 0 ? <Empty>No hay reglas. Crea la primera arriba.</Empty> : (
-          <ul className="rules">
-            {rules.map((r) => (
-              <li key={r.id} className={r.enabled ? "" : "off"}>
-                <div className="rule-main">
-                  <b>{r.master_account}</b> <span className="arrow">→</span> <b>{r.follower_account}</b>
-                  <span className="chip">x{r.multiplier}</span>
-                  <span className="chip">{r.symbol_filter ?? "todos los símbolos"}</span>
-                </div>
-                <div className="rule-actions">
-                  <label className="switch"><input type="checkbox" checked={r.enabled} onChange={(e) => toggle(r.id, e.target.checked)} /><span /></label>
-                  <button className="ghost danger" onClick={() => remove(r.id)}>Borrar</button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
+      {advanced && (
+        <Card title="Reglas avanzadas (filtro por símbolo)" icon="list">
+          <p className="muted small">Una regla con filtro copia solo ese símbolo (p. ej. únicamente NQ). En el mapa aparecen como líneas etiquetadas con el símbolo. Las reglas sin filtro se gestionan desde el mapa.</p>
+          <form className="rule-form" onSubmit={add}>
+            <label>Maestro<input list="accts" value={master} onChange={(e) => setMaster(e.target.value)} placeholder="Sim101" required /></label>
+            <label>Seguidor<input list="accts" value={follower} onChange={(e) => setFollower(e.target.value)} placeholder="Sim102" required /></label>
+            <label>Multiplicador<input type="number" step="0.1" min="0.1" value={mult} onChange={(e) => setMult(e.target.value)} /></label>
+            <label>Símbolo<input value={symbol} onChange={(e) => setSymbol(e.target.value)} placeholder="ej. NQ" required /></label>
+            <datalist id="accts">{ids.map((i) => <option key={i} value={i} />)}</datalist>
+            <button className="primary">Añadir</button>
+          </form>
+          {err && <p className="error">{err}</p>}
+          {filtered.length === 0 ? <Empty>No hay reglas con filtro de símbolo.</Empty> : (
+            <ul className="rules">
+              {filtered.map((r) => (
+                <li key={r.id} className={r.enabled ? "" : "off"}>
+                  <div className="rule-main"><b>{r.master_account}</b> <span className="arrow">→</span> <b>{r.follower_account}</b><span className="chip">x{r.multiplier}</span><span className="chip">{r.symbol_filter}</span></div>
+                  <div className="rule-actions">
+                    <label className="switch"><input type="checkbox" checked={r.enabled} onChange={(e) => toggle(r.id, e.target.checked)} /><span /></label>
+                    <button className="ghost danger" onClick={() => remove(r.id)}>Borrar</button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      )}
 
-      <Card title="Flujo de replicación en vivo">
+      <Card title="Flujo de replicación en vivo" icon="activity">
         {feed.length === 0 ? <Empty>Sin operaciones todavía.</Empty> : (
           <ul className="feed">
             {feed.map((a, i) => (

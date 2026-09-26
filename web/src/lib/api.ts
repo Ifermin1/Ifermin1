@@ -61,6 +61,10 @@ export type NewsEvent = { id: string; time: string; country: string; country_nam
                           forecast: string | null; previous: string | null; actual: string | null };
 export type NewsFeed = { events: NewsEvent[]; fetched_at: number | null; error: string | null; countries: string[]; source: string };
 
+/** Disposición del mapa de cuentas (pestaña Copiar): solo presentación, guardada en el engine. */
+export type CopyMapLayout = { view: "flow" | "cables"; positions: Record<string, Record<string, { x: number; y: number }>>;
+                              links: { a: string; b: string }[]; show_offline: boolean };
+
 export type Session = { baseUrl: string; token: string };
 
 const KEY = "tpx.session";
@@ -107,6 +111,8 @@ export function makeClient(s: Session) {
     setNotifications: (c: NotifyConfig) => req<NotifyState>("/api/notifications", { method: "PUT", body: JSON.stringify(c) }),
     testNotifications: () => req<{ ok: boolean; error: string | null }>("/api/notifications/test", { method: "POST" }),
     discoverChat: (bot_token?: string) => req<{ ok: boolean; chat_id?: string; name?: string; error?: string }>("/api/notifications/discover-chat", { method: "POST", body: JSON.stringify({ bot_token }) }),
+    copyMap: () => req<CopyMapLayout>("/api/ui/copy-map"),
+    saveCopyMap: (l: CopyMapLayout) => req<CopyMapLayout>("/api/ui/copy-map", { method: "PUT", body: JSON.stringify(l) }),
     news: (days = 7, countries = "", minImpact = "low") => req<NewsFeed>(`/api/news?days=${days}${countries ? `&countries=${encodeURIComponent(countries)}` : ""}&min_impact=${minImpact}`),
     /** Calendario: `month` = AAAA-MM; `account` vacío = todas. */
     month: (month: string, account = "") => req<MonthStats>(`/api/stats/month?month=${month}${account ? `&account=${encodeURIComponent(account)}` : ""}`),
