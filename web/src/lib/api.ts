@@ -2,7 +2,7 @@
 // para que la PWA instalada en el teléfono recuerde a qué engine conectarse.
 
 export type Health = {
-  app: string; mode: "mock" | "ninja"; addon_outdated: boolean; min_addon_version: string;
+  app: string; mode: "mock" | "ninja"; addon_outdated: boolean; min_addon_version: string; web_build: string | null;
   bridge: { mode: string; connected: boolean; last_msg_in: string | null; last_msg_out: string | null;
             last_sync: string | null; last_heartbeat: string | null; master_account: string | null; addon_version: string | null; error_count: number; master_feed_up: boolean; follower_feed_up: boolean; sync_up: boolean };
   risk: RiskState; stats: { events_in: number; orders_out: number; blocked: number; errors: number; rejected: number; fills: number; duplicates: number;

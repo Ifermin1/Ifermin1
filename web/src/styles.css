@@ -92,6 +92,8 @@ button:disabled { opacity: .55; cursor: default; }
 .alert-card { border-color: rgba(248,113,113,.6); background: linear-gradient(90deg, rgba(248,113,113,.14), rgba(248,113,113,.04)); }
 .banner { padding: 10px 14px; border-radius: 10px; margin-bottom: 12px; }
 .banner.bad { background: rgba(248,113,113,.12); border: 1px solid var(--bad); }
+.banner.update { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; background: linear-gradient(90deg, rgba(56,189,248,.16), rgba(99,102,241,.08)); border: 1px solid var(--accent); }
+.banner.update button { margin-left: auto; }
 
 /* indicadores */
 .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }

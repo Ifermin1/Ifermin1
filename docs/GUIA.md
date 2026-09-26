@@ -49,17 +49,24 @@ versión de escritorio).
 
 ## 2. Actualizar a una versión nueva
 
-Con el engine parado (Ctrl+C):
-
 ```powershell
 cd $HOME\tradepilot
 powershell -ExecutionPolicy Bypass -File scripts\update.ps1
 ```
 
-Descarga el código, copia el addon si cambió (con copia de seguridad del anterior) y arranca el engine. **Si el script dice
-que copió el addon**, hay que compilarlo: *NinjaScript Editor → F5* y reiniciar NinjaTrader. Comprueba la versión en el
-Output de NinjaTrader y en *Inicio* de la consola ("addon vX.Y"). Si la consola muestra "Addon desactualizado" en rojo, falta
-ese paso.
+El script hace los cinco pasos y dice qué ha hecho en cada uno: descarga el código (muestra rama y último cambio),
+instala las dependencias nuevas del engine, **compila la consola web** (necesita Node.js; si no está, lo dice en rojo y la
+consola no cambia), copia el addon si cambió (con copia de seguridad del anterior) y **reinicia el engine**: para el que
+estuviera corriendo (también el de la tarea programada) y arranca el nuevo. Si no reiniciara, el engine viejo seguiría
+sirviendo la consola vieja.
+
+Después:
+
+1. **Si el script dice que copió el addon**, compílalo: *NinjaScript Editor → F5* y reinicia NinjaTrader. Comprueba la
+   versión en el Output y en *Inicio* ("addon vX.Y"). Si la consola muestra "Addon desactualizado" en rojo, falta ese paso.
+2. En el navegador pulsa **Ctrl+F5** (recarga sin caché); en el teléfono cierra la app y ábrela. Si la consola detecta que el
+   engine sirve una versión más nueva que la que tienes cargada, muestra un aviso azul con el botón **Recargar ahora**.
+3. La fecha de la consola que estás viendo sale abajo a la izquierda del menú ("consola del dd/mm hh:mm").
 
 ---
 

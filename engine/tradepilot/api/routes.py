@@ -24,9 +24,19 @@ def health(request: Request):
     c = _c(request)
     v = c.accounts.health().addon_version
     outdated = c.settings.ENGINE_MODE == "ninja" and (v is None or _ver(v) < _ver(c.settings.MIN_ADDON_VERSION))
+    web_build = None
+    try:
+        from datetime import datetime
+        from pathlib import Path
+        idx = Path(c.settings.WEB_DIST) / "index.html"
+        if idx.exists():
+            web_build = datetime.fromtimestamp(idx.stat().st_mtime).astimezone().isoformat(timespec="seconds")
+    except Exception:
+        web_build = None
     return {
         "app": c.settings.APP_NAME,
         "mode": c.settings.ENGINE_MODE,
+        "web_build": web_build,          # cuándo se compiló la consola que sirve el engine (para detectar cachés viejas)
         "addon_outdated": outdated,
         "min_addon_version": c.settings.MIN_ADDON_VERSION,
         "bridge": c.accounts.health(),

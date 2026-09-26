@@ -50,9 +50,20 @@ export function StatusStrip({ className = "" }: { className?: string }) {
   );
 }
 
+const BUILT = new Date(__BUILD__);
+const fmtBuild = (d: Date) => d.toLocaleString("es-ES", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
+/** El engine sirve una consola compilada después que la que tiene cargada el navegador (caché o app instalada). */
+const staleBuild = (webBuild: string | null | undefined) => !!webBuild && new Date(webBuild).getTime() - BUILT.getTime() > 3 * 60000;
+async function hardReload() {
+  try { for (const r of await navigator.serviceWorker?.getRegistrations?.() ?? []) await r.unregister(); } catch { /* sin service worker */ }
+  try { for (const k of await caches?.keys?.() ?? []) await caches.delete(k); } catch { /* sin caché */ }
+  window.location.reload();
+}
+
 export function Shell({ route, onRoute, children }: { route: Route; onRoute: (r: Route) => void; children: ReactNode }) {
   const { health, wsStatus, risk, logout, session, density, setDensity, theme, setTheme } = useStore();
   const connected = health?.bridge.connected ?? null;
+  const stale = staleBuild(health?.web_build);
   return (
     <div className="shell">
       <aside className="sidenav">
@@ -70,6 +81,7 @@ export function Shell({ route, onRoute, children }: { route: Route; onRoute: (r:
             <Badge ok={wsStatus === "open" ? true : wsStatus === "connecting" ? null : false}>en vivo</Badge>
           </div>
           <div className="muted small">{session?.baseUrl}</div>
+          <div className="muted small" title={BUILT.toISOString()}>consola del {fmtBuild(BUILT)}</div>
           <button className="link" onClick={logout}>Salir</button>
         </div>
       </aside>
@@ -88,7 +100,15 @@ export function Shell({ route, onRoute, children }: { route: Route; onRoute: (r:
                     aria-pressed={density === "compact"} onClick={() => setDensity(density === "compact" ? "cozy" : "compact")}>{density === "compact" ? "▤" : "▥"}</button>
           </div>
         </header>
-        <main className="content">{children}</main>
+        <main className="content">
+          {stale && (
+            <div className="banner update" data-testid="stale-banner">
+              <b>Hay una versión nueva de la consola</b> (compilada el {fmtBuild(new Date(health!.web_build!))}; esta es del {fmtBuild(BUILT)}).
+              <button className="primary small-btn" onClick={() => void hardReload()}>Recargar ahora</button>
+            </div>
+          )}
+          {children}
+        </main>
       </div>
 
       <StatusStrip className="strip-mobile" />
