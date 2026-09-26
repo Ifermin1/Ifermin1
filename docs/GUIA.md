@@ -68,7 +68,49 @@ ese paso.
 - **En el PC:** `http://localhost:8000`. Token: el `API_TOKEN` del `.env`.
 - **En el teléfono (misma Wi-Fi):** la URL `http://192.168.x.x:8000` que imprime el engine al arrancar. En Android, menú de
   Chrome → *Añadir a pantalla de inicio*; en iOS, compartir en Safari → *Añadir a pantalla de inicio*. Queda como app.
-- Acceso desde fuera de casa: fase posterior (túnel), ver `docs/ARQUITECTURA.md` §2.
+- Acceso desde fuera de casa: con Tailscale (ver abajo) o un túnel, `docs/ARQUITECTURA.md` §2.
+
+### Instalar la consola en el teléfono
+
+La consola es una *web app* (PWA): no está en las tiendas, se instala desde el navegador y queda como una app más, con
+icono, pantalla completa y sin barra de direcciones.
+
+1. **Que el teléfono llegue al engine.**
+   - En casa, misma Wi-Fi que el PC de trading: la URL es `http://<IP-del-PC>:8000` (el engine la imprime al arrancar,
+     p. ej. `http://192.168.1.40:8000`). El paso 2 del apartado 1 (regla del firewall) tiene que estar hecho.
+   - Desde fuera de casa (datos móviles), lo más sencillo es **Tailscale**: instálalo en el PC y en el teléfono con la
+     misma cuenta y usa la IP de Tailscale del PC (`http://100.x.y.z:8000`). Es una red privada entre tus dispositivos;
+     nada queda abierto a Internet. Alternativa con dominio y HTTPS: Cloudflare Tunnel (`docs/ARQUITECTURA.md` §2).
+2. **Abrir la URL en el navegador del teléfono** y entrar con el token (*URL del engine* = esa dirección; el teléfono la
+   recuerda).
+3. **Instalar**:
+   - **Android (Chrome):** menú ⋮ → *Instalar aplicación* (o *Añadir a pantalla de inicio*) → *Instalar*.
+   - **iPhone (Safari):** botón *Compartir* (el cuadrado con la flecha) → *Añadir a pantalla de inicio* → *Añadir*. Tiene
+     que ser Safari; desde Chrome en iPhone no aparece la opción.
+4. Abrir desde el icono. La sesión y la URL se guardan en ese teléfono; para cambiar de engine, *Salir* y volver a entrar.
+
+Sobre `http://` con IP (sin HTTPS) el navegador instala la app en modo "acceso directo" (pantalla completa, sin caché
+offline). Funciona igual. Con HTTPS (túnel) la instalación es la completa.
+
+### Avisos al teléfono
+
+Hay dos vías, y se pueden usar las dos a la vez (*Riesgo → Avisos al teléfono*):
+
+- **Telegram** (recomendada): avisa **aunque la consola esté cerrada** o el teléfono bloqueado. Manda los eventos
+  importantes: límite de pérdida u objetivo alcanzado (y el aviso al 80 %), drawdown, kill switch, cierres, stop
+  rechazado, orden rechazada, cuenta bloqueada por el prop firm, seguidora desincronizada, addon sin heartbeat o
+  reiniciado, mensajes perdidos, errores. Agrupa lo que pasa en el mismo instante en un solo mensaje y no repite el mismo
+  aviso de la misma cuenta en un minuto. Configurarlo lleva dos minutos:
+  1. En Telegram abre **@BotFather**, escribe `/newbot`, dale un nombre (p. ej. *TradePilot avisos*) y un usuario que
+     acabe en `bot`. BotFather responde con el **token** (`123456789:AAH…`): cópialo.
+  2. Abre el chat de tu bot nuevo (BotFather te da el enlace) y escríbele `/start`.
+  3. En la consola, *Riesgo → Avisos al teléfono*: pega el token, pulsa **Detectar chat** (encuentra tu chat gracias al
+     `/start`), marca *Telegram activado*, elige qué grupos de avisos quieres, **Guardar** y **Enviar prueba**. Debe llegar
+     un mensaje a Telegram en el acto.
+  El grupo *Cada operación* manda un mensaje por cada fill: útil para vigilar un día concreto, ruidoso a diario.
+- **En este dispositivo**: notificaciones del navegador. Pulsa *Activar avisos en este dispositivo* y acepta el permiso.
+  Avisan con la consola abierta o en segundo plano (Android y PC); en iPhone solo mientras la app está abierta. No
+  necesitan configuración, pero no sustituyen a Telegram cuando la app está cerrada.
 
 ### La consola de un vistazo
 

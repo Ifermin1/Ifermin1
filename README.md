@@ -44,6 +44,8 @@ Descarga los cambios, copia el addon actualizado a la carpeta de AddOns de Ninja
 3. En el teléfono abre `http://<IP-del-PC>:8000`, deja esa URL en el campo *URL del engine* y pon el `API_TOKEN`.
 4. Para tenerla como app: en Android, menú de Chrome → *Añadir a pantalla de inicio*; en iOS, botón compartir de Safari → *Añadir a pantalla de inicio*.
 
+Avisos al teléfono (Telegram y notificaciones del navegador) e instalación paso a paso: `docs/GUIA.md` §3.
+
 Nota: sobre `http://` con IP (sin HTTPS) el navegador no registra el *service worker*, así que el icono en el escritorio funciona como acceso directo a pantalla completa pero no hay instalación "oficial" ni caché offline. La app funciona igual; la instalación completa llega cuando se ponga HTTPS (túnel), más adelante.
 
 ## Arranque en Windows con un solo comando

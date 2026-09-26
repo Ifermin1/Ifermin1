@@ -15,6 +15,7 @@ from tradepilot.services.replication_service import ReplicationService
 from tradepilot.services.risk_service import RiskService
 from tradepilot.services.commission_service import CommissionService
 from tradepilot.services.performance_service import PerformanceService
+from tradepilot.services.notify_service import NotifyService
 from tradepilot.services.sync_service import SyncService
 
 
@@ -32,6 +33,7 @@ class Container:
     journal: Journal
     commissions: CommissionService | None = None
     performance: PerformanceService | None = None
+    notify: NotifyService | None = None
 
     async def start(self) -> None:
         await self.bridge.start()
@@ -93,6 +95,7 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
     accounts.commissions = commissions
     replication.commissions = commissions
     risk.commissions = commissions
+    notify = NotifyService(store, bus)
     performance = PerformanceService(store, commissions, cfg.DRAWDOWN_EOD_TIME)
     accounts.performance = performance
     replication.performance = performance
@@ -109,4 +112,4 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
             except Exception as exc:
                 logger.exception(f"Error en vigilancia de {name}: {exc}")
     accounts.after_sync = _after_sync
-    return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal, commissions, performance)
+    return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal, commissions, performance, notify)

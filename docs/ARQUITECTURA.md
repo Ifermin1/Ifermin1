@@ -127,6 +127,7 @@ Documentación interactiva en `/docs` (Swagger) cuando el engine está arrancado
 | Salta el stop/TP de una entrada que la seguidora no tiene (se bloqueó por tamaño) | El engine recuerda las órdenes pendientes del maestro; el fill de una que la seguidora no tiene copiada solo cierra lo que sus propios stops/TPs vivos no cubren, y el fill de su propio stop cuenta en vuelo hasta que el bróker lo refleja. Un cierre nunca va contra el signo de la posición (16/9 14:14: 173 quedó corta 3) | `_master_pending`, `_on_follower_fill` |
 | ¿Entran todas al precio de la maestra? | `ReplicationService.executions`: por cada orden copiada, precio medio de la maestra y fill de cada seguidora con deslizamiento en ticks (`domain/symbols.py`), latencia y tiempo en bróker; `GET /api/execution`; `PUT /api/rules/entry` aplica el mismo modo de entrada a todas las seguidoras (`ENTRY_MODE_SET`). El simulador devuelve fills con 0-2 ticks y 80-300 ms para verlo sin NinjaTrader. Plan en `docs/PLAN_MISMO_PRECIO.md` | `_note_execution`, `_note_follower_fill`, `ExecutionQuality.tsx`, `MockBridge._ack_fill` |
 | Historial de rendimiento (calendario) | `PerformanceService`: reconstruye cada operación cerrada a partir de los fills (posición por cuenta y raíz: entradas, salidas parciales, giros; P&L = puntos × valor del punto; comisiones estimadas) en la tabla `trades`, y guarda el P&L diario del bróker por cuenta en `daily_stats`; `GET /api/stats/month?month=AAAA-MM&account=` devuelve días (bróker o suma de operaciones, comisiones, aciertos) y operaciones. El simulador genera 45 días de demostración (`MOCK_DEMO_HISTORY`) | `performance_service.py`, `Performance.tsx` |
+| Enterarse de un límite, un cierre o un addon caído sin estar mirando la consola | `NotifyService`: suscrito a la auditoría, manda por Telegram (Bot API, `httpx`) los tipos configurados, agrupados en 1,5 s y sin repetir el mismo aviso de la misma cuenta en 60 s; `GET/PUT /api/notifications`, `POST /api/notifications/test`, `POST /api/notifications/discover-chat` (lee `getUpdates` tras el `/start`). En la consola, además, notificaciones del navegador (`lib/notify.ts`) para los eventos importantes que llegan por WebSocket | `notify_service.py`, `NotifyCard.tsx` |
 | Diagnóstico de incidentes | Diario JSONL (`data/journal/AAAA-MM-DD.jsonl`) con cada mensaje recibido y cada orden enviada | `journal.py` |
 | Addon desactualizado sin saberlo | `MIN_ADDON_VERSION`; aviso rojo en *Inicio* | `/api/health.addon_outdated` |
 | No ver qué stops tiene realmente cada seguidora | `GET_ORDERS` cada 2 s (addon v2.2) → `AccountSnapshot.working_orders`; el panel por cuenta muestra stop/TP con distancia al último tick (`market.price`) | `account_service.apply_orders`, *Inicio* / *Cuentas* |
@@ -156,7 +157,7 @@ de 2 s y el bróker ya no tiene viva se purga, y una salida del lado contrario n
 fantasma recortó cada stop nuevo a 1 y las seguidoras quedaron cortas 1 tres veces). Un fill en vuelo solo se asienta
 contra una foto de posiciones pedida después de recibirlo, y los fills parciales del maestro copian lo que la seguidora
 aún deba (`_master_filled`) en vez de saltarse por "ya ejecutó su orden".
-Pendiente: avisos por Telegram.
+Avisos por Telegram: hechos (`NotifyService`).
 
 ## 7. Próximos pasos sugeridos
 

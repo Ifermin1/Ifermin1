@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { show as notifyShow } from "./notify";
 import { makeClient, loadSession, saveSession, type Account, type AuditEvent, type Client, type Health, type Price,
          type RiskState, type Rule, type Session } from "./api";
 import { root } from "./format";
@@ -67,7 +68,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (topic === "accounts.snapshot") setAccounts(data);
         else if (topic === "broker.health") setHealth((h) => (h ? { ...h, bridge: data } : h));
         else if (topic === "risk.state") setRisk(data);
-        else if (topic === "audit.event") setAudit((list) => [data, ...list].slice(0, 300));
+        else if (topic === "audit.event") { setAudit((list) => [data, ...list].slice(0, 300)); void notifyShow(data); }
         else if (topic === "market.price" && data?.symbol && typeof data.last === "number") {
           priceBuf.current[root(data.symbol)] = { symbol: data.symbol, last: data.last, bid: data.bid ?? data.last, ask: data.ask ?? data.last, at: Date.now() };
         }

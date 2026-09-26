@@ -3,6 +3,7 @@ import { useStore } from "../lib/store";
 import { money, time, signedMoney } from "../lib/format";
 import { Card, Empty } from "../components/ui";
 import type { Commissions, RiskLimit } from "../lib/api";
+import { NotifyCard } from "../components/NotifyCard";
 import { DrawdownMeter, ddTone } from "../components/AccountPanel";
 
 const MODE_LABEL: Record<string, string> = { intraday: "dinámico", eod: "EOD", closed: "cerrado" };
@@ -214,6 +215,8 @@ export function Risk() {
           <button className="primary">Guardar comisiones</button>
         </form>
       </Card>
+
+      <NotifyCard client={client} />
 
       <Card title="Límites por cuenta">
         <form className="rule-form" id="limit-form" onSubmit={save}>

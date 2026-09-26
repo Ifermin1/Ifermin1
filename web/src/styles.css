@@ -333,6 +333,16 @@ table.trades td, table.trades th { font-size: 12px; white-space: nowrap; }
 .cal-legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 11px; color: var(--muted); align-items: center; }
 .cal-legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1px solid var(--line); vertical-align: -2px; margin-right: 3px; }
 
+/* avisos al teléfono */
+.notify-grid { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 900px) { .notify-grid { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); } }
+.notify-form { display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr); margin: 8px 0; }
+@media (min-width: 640px) { .notify-form { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); } }
+.notify-groups { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 10px; }
+.notify-group span { display: inline; }
+.notify-grid .chips { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
+
 /* auditoría: filtros */
 .filters { display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr); margin-bottom: 10px; }
 .filters .chips { grid-column: 1 / -1; }

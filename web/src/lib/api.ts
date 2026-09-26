@@ -51,6 +51,11 @@ export type Trade = { id: number; account_id: string; day: string; symbol: strin
                       exit_price: number; pnl: number; commissions: number; opened_at: string | null; closed_at: string; fills: number };
 export type MonthStats = { from: string; to: string; days: DayStat[]; trades: Trade[]; accounts: string[] };
 
+/** Avisos por Telegram (engine → teléfono). */
+export type NotifyState = { enabled: boolean; bot_token: string; chat_id: string; events: string[]; defaults: string[]; titles: Record<string, string>;
+                            stats: { sent: number; errors: number; last_error: string | null; last_sent_at: number | null; suppressed: number } };
+export type NotifyConfig = Pick<NotifyState, "enabled" | "bot_token" | "chat_id" | "events">;
+
 export type Session = { baseUrl: string; token: string };
 
 const KEY = "tpx.session";
@@ -93,6 +98,10 @@ export function makeClient(s: Session) {
     risk: () => req<RiskState>("/api/risk"),
     pnl: (hours = 24) => req<PnlHistory>(`/api/pnl?hours=${hours}`),
     execution: (limit = 40) => req<Execution[]>(`/api/execution?limit=${limit}`),
+    notifications: () => req<NotifyState>("/api/notifications"),
+    setNotifications: (c: NotifyConfig) => req<NotifyState>("/api/notifications", { method: "PUT", body: JSON.stringify(c) }),
+    testNotifications: () => req<{ ok: boolean; error: string | null }>("/api/notifications/test", { method: "POST" }),
+    discoverChat: (bot_token?: string) => req<{ ok: boolean; chat_id?: string; name?: string; error?: string }>("/api/notifications/discover-chat", { method: "POST", body: JSON.stringify({ bot_token }) }),
     /** Calendario: `month` = AAAA-MM; `account` vacío = todas. */
     month: (month: string, account = "") => req<MonthStats>(`/api/stats/month?month=${month}${account ? `&account=${encodeURIComponent(account)}` : ""}`),
     /** Mismo modo de entrada para todas las seguidoras de la maestra actual. */

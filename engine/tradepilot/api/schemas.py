@@ -19,6 +19,17 @@ class RuleCreate(ExecutionOptions):
     enabled: bool = True
 
 
+class NotifyRequest(BaseModel):
+    enabled: bool = False
+    bot_token: str = ""
+    chat_id: str = ""
+    events: list[str] = Field(default_factory=list)
+
+
+class DiscoverChatRequest(BaseModel):
+    bot_token: Optional[str] = None
+
+
 class EntryPreset(BaseModel):
     """Mismo modo de entrada para todas las seguidoras de la maestra (botones de "Calidad de ejecución")."""
     entry_mode: str = Field(pattern="^(market|limit)$")

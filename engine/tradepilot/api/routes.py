@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from tradepilot.api.auth import require_token
-from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset
+from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest
 from tradepilot.container import Container
 from tradepilot.domain.risk import RiskLimit, Schedule
 
@@ -128,6 +128,42 @@ def set_entry_for_all(body: EntryPreset, request: Request):
 def execution_quality(request: Request, limit: int = 40):
     """Últimas operaciones copiadas con el fill de cada seguidora: precio, deslizamiento en ticks y tiempos."""
     return _c(request).replication.recent_executions(min(max(1, limit), 300))
+
+
+@router.get("/notifications")
+def get_notifications(request: Request):
+    c = _c(request)
+    if c.notify is None:
+        raise HTTPException(503, "avisos no disponibles")
+    return c.notify.state()
+
+
+@router.put("/notifications")
+def set_notifications(body: NotifyRequest, request: Request):
+    """Avisos por Telegram: token del bot, chat y qué eventos mandar."""
+    from tradepilot.services.notify_service import NotifyConfig
+    c = _c(request)
+    if c.notify is None:
+        raise HTTPException(503, "avisos no disponibles")
+    cfg = c.notify.set_config(NotifyConfig(**body.model_dump()))
+    c.audit.log("NOTIFY_SET", f"Avisos por Telegram {'activados' if cfg.enabled else 'desactivados'} ({len(cfg.events)} tipos de evento)")
+    return c.notify.state()
+
+
+@router.post("/notifications/test")
+async def test_notifications(request: Request):
+    c = _c(request)
+    if c.notify is None:
+        raise HTTPException(503, "avisos no disponibles")
+    return await c.notify.test()
+
+
+@router.post("/notifications/discover-chat")
+async def discover_chat(body: DiscoverChatRequest, request: Request):
+    c = _c(request)
+    if c.notify is None:
+        raise HTTPException(503, "avisos no disponibles")
+    return await c.notify.discover_chat(body.bot_token)
 
 
 @router.get("/stats/month")
