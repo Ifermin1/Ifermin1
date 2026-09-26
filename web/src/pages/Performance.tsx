@@ -5,6 +5,7 @@ import { money, moneyShort, signedMoney } from "../lib/format";
 import { Card, Empty, Kpi } from "../components/ui";
 import { Icon } from "../components/Icons";
 import { ShareModal, type ShareData } from "../components/ShareCard";
+import { NewsPanel } from "../components/NewsPanel";
 
 /* Calendario de rendimiento: un mes de un vistazo (P&L neto por día, operaciones, aciertos), indicadores del mes,
  * curva acumulada y el detalle de un día con sus operaciones. Verde/rojo con tres intensidades según el tamaño del día. */
@@ -30,6 +31,7 @@ export function Performance() {
   const [selected, setSelected] = useState<string | null>(null);
   const [hover, setHover] = useState<number | null>(null);
   const [share, setShare] = useState(false);
+  const [view, setView] = useState<"perf" | "news">(() => (window.location.hash.includes("news") ? "news" : "perf"));
   const [width, setWidth] = useState(600);
   const box = useRef<HTMLDivElement>(null);
   const [ddWidth, setDdWidth] = useState(500);
@@ -143,10 +145,20 @@ export function Performance() {
     bars: series.map((s) => ({ day: s.day, net: s.net })) };
   if (!client) return null;
 
+  if (view === "news") {
+    return (
+      <div className="grid" data-testid="performance">
+        <Card title="Calendario económico" icon="news" right={<div className="view-tabs" data-testid="view-tabs"><button onClick={() => setView("perf")}>Rendimiento</button><button className="active">Noticias</button></div>}>
+          <NewsPanel client={client} />
+        </Card>
+      </div>
+    );
+  }
   return (
     <div className="grid" data-testid="performance">
       <Card>
         <div className="perf-bar">
+          <div className="view-tabs" data-testid="view-tabs"><button className="active">Rendimiento</button><button onClick={() => setView("news")}>Noticias</button></div>
           <div className="month-nav">
             <button className="chip-btn" onClick={() => setCursor(new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1))} aria-label="Mes anterior">‹</button>
             <b>{cursor.toLocaleDateString("es-ES", { month: "long", year: "numeric" })}</b>

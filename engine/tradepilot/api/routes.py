@@ -166,6 +166,15 @@ async def discover_chat(body: DiscoverChatRequest, request: Request):
     return await c.notify.discover_chat(body.bot_token)
 
 
+@router.get("/news")
+async def news(request: Request, days: int = 7, countries: str | None = None, min_impact: str = "low"):
+    """Calendario económico (ForexFactory): eventos de los próximos `days` días; `countries` = USD,EUR…; `min_impact` = low|medium|high."""
+    c = _c(request)
+    if c.news is None:
+        raise HTTPException(503, "calendario económico no disponible")
+    return await c.news.get(days, [x for x in (countries or "").split(",") if x], min_impact)
+
+
 @router.get("/stats/month")
 def stats_month(request: Request, month: str | None = None, account: str | None = None):
     """Calendario: días (P&L del bróker o suma de operaciones, comisiones, operaciones, aciertos) y operaciones del mes.

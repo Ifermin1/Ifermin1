@@ -51,7 +51,7 @@ export function StatusStrip({ className = "" }: { className?: string }) {
 }
 
 export function Shell({ route, onRoute, children }: { route: Route; onRoute: (r: Route) => void; children: ReactNode }) {
-  const { health, wsStatus, risk, logout, session, density, setDensity } = useStore();
+  const { health, wsStatus, risk, logout, session, density, setDensity, theme, setTheme } = useStore();
   const connected = health?.bridge.connected ?? null;
   return (
     <div className="shell">
@@ -82,6 +82,8 @@ export function Shell({ route, onRoute, children }: { route: Route; onRoute: (r:
             {risk?.kill_switch && <span className="badge bad blink">KILL SWITCH</span>}
             <Badge ok={connected}>{health ? (health.mode === "mock" ? "Simulador" : "NinjaTrader") : "…"} {connected ? "conectado" : "sin datos"}</Badge>
             <Badge ok={wsStatus === "open" ? true : wsStatus === "connecting" ? null : false}>en vivo</Badge>
+            <button className="ghost icon-btn" title={theme === "light" ? "Tema oscuro" : "Tema claro"} aria-pressed={theme === "light"} data-testid="theme-toggle"
+                    onClick={() => setTheme(theme === "light" ? "dark" : "light")}><Icon name={theme === "light" ? "moon" : "sun"} size={16} /></button>
             <button className={`ghost icon-btn ${density === "compact" ? "active" : ""}`} title={density === "compact" ? "Vista amplia" : "Vista compacta"}
                     aria-pressed={density === "compact"} onClick={() => setDensity(density === "compact" ? "cozy" : "compact")}>{density === "compact" ? "▤" : "▥"}</button>
           </div>

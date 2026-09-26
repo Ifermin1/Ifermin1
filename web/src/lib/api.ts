@@ -56,6 +56,11 @@ export type NotifyState = { enabled: boolean; bot_token: string; chat_id: string
                             stats: { sent: number; errors: number; last_error: string | null; last_sent_at: number | null; suppressed: number } };
 export type NotifyConfig = Pick<NotifyState, "enabled" | "bot_token" | "chat_id" | "events">;
 
+/** Calendario económico (ForexFactory vía el engine). */
+export type NewsEvent = { id: string; time: string; country: string; country_name: string; title: string; impact: "high" | "medium" | "low" | "holiday";
+                          forecast: string | null; previous: string | null; actual: string | null };
+export type NewsFeed = { events: NewsEvent[]; fetched_at: number | null; error: string | null; countries: string[]; source: string };
+
 export type Session = { baseUrl: string; token: string };
 
 const KEY = "tpx.session";
@@ -102,6 +107,7 @@ export function makeClient(s: Session) {
     setNotifications: (c: NotifyConfig) => req<NotifyState>("/api/notifications", { method: "PUT", body: JSON.stringify(c) }),
     testNotifications: () => req<{ ok: boolean; error: string | null }>("/api/notifications/test", { method: "POST" }),
     discoverChat: (bot_token?: string) => req<{ ok: boolean; chat_id?: string; name?: string; error?: string }>("/api/notifications/discover-chat", { method: "POST", body: JSON.stringify({ bot_token }) }),
+    news: (days = 7, countries = "", minImpact = "low") => req<NewsFeed>(`/api/news?days=${days}${countries ? `&countries=${encodeURIComponent(countries)}` : ""}&min_impact=${minImpact}`),
     /** Calendario: `month` = AAAA-MM; `account` vacío = todas. */
     month: (month: string, account = "") => req<MonthStats>(`/api/stats/month?month=${month}${account ? `&account=${encodeURIComponent(account)}` : ""}`),
     /** Mismo modo de entrada para todas las seguidoras de la maestra actual. */

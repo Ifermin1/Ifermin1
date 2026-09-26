@@ -5,6 +5,7 @@ import { Card, Empty, Kpi } from "../components/ui";
 import { AccountPanel } from "../components/AccountPanel";
 import { PnlChart } from "../components/PnlChart";
 import { ExecutionQuality } from "../components/ExecutionQuality";
+import { NewsToday } from "../components/NewsPanel";
 
 /** Inicio = sala de control: alertas, P&L del día, cuentas en juego y estado del puente. */
 export function Dashboard() {
@@ -91,6 +92,9 @@ export function Dashboard() {
         </div>
 
         <div className="dash-col">
+          <Card title="Noticias de hoy" icon="news" right={<span className="muted small">EE. UU. · impacto medio y alto</span>}>
+            {client ? <NewsToday client={client} /> : null}
+          </Card>
           <Card title={`Cuentas en juego · ${inPlay.length}`} icon="users" right={<span className="muted small">{Object.keys(prices).length ? `en vivo: ${Object.values(prices).map((p) => `${p.symbol} ${p.last}`).join(" · ")}` : "sin ticks de precio"}</span>}>
             {inPlay.length === 0 ? <Empty>{accounts.length ? "Ninguna seguidora está copiando. Actívalas en Cuentas." : "Esperando cuentas del bróker…"}</Empty> : (
               <div className="panels">

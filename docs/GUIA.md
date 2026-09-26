@@ -119,6 +119,7 @@ Hay dos vías, y se pueden usar las dos a la vez (*Riesgo → Avisos al teléfon
   que el P&L se está estimando con el último precio del addon; sin `≈` es el dato tal cual lo reporta NinjaTrader.
 - **Vista compacta**: el botón ▥ de la esquina superior derecha reduce márgenes y tamaños para ver más cuentas en pantalla
   (ideal en el teléfono). Se recuerda en ese navegador.
+- **Tema claro u oscuro**: el botón ☀/☾ junto al anterior. También se recuerda en ese navegador.
 - **Inicio** es la sala de control: avisos rojos, indicadores del día, el **gráfico de P&L** (una línea por cuenta; rangos
   `1h`, `4h`, `hoy`; toca el gráfico para ver los valores a una hora; pulsa una cuenta de la leyenda para ocultarla; *Tabla*
   muestra las mismas cifras cada 5 minutos), la tarjeta **Calidad de ejecución** (¿entran todas las seguidoras al precio del
@@ -136,6 +137,10 @@ Hay dos vías, y se pueden usar las dos a la vez (*Riesgo → Avisos al teléfon
   acumulado, la evolución del mes (barras diarias y acumulado), largos frente a cortos y el informe **por duración de la
   operación** (P&L, número y aciertos por tramo: 0-15 s, 15-45 s, 1-2 min…). **Compartir** genera una tarjeta con las
   cifras del mes (sin nombres de cuenta) para descargarla como imagen o copiarla y pegarla en Telegram, WhatsApp o X.
+  La pestaña **Noticias** (arriba, junto a *Rendimiento*) es el **calendario económico**: la semana en siete columnas con
+  cada dato (hora local, impacto alto/medio/bajo, previsión, anterior y real), filtro de país e impacto, y el próximo
+  evento de alto impacto con cuenta atrás; en *Inicio* aparece lo que queda hoy de impacto medio o alto. Los datos
+  vienen de ForexFactory a través del engine (el PC del engine necesita Internet); se actualizan cada 30 minutos.
   El selector *Cuenta* filtra una sola cuenta. El P&L
   del día es el que reporta el bróker (NinjaTrader); las operaciones se reconstruyen con los fills que ve el engine
   (maestra, seguidoras y manuales), así que solo hay operaciones desde que el engine está en marcha. La sesión que abre a

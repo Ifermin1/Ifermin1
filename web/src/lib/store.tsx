@@ -14,11 +14,15 @@ type Store = {
   health: Health | null; accounts: Account[]; rules: Rule[]; audit: AuditEvent[]; risk: RiskState | null;
   prices: PriceMap; wsStatus: WsStatus; error: string | null;
   density: Density; setDensity: (d: Density) => void;
+  theme: Theme; setTheme: (t: Theme) => void;
   refresh: () => Promise<void>; setRules: (r: Rule[]) => void; setRisk: (r: RiskState) => void;
 };
 
 const Ctx = createContext<Store | null>(null);
 const DENSITY_KEY = "tpx.density";
+export type Theme = "dark" | "light";
+const THEME_KEY = "tpx.theme";
+const loadTheme = (): Theme => { try { return localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark"; } catch { return "dark"; } };
 const loadDensity = (): Density => { try { return localStorage.getItem(DENSITY_KEY) === "compact" ? "compact" : "cozy"; } catch { return "cozy"; } };
 
 export function StoreProvider({ children }: { children: ReactNode }) {
@@ -38,6 +42,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const setDensity = useCallback((d: Density) => { setDensityState(d); try { localStorage.setItem(DENSITY_KEY, d); } catch { /* modo privado */ } }, []);
   useEffect(() => { document.documentElement.dataset.density = density; }, [density]);
+  const [theme, setThemeState] = useState<Theme>(loadTheme);
+  const setTheme = useCallback((t: Theme) => { setThemeState(t); try { localStorage.setItem(THEME_KEY, t); } catch { /* modo privado */ } }, []);
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme === "light" ? "#f5f7fb" : "#0b1220");
+  }, [theme]);
 
   const refresh = useCallback(async () => {
     if (!client) return;
@@ -88,7 +98,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [client, refresh]);
 
   const value: Store = { session, client, login, logout, health, accounts, rules, audit, risk, prices, wsStatus, error,
-                         density, setDensity, refresh, setRules, setRisk };
+                         density, setDensity, theme, setTheme, refresh, setRules, setRisk };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
