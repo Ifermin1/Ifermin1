@@ -173,7 +173,9 @@ class MockBridge(BrokerBridge):
         if not self._running:
             return
         ticks = random.choice([0, 0, 0, 0, 1, 1, 2]) * tick_size(symbol)
-        price = round((ref_price or 20000.0) + (ticks if action.upper().startswith("BUY") else -ticks), 6)
+        # las órdenes de igualar/cerrar (SYNC-/FIX-) llegan sin precio: se llenan al último precio simulado del símbolo
+        base = ref_price or self._px.get(symbol, 20000.0)
+        price = round(base + (ticks if action.upper().startswith("BUY") else -ticks), 6)
         await self.bus.publish(TOPIC_MASTER_EVENT, {
             "msg_type": "EXECUTION", "account": account, "action": action, "symbol": symbol, "quantity": quantity,
             "price": price, "order_type": "MARKET", "state": "Filled", "order_id": "F" + uuid.uuid4().hex[:8],

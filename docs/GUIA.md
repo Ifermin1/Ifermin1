@@ -132,7 +132,11 @@ Hay dos vías, y se pueden usar las dos a la vez (*Riesgo → Avisos al teléfon
   mayor), el número de operaciones y el % de ganadoras; totales por semana; indicadores del mes (P&L neto, días verdes y
   rojos, operaciones y % ganadoras, factor de beneficio, media ganadora y perdedora, mejor y peor día, racha); toca un día
   para ver sus operaciones cerradas (entrada, salida, lado, contratos, precios, P&L, comisiones, duración) y el reparto por
-  cuenta; abajo, la evolución del mes (barras diarias y acumulado). El selector *Cuenta* filtra una sola cuenta. El P&L
+  cuenta; la **puntuación del mes** (0-100: aciertos, factor de beneficio y ratio ganancia/pérdida), el **drawdown** del
+  acumulado, la evolución del mes (barras diarias y acumulado), largos frente a cortos y el informe **por duración de la
+  operación** (P&L, número y aciertos por tramo: 0-15 s, 15-45 s, 1-2 min…). **Compartir** genera una tarjeta con las
+  cifras del mes (sin nombres de cuenta) para descargarla como imagen o copiarla y pegarla en Telegram, WhatsApp o X.
+  El selector *Cuenta* filtra una sola cuenta. El P&L
   del día es el que reporta el bróker (NinjaTrader); las operaciones se reconstruyen con los fills que ve el engine
   (maestra, seguidoras y manuales), así que solo hay operaciones desde que el engine está en marcha. La sesión que abre a
   la hora de cierre (17:00 por defecto, `DRAWDOWN_EOD_TIME`) cuenta como el día siguiente, como en CME.

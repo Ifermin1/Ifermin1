@@ -1,18 +1,19 @@
 import { useState, type ReactNode } from "react";
 import { useStore } from "../lib/store";
 import { Badge } from "./ui";
+import { Icon, type IconName } from "./Icons";
 import { livePnl } from "./AccountPanel";
 import { signedMoney } from "../lib/format";
 
 export type Route = "dashboard" | "performance" | "accounts" | "replicator" | "risk" | "audit";
 
-const NAV: { id: Route; label: string; icon: string }[] = [
-  { id: "dashboard", label: "Inicio", icon: "▦" },
-  { id: "performance", label: "Calendario", icon: "▤" },
-  { id: "accounts", label: "Cuentas", icon: "◎" },
-  { id: "replicator", label: "Copiar", icon: "⧉" },
-  { id: "risk", label: "Riesgo", icon: "⚠" },
-  { id: "audit", label: "Auditoría", icon: "≡" },
+const NAV: { id: Route; label: string; icon: IconName }[] = [
+  { id: "dashboard", label: "Inicio", icon: "home" },
+  { id: "performance", label: "Calendario", icon: "calendar" },
+  { id: "accounts", label: "Cuentas", icon: "users" },
+  { id: "replicator", label: "Copiar", icon: "copy" },
+  { id: "risk", label: "Riesgo", icon: "shield" },
+  { id: "audit", label: "Auditoría", icon: "list" },
 ];
 
 /** Resumen siempre visible: P&L del día de las cuentas en juego, cuántas copian y el kill switch. */
@@ -55,15 +56,19 @@ export function Shell({ route, onRoute, children }: { route: Route; onRoute: (r:
   return (
     <div className="shell">
       <aside className="sidenav">
-        <div className="brand"><span className="brand-dot" />TradePilot X</div>
+        <div className="brand"><span className="brand-dot" /><span className="brand-text">TradePilot X</span></div>
         <nav>
           {NAV.map((n) => (
             <button key={n.id} className={route === n.id ? "active" : ""} onClick={() => onRoute(n.id)}>
-              <span className="nav-icon">{n.icon}</span>{n.label}
+              <span className="nav-icon"><Icon name={n.icon} size={16} /></span>{n.label}
             </button>
           ))}
         </nav>
         <div className="sidenav-foot">
+          <div className="chips">
+            <Badge ok={connected}>{health ? (health.mode === "mock" ? "Simulador" : "NinjaTrader") : "…"}</Badge>
+            <Badge ok={wsStatus === "open" ? true : wsStatus === "connecting" ? null : false}>en vivo</Badge>
+          </div>
           <div className="muted small">{session?.baseUrl}</div>
           <button className="link" onClick={logout}>Salir</button>
         </div>
@@ -88,7 +93,7 @@ export function Shell({ route, onRoute, children }: { route: Route; onRoute: (r:
       <nav className="tabbar">
         {NAV.map((n) => (
           <button key={n.id} className={route === n.id ? "active" : ""} onClick={() => onRoute(n.id)}>
-            <span className="nav-icon">{n.icon}</span><span>{n.label}</span>
+            <span className="nav-icon"><Icon name={n.icon} size={18} /></span><span>{n.label}</span>
           </button>
         ))}
       </nav>

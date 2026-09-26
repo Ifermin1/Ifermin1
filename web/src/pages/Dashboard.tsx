@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useStore } from "../lib/store";
 import { ago, time } from "../lib/format";
-import { Card, Empty, Stat } from "../components/ui";
+import { Card, Empty, Kpi } from "../components/ui";
 import { AccountPanel } from "../components/AccountPanel";
 import { PnlChart } from "../components/PnlChart";
 import { ExecutionQuality } from "../components/ExecutionQuality";
@@ -64,42 +64,49 @@ export function Dashboard() {
       )}
 
       <div className="stats">
-        <Stat label="Copiando" value={`${copying.length} / ${accounts.filter((a) => a.enabled && a.account_id !== master).length}`} tone={copying.length ? "ok" : "muted"} />
-        <Stat label="Posiciones abiertas" value={openPositions} tone={openPositions ? "warn" : "muted"} />
-        <Stat label="Órdenes replicadas" value={health?.stats.orders_out ?? 0} />
-        <Stat label="Fills seguidores" value={health?.stats.fills ?? 0} tone={health?.stats.fills ? "ok" : "muted"} />
-        <Stat label="Rechazadas · bloqueadas" value={`${health?.stats.rejected ?? 0} · ${health?.stats.blocked ?? 0}`} tone={(health?.stats.rejected || health?.stats.blocked) ? "bad" : "muted"} />
-        <Stat label="Errores" value={health?.stats.errors ?? 0} tone={health?.stats.errors ? "bad" : "ok"} />
-        <Stat label="Latencia copia" value={health?.stats.latency_ms_avg != null ? `${health.stats.latency_ms_avg} ms` : "—"}
-              tone={health?.stats.latency_ms_avg == null ? "muted" : health.stats.latency_ms_avg > 500 ? "warn" : "ok"} />
-        <Stat label="Deslizamiento medio" value={health?.stats.slippage_avg != null ? `${health.stats.slippage_avg > 0 ? "+" : ""}${health.stats.slippage_avg} pts` : "—"}
-              tone={health?.stats.slippage_avg == null ? "muted" : health.stats.slippage_avg > 1 ? "warn" : "ok"} />
+        <Kpi label="Copiando" icon="users" value={`${copying.length} / ${accounts.filter((a) => a.enabled && a.account_id !== master).length}`} tone={copying.length ? "ok" : "muted"}
+             ring={accounts.filter((a) => a.enabled && a.account_id !== master).length ? (100 * copying.length) / accounts.filter((a) => a.enabled && a.account_id !== master).length : null} sub="seguidoras activas" />
+        <Kpi label="Posiciones" icon="layers" value={openPositions} tone={openPositions ? "warn" : "muted"} sub={openPositions ? "abiertas ahora" : "todo plano"} />
+        <Kpi label="Órdenes replicadas" icon="copy" value={health?.stats.orders_out ?? 0} tone="accent" sub="en esta sesión" />
+        <Kpi label="Fills seguidoras" icon="check" value={health?.stats.fills ?? 0} tone={health?.stats.fills ? "ok" : "muted"} sub="ejecuciones confirmadas" />
+        <Kpi label="Rechazadas · bloqueadas" icon="x" value={`${health?.stats.rejected ?? 0} · ${health?.stats.blocked ?? 0}`} tone={(health?.stats.rejected || health?.stats.blocked) ? "bad" : "muted"} sub="por el bróker · por riesgo" />
+        <Kpi label="Errores" icon="bolt" value={health?.stats.errors ?? 0} tone={health?.stats.errors ? "bad" : "ok"} sub="del puente" />
+        <Kpi label="Latencia copia" icon="clock" value={health?.stats.latency_ms_avg != null ? `${health.stats.latency_ms_avg} ms` : "—"}
+             tone={health?.stats.latency_ms_avg == null ? "muted" : health.stats.latency_ms_avg > 500 ? "warn" : "ok"} sub="maestro → seguidora, media" />
+        <Kpi label="Deslizamiento" icon="activity" value={health?.stats.slippage_avg != null ? `${health.stats.slippage_avg > 0 ? "+" : ""}${health.stats.slippage_avg} pts` : "—"}
+             tone={health?.stats.slippage_avg == null ? "muted" : health.stats.slippage_avg > 1 ? "warn" : "ok"} sub="positivo = peor que el maestro" />
       </div>
 
-      <Card title="P&L del día" right={<span className="muted small">muestras cada 15 s · realizado + flotante según NinjaTrader</span>}>
-        {client ? <PnlChart accounts={accounts} client={client} master={master} compact={compact} /> : null}
-      </Card>
+      <div className="dash-grid">
+        <div className="dash-col">
+          <Card title="P&L del día" icon="trendUp" right={<span className="muted small">muestras cada 15 s · realizado + flotante según NinjaTrader</span>}>
+            {client ? <PnlChart accounts={accounts} client={client} master={master} compact={compact} /> : null}
+          </Card>
 
-      <Card title="Calidad de ejecución" right={<span className="muted small">¿entran todas al precio del maestro? · últimas 40 operaciones</span>}>
-        {client ? <ExecutionQuality client={client} accounts={accounts} rules={rules} master={master} compact={compact}
-                                    lastFillId={audit.find((a) => a.event_type === "FOLLOWER_FILL" || a.event_type === "ENTRY_MODE_SET")?.id ?? null}
-                                    onRules={(updated) => setRules(rules.map((r) => updated.find((u) => u.id === r.id) ?? r))} /> : null}
-      </Card>
+          <Card title="Calidad de ejecución" icon="target" right={<span className="muted small">¿entran todas al precio del maestro? · últimas 40 operaciones</span>}>
+            {client ? <ExecutionQuality client={client} accounts={accounts} rules={rules} master={master} compact={compact}
+                                        lastFillId={audit.find((a) => a.event_type === "FOLLOWER_FILL" || a.event_type === "ENTRY_MODE_SET")?.id ?? null}
+                                        onRules={(updated) => setRules(rules.map((r) => updated.find((u) => u.id === r.id) ?? r))} /> : null}
+          </Card>
+        </div>
 
-      <Card title={`Cuentas en juego · ${inPlay.length}`} right={<span className="muted small">{Object.keys(prices).length ? `precio en vivo: ${Object.values(prices).map((p) => `${p.symbol} ${p.last}`).join(" · ")}` : "sin ticks de precio"}</span>}>
-        {inPlay.length === 0 ? <Empty>{accounts.length ? "Ninguna seguidora está copiando. Actívalas en Cuentas." : "Esperando cuentas del bróker…"}</Empty> : (
-          <div className="panels">
-            {inPlay.map((a) => (
-              <AccountPanel key={a.account_id} a={a} role={a.account_id === master ? "master" : "follower"} link={linkOf(a.account_id)} limit={limits.get(a.account_id)}
-                            lastFill={lastFill(a.account_id)} lastReject={lastReject(a.account_id)} prices={prices} busy={busy === a.account_id} compact
-                            onFlatten={() => void flatten(a.account_id)} />
-            ))}
-          </div>
-        )}
-      </Card>
+        <div className="dash-col">
+          <Card title={`Cuentas en juego · ${inPlay.length}`} icon="users" right={<span className="muted small">{Object.keys(prices).length ? `en vivo: ${Object.values(prices).map((p) => `${p.symbol} ${p.last}`).join(" · ")}` : "sin ticks de precio"}</span>}>
+            {inPlay.length === 0 ? <Empty>{accounts.length ? "Ninguna seguidora está copiando. Actívalas en Cuentas." : "Esperando cuentas del bróker…"}</Empty> : (
+              <div className="panels">
+                {inPlay.map((a) => (
+                  <AccountPanel key={a.account_id} a={a} role={a.account_id === master ? "master" : "follower"} link={linkOf(a.account_id)} limit={limits.get(a.account_id)}
+                                lastFill={lastFill(a.account_id)} lastReject={lastReject(a.account_id)} prices={prices} busy={busy === a.account_id} compact
+                                onFlatten={() => void flatten(a.account_id)} />
+                ))}
+              </div>
+            )}
+          </Card>
+        </div>
+      </div>
 
       <div className="grid two">
-        <Card title="Puente con el bróker">
+        <Card title="Puente con el bróker" icon="bolt">
           {b ? (
             <div className="kv">
               <div><span>Modo</span><b>{b.mode === "mock" ? "Simulador" : `NinjaTrader${b.addon_version ? ` · addon v${b.addon_version}` : " · addon antiguo"}`}</b></div>
@@ -116,7 +123,7 @@ export function Dashboard() {
           <p className="muted small">Latencia: del fill del maestro al fill del seguidor. Deslizamiento: precio del seguidor frente al del maestro, positivo = peor.</p>
         </Card>
 
-        <Card title="Actividad reciente">
+        <Card title="Actividad reciente" icon="list">
           {audit.length === 0 ? <Empty>Sin actividad todavía.</Empty> : (
             <ul className="feed">
               {audit.slice(0, compact ? 12 : 8).map((a, i) => (
