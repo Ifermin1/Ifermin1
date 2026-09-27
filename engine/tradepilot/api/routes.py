@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from tradepilot.api.auth import require_token
-from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CopyMapLayout
+from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CopyMapLayout, CashEventCreate, CashEventUpdate, AnalysisParams
 from tradepilot.container import Container
 from tradepilot.domain.risk import RiskLimit, Schedule
 
@@ -210,6 +210,86 @@ def put_copy_map(body: CopyMapLayout, request: Request):
     body.links = links
     _c(request).store.set_kv(COPY_MAP_KEY, body.model_dump_json())
     return body.model_dump()
+
+
+ANALYSIS_KEY = "ui.analysis"
+
+
+@router.get("/ui/analysis")
+def get_analysis_params(request: Request):
+    """Parámetros de la pestaña Análisis (o los de fábrica si nunca se guardaron)."""
+    import json
+    raw = _c(request).store.get_kv(ANALYSIS_KEY)
+    if not raw:
+        return AnalysisParams().model_dump()
+    try:
+        return AnalysisParams.model_validate(json.loads(raw)).model_dump()
+    except Exception:
+        return AnalysisParams().model_dump()
+
+
+@router.put("/ui/analysis")
+def put_analysis_params(body: AnalysisParams, request: Request):
+    _c(request).store.set_kv(ANALYSIS_KEY, body.model_dump_json())
+    return body.model_dump()
+
+
+@router.get("/stats/analysis")
+def stats_analysis(request: Request, day_from: str | None = None, day_to: str | None = None, account: str | None = None):
+    """Análisis de un periodo: operaciones, filas por día (bruto, comisiones, P&L del bróker, saldo de cierre, retiros) y
+    movimientos de caja. `day_from`/`day_to` = AAAA-MM-DD (por defecto los últimos 90 días); `account` vacío = todas."""
+    from datetime import date, timedelta
+    c = _c(request)
+    if c.performance is None:
+        raise HTTPException(503, "rendimiento no disponible")
+    today = date.today()
+    d0 = day_from or (today - timedelta(days=90)).isoformat()
+    d1 = day_to or (today + timedelta(days=1)).isoformat()
+    try:
+        date.fromisoformat(d0); date.fromisoformat(d1)
+    except ValueError:
+        raise HTTPException(400, "fechas inválidas (AAAA-MM-DD)")
+    if d1 < d0:
+        raise HTTPException(400, "el fin del periodo es anterior al inicio")
+    return c.performance.analysis(d0, d1, account or None)
+
+
+@router.get("/cash")
+def list_cash(request: Request, account: str | None = None):
+    """Movimientos de caja (retiros solicitados, pagos recibidos, depósitos) anotados a mano; `account` vacío = todas."""
+    return _c(request).store.list_cash_events(account or None)
+
+
+@router.post("/cash", status_code=201)
+def add_cash(body: CashEventCreate, request: Request):
+    from datetime import datetime
+    c = _c(request)
+    e = body.model_dump()
+    e["created_at"] = datetime.now().isoformat(timespec="seconds")
+    e["id"] = c.store.add_cash_event(e)
+    c.audit.log("CASH_EVENT", f"{body.kind} de {body.amount:.2f} USD ({body.status})", body.account_id, None, {"id": e["id"], **body.model_dump()})
+    return e
+
+
+@router.patch("/cash/{event_id}")
+def update_cash(event_id: int, body: CashEventUpdate, request: Request):
+    c = _c(request)
+    if c.store.get_cash_event(event_id) is None:
+        raise HTTPException(404, "movimiento no encontrado")
+    fields = {k: v for k, v in body.model_dump().items() if v is not None or k == "paid"}
+    if "paid" in fields and fields["paid"] is None and body.model_fields_set.isdisjoint({"paid"}):
+        del fields["paid"]
+    c.store.update_cash_event(event_id, fields)
+    return c.store.get_cash_event(event_id)
+
+
+@router.delete("/cash/{event_id}", status_code=204)
+def delete_cash(event_id: int, request: Request):
+    c = _c(request)
+    if c.store.get_cash_event(event_id) is None:
+        raise HTTPException(404, "movimiento no encontrado")
+    c.store.delete_cash_event(event_id)
+    return None
 
 
 @router.get("/news")

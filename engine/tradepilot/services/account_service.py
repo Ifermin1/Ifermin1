@@ -76,6 +76,7 @@ class AccountService:
             snap.net_pnl = round(snap.daily_pnl - snap.commissions_today, 2)
             if self.performance is not None and snap.enabled:
                 self.performance.note_daily_pnl(info.account_id, snap.daily_pnl, self.now())
+                self.performance.note_balance(info.account_id, info.balance, self.now())
             snap.connected, snap.connection, snap.reported, snap.updated_at = info.connected, info.connection, True, now
             if self.store:
                 self.store.upsert_account_seen(info.account_id, info.balance, now.isoformat(), snap.enabled, info.connected)

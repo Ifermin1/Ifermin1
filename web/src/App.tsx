@@ -4,13 +4,14 @@ import { Shell, type Route } from "./components/Shell";
 import { Login } from "./pages/Login";
 import { Dashboard } from "./pages/Dashboard";
 import { Performance } from "./pages/Performance";
+import { Analysis } from "./pages/Analysis";
 import { Accounts } from "./pages/Accounts";
 import { Replicator } from "./pages/Replicator";
 import { Risk } from "./pages/Risk";
 import { Audit } from "./pages/Audit";
 
-const ROUTES: Route[] = ["dashboard", "performance", "accounts", "replicator", "risk", "audit"];
-const fromHash = (): Route => { const h = window.location.hash.replace("#", "") as Route; return ROUTES.includes(h) ? h : "dashboard"; };
+const ROUTES: Route[] = ["dashboard", "performance", "analysis", "accounts", "replicator", "risk", "audit"];
+const fromHash = (): Route => { const h = window.location.hash.replace("#", "").split("/")[0] as Route; return ROUTES.includes(h) ? h : "dashboard"; };
 
 function Inner() {
   const { session, error } = useStore();
@@ -23,6 +24,7 @@ function Inner() {
       {error && <div className="banner bad">Sin conexión con el engine: {error}</div>}
       {route === "dashboard" && <Dashboard />}
       {route === "performance" && <Performance />}
+      {route === "analysis" && <Analysis />}
       {route === "accounts" && <Accounts />}
       {route === "replicator" && <Replicator />}
       {route === "risk" && <Risk />}

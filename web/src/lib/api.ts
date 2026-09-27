@@ -65,6 +65,16 @@ export type NewsFeed = { events: NewsEvent[]; fetched_at: number | null; error: 
 export type CopyMapLayout = { view: "flow" | "cables"; positions: Record<string, Record<string, { x: number; y: number }>>;
                               links: { a: string; b: string }[]; show_offline: boolean };
 
+/** Análisis (pestaña Análisis): operaciones y filas por día de un periodo, movimientos de caja y parámetros. */
+export type AnalysisDay = { day: string; trades: number; pnl_trades: number; pnl_broker: number | null; commissions: number; contracts: number;
+                            balance: number | null; withdrawals: number; deposits: number };
+export type CashEvent = { id: number; account_id: string; day: string; kind: "withdrawal" | "deposit" | "adjust"; amount: number; paid: number | null;
+                          status: "pending" | "completed" | "rejected"; note: string; created_at: string };
+export type CashEventInput = Omit<CashEvent, "id" | "created_at">;
+export type AnalysisData = { from: string; to: string; trades: Trade[]; days: AnalysisDay[]; cash: CashEvent[]; accounts: string[]; fills: number };
+export type AnalysisParams = { commission_rt: number; be_tolerance: number; loss_reference: number; short_seconds: number; start_balance: number | null;
+                               use_engine_commissions: boolean };
+
 export type Session = { baseUrl: string; token: string };
 
 const KEY = "tpx.session";
@@ -113,6 +123,15 @@ export function makeClient(s: Session) {
     discoverChat: (bot_token?: string) => req<{ ok: boolean; chat_id?: string; name?: string; error?: string }>("/api/notifications/discover-chat", { method: "POST", body: JSON.stringify({ bot_token }) }),
     copyMap: () => req<CopyMapLayout>("/api/ui/copy-map"),
     saveCopyMap: (l: CopyMapLayout) => req<CopyMapLayout>("/api/ui/copy-map", { method: "PUT", body: JSON.stringify(l) }),
+    /** Análisis de un periodo: `from`/`to` = AAAA-MM-DD; `account` vacío = todas. */
+    analysis: (from: string, to: string, account = "") =>
+      req<AnalysisData>(`/api/stats/analysis?day_from=${from}&day_to=${to}${account ? `&account=${encodeURIComponent(account)}` : ""}`),
+    cash: (account = "") => req<CashEvent[]>(`/api/cash${account ? `?account=${encodeURIComponent(account)}` : ""}`),
+    addCash: (b: CashEventInput) => req<CashEvent>("/api/cash", { method: "POST", body: JSON.stringify(b) }),
+    updateCash: (id: number, b: Partial<CashEventInput>) => req<CashEvent>(`/api/cash/${id}`, { method: "PATCH", body: JSON.stringify(b) }),
+    deleteCash: (id: number) => req<void>(`/api/cash/${id}`, { method: "DELETE" }),
+    analysisParams: () => req<AnalysisParams>("/api/ui/analysis"),
+    saveAnalysisParams: (p: AnalysisParams) => req<AnalysisParams>("/api/ui/analysis", { method: "PUT", body: JSON.stringify(p) }),
     news: (days = 7, countries = "", minImpact = "low") => req<NewsFeed>(`/api/news?days=${days}${countries ? `&countries=${encodeURIComponent(countries)}` : ""}&min_impact=${minImpact}`),
     /** Calendario: `month` = AAAA-MM; `account` vacío = todas. */
     month: (month: string, account = "") => req<MonthStats>(`/api/stats/month?month=${month}${account ? `&account=${encodeURIComponent(account)}` : ""}`),

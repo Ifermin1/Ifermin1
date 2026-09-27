@@ -122,3 +122,33 @@ class CommissionsRequest(BaseModel):
     enabled: bool = True
     default_per_side: float = Field(default=2.0, ge=0)
     rates: dict[str, float] = {}
+
+
+class CashEventCreate(BaseModel):
+    """Movimiento de caja de una cuenta: retiro (solicitado al prop firm), pago recibido, depósito o ajuste."""
+    account_id: str = Field(min_length=1)
+    day: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    kind: str = Field(default="withdrawal", pattern="^(withdrawal|deposit|adjust)$")
+    amount: float = 0.0                      # importe descontado (retiro) o sumado (depósito) al saldo
+    paid: float | None = None                # lo recibido de verdad (tras el reparto del prop firm); None = aún no
+    status: str = Field(default="completed", pattern="^(pending|completed|rejected)$")
+    note: str = ""
+
+
+class CashEventUpdate(BaseModel):
+    day: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    kind: str | None = Field(default=None, pattern="^(withdrawal|deposit|adjust)$")
+    amount: float | None = None
+    paid: float | None = None
+    status: str | None = Field(default=None, pattern="^(pending|completed|rejected)$")
+    note: str | None = None
+
+
+class AnalysisParams(BaseModel):
+    """Parámetros de la pestaña Análisis (compartidos entre tus dispositivos). No cambian los datos originales."""
+    commission_rt: float = Field(default=5.0, ge=0)       # comisión ida y vuelta por contrato (USD)
+    be_tolerance: float = Field(default=0.0, ge=0)        # ± USD para considerar una operación en breakeven
+    loss_reference: float = Field(default=250.0, ge=0)    # referencia personal de pérdida por operación (USD)
+    short_seconds: int = Field(default=60, ge=1, le=3600) # límite de "operación corta"
+    start_balance: float | None = Field(default=None, ge=0)   # saldo inicial de la cuenta; None = se deduce del primer saldo
+    use_engine_commissions: bool = True                   # True: comisiones anotadas por el engine; False: contratos × commission_rt

@@ -954,3 +954,44 @@ async def test_copy_map_layout_is_persisted_and_links_deduplicated(client: Async
     assert (await client.put("/api/ui/copy-map", json={"view": "bogus"})).status_code == 422
     # las reglas de copia no cambian por guardar el mapa
     assert (await client.get("/api/rules")).json() == []
+
+
+async def test_analysis_endpoint_returns_trades_days_balance_and_cash(client: AsyncClient, container):
+    from datetime import datetime
+    p = container.performance
+    p.note_fill("Sim102", "NQ 12-26", "BUY", 2, 20000.0, datetime(2026, 9, 10, 10, 0, 0))
+    p.note_fill("Sim102", "NQ 12-26", "SELL", 2, 20010.0, datetime(2026, 9, 10, 10, 0, 40))
+    p.note_balance("Sim102", 50400.0, datetime(2026, 9, 10, 16, 0))
+    r = await client.post("/api/cash", json={"account_id": "Sim102", "day": "2026-09-10", "kind": "withdrawal", "amount": 1500, "paid": 1350, "status": "completed", "note": "primer retiro"})
+    assert r.status_code == 201, r.text
+    cid = r.json()["id"]
+    r = await client.get("/api/stats/analysis?day_from=2026-09-01&day_to=2026-09-30&account=Sim102")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert len(body["trades"]) == 1 and body["trades"][0]["pnl"] == 400.0 and body["trades"][0]["quantity"] == 2
+    assert body["fills"] == 2
+    day = next(d for d in body["days"] if d["day"] == "2026-09-10")
+    assert day["trades"] == 1 and day["pnl_trades"] == 400.0 and day["balance"] == 50400.0 and day["withdrawals"] == 1500.0
+    assert [c["id"] for c in body["cash"]] == [cid]
+    # editar y borrar el movimiento
+    r = await client.patch(f"/api/cash/{cid}", json={"status": "pending", "paid": None})
+    assert r.status_code == 200 and r.json()["status"] == "pending" and r.json()["paid"] is None
+    r = await client.get("/api/cash?account=Sim102")
+    assert r.status_code == 200 and len(r.json()) == 1
+    r = await client.delete(f"/api/cash/{cid}")
+    assert r.status_code == 204
+    assert (await client.get("/api/cash?account=Sim102")).json() == []
+    assert (await client.delete(f"/api/cash/{cid}")).status_code == 404
+    # fechas inválidas
+    assert (await client.get("/api/stats/analysis?day_from=2026-13-01")).status_code == 400
+    assert (await client.get("/api/stats/analysis?day_from=2026-09-30&day_to=2026-09-01")).status_code == 400
+
+
+async def test_analysis_params_are_persisted(client: AsyncClient):
+    r = await client.get("/api/ui/analysis")
+    assert r.status_code == 200 and r.json()["commission_rt"] == 5.0 and r.json()["loss_reference"] == 250.0
+    r = await client.put("/api/ui/analysis", json={"commission_rt": 4.5, "be_tolerance": 2, "loss_reference": 300, "short_seconds": 45, "start_balance": 50000, "use_engine_commissions": False})
+    assert r.status_code == 200
+    r = await client.get("/api/ui/analysis")
+    assert r.json() == {"commission_rt": 4.5, "be_tolerance": 2.0, "loss_reference": 300.0, "short_seconds": 45, "start_balance": 50000.0, "use_engine_commissions": False}
+    assert (await client.put("/api/ui/analysis", json={"commission_rt": -1})).status_code == 422

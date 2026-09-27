@@ -66,6 +66,13 @@ class SQLiteStore:
                 CREATE TABLE IF NOT EXISTS daily_stats (
                     account_id TEXT, day TEXT, pnl REAL, updated_at TEXT, PRIMARY KEY (account_id, day)
                 );
+                CREATE TABLE IF NOT EXISTS balance_daily (
+                    account_id TEXT, day TEXT, balance REAL, updated_at TEXT, PRIMARY KEY (account_id, day)
+                );
+                CREATE TABLE IF NOT EXISTS cash_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, account_id TEXT, day TEXT, kind TEXT, amount REAL, paid REAL,
+                    status TEXT, note TEXT, created_at TEXT
+                );
                 """
             )
             # migraciones ligeras
@@ -271,6 +278,63 @@ class SQLiteStore:
         with self._lock:
             rows = self._conn.execute(sql + " ORDER BY day", args).fetchall()
         return [dict(r) for r in rows]
+
+    # ---- saldo por día y movimientos de caja (retiros, pagos, depósitos) ----
+    def save_balance_day(self, account_id: str, day: str, balance: float, updated_at: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("INSERT OR REPLACE INTO balance_daily (account_id, day, balance, updated_at) VALUES (?, ?, ?, ?)",
+                               (account_id, day, balance, updated_at))
+
+    def get_balance_days(self, day_from: str, day_to: str, account_id: str | None = None) -> list[dict]:
+        sql = "SELECT account_id, day, balance, updated_at FROM balance_daily WHERE day >= ? AND day <= ?"
+        args: list = [day_from, day_to]
+        if account_id:
+            sql += " AND account_id = ?"
+            args.append(account_id)
+        with self._lock:
+            rows = self._conn.execute(sql + " ORDER BY day", args).fetchall()
+        return [dict(r) for r in rows]
+
+    def list_cash_events(self, account_id: str | None = None) -> list[dict]:
+        sql, args = "SELECT * FROM cash_events", []
+        if account_id:
+            sql += " WHERE account_id = ?"
+            args.append(account_id)
+        with self._lock:
+            rows = self._conn.execute(sql + " ORDER BY day, id", args).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_cash_event(self, event_id: int) -> dict | None:
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM cash_events WHERE id = ?", (event_id,)).fetchone()
+        return dict(row) if row else None
+
+    def add_cash_event(self, e: dict) -> int:
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "INSERT INTO cash_events (account_id, day, kind, amount, paid, status, note, created_at) "
+                "VALUES (:account_id, :day, :kind, :amount, :paid, :status, :note, :created_at)", e)
+            return int(cur.lastrowid)
+
+    def update_cash_event(self, event_id: int, fields: dict) -> None:
+        if not fields:
+            return
+        cols = ", ".join(f"{k} = :{k}" for k in fields)
+        with self._lock, self._conn:
+            self._conn.execute(f"UPDATE cash_events SET {cols} WHERE id = :id", {**fields, "id": event_id})
+
+    def delete_cash_event(self, event_id: int) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM cash_events WHERE id = ?", (event_id,))
+
+    def count_fills(self, day_from: str, day_to: str, account_id: str | None = None) -> int:
+        sql = "SELECT COALESCE(SUM(fills), 0) FROM trades WHERE day >= ? AND day <= ?"
+        args: list = [day_from, day_to]
+        if account_id:
+            sql += " AND account_id = ?"
+            args.append(account_id)
+        with self._lock:
+            return int(self._conn.execute(sql, args).fetchone()[0])
 
     def get_commissions_range(self, day_from: str, day_to: str, account_id: str | None = None) -> list[dict]:
         sql = "SELECT account_id, day, contracts, cost FROM commissions_daily WHERE day >= ? AND day <= ?"

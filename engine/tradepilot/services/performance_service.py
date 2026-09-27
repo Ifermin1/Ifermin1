@@ -24,6 +24,7 @@ class PerformanceService:
         self._open: dict[tuple[str, str], dict] = {}     # (cuenta, raíz) -> posición abierta en curso
         self._seeded = False
         self._last_daily: dict[tuple[str, str], tuple[float, float]] = {}   # (cuenta, día) -> (pnl, monotonic)
+        self._last_balance: dict[tuple[str, str], tuple[float, float]] = {}
 
     # ---- día de trading: la sesión que abre a la hora de cierre (17:00) pertenece al día siguiente, como en CME.
     # (Las comisiones diarias se guardan por la fecha en que ARRANCA la sesión: un día menos; month() lo alinea.) ----
@@ -123,6 +124,67 @@ class PerformanceService:
         except Exception as exc:
             logger.warning(f"No se pudo guardar el P&L diario de {account}: {exc}")
 
+    def note_balance(self, account: str, balance: float, at: datetime | None = None) -> None:
+        """Saldo que reporta el bróker, guardado por cuenta y día (manda el último del día: es el saldo de cierre)."""
+        if not self.store or balance is None:
+            return
+        at = at or self.now()
+        day = self.day_key(at)
+        import time as _t
+        last = self._last_balance.get((account, day))
+        if last is not None and abs(last[0] - float(balance)) < 0.005 and _t.monotonic() - last[1] < 60:
+            return
+        self._last_balance[(account, day)] = (float(balance), _t.monotonic())
+        try:
+            self.store.save_balance_day(account, day, round(float(balance), 2), at.isoformat(timespec="seconds"))
+        except Exception as exc:
+            logger.warning(f"No se pudo guardar el saldo diario de {account}: {exc}")
+
+    # ---- consulta: análisis de un periodo (duración, riesgo, balance y retiros) ----
+    def analysis(self, day_from: str, day_to: str, account: str | None = None) -> dict:
+        """Operaciones del periodo, filas por día (operaciones, bruto, comisiones, P&L del bróker, saldo de cierre) y
+        movimientos de caja de la cuenta. Los cálculos de duración y riesgo los hace la consola con estos datos."""
+        if not self.store:
+            return {"from": day_from, "to": day_to, "trades": [], "days": [], "cash": [], "accounts": [], "fills": 0, "balances": {}}
+        trades = self.store.get_trades(day_from, day_to, account)
+        broker = self.store.get_daily_pnl(day_from, day_to, account)
+        balances = self.store.get_balance_days(day_from, day_to, account)
+        prev = lambda d: (datetime.fromisoformat(d).date() - timedelta(days=1)).isoformat()
+        nxt = lambda d: (datetime.fromisoformat(d).date() + timedelta(days=1)).isoformat()
+        fees = [{**f, "day": nxt(f["day"])} for f in self.store.get_commissions_range(prev(day_from), prev(day_to), account)]
+        cash = [c for c in self.store.list_cash_events(account) if day_from <= c["day"] <= day_to]
+        days: dict[str, dict] = {}
+
+        def day(d: str) -> dict:
+            return days.setdefault(d, {"day": d, "trades": 0, "pnl_trades": 0.0, "pnl_broker": None, "commissions": 0.0, "contracts": 0,
+                                       "balance": None, "withdrawals": 0.0, "deposits": 0.0})
+        for t in trades:
+            x = day(t["day"])
+            x["trades"] += 1
+            x["pnl_trades"] = round(x["pnl_trades"] + float(t["pnl"] or 0.0), 2)
+        for b in broker:
+            x = day(b["day"])
+            x["pnl_broker"] = round((x["pnl_broker"] or 0.0) + float(b["pnl"] or 0.0), 2)
+        enabled = self.commissions is None or self.commissions.config.enabled
+        for f in fees:
+            x = day(f["day"])
+            x["contracts"] += int(f["contracts"] or 0)
+            x["commissions"] = round(x["commissions"] + (float(f["cost"] or 0.0) if enabled else 0.0), 2)
+        per_day_balance: dict[str, float] = {}
+        for b in balances:            # varias cuentas: suma de saldos de cierre del día
+            per_day_balance[b["day"]] = round(per_day_balance.get(b["day"], 0.0) + float(b["balance"] or 0.0), 2)
+        for d, v in per_day_balance.items():
+            day(d)["balance"] = v
+        for c in cash:
+            x = day(c["day"])
+            if c["kind"] == "withdrawal" and c["status"] != "rejected":
+                x["withdrawals"] = round(x["withdrawals"] + float(c["amount"] or 0.0), 2)
+            elif c["kind"] == "deposit" and c["status"] != "rejected":
+                x["deposits"] = round(x["deposits"] + float(c["amount"] or 0.0), 2)
+        accounts = sorted({t["account_id"] for t in trades} | {b["account_id"] for b in broker} | {b["account_id"] for b in balances})
+        return {"from": day_from, "to": day_to, "trades": trades, "days": sorted(days.values(), key=lambda x: x["day"]), "cash": cash,
+                "accounts": accounts, "fills": self.store.count_fills(day_from, day_to, account)}
+
     # ---- consulta: un mes para el calendario ----
     def month(self, year: int, month: int, account: str | None = None) -> dict:
         first = datetime(year, month, 1).date()
@@ -167,13 +229,17 @@ class PerformanceService:
         return {"from": d0, "to": d1, "days": sorted(days.values(), key=lambda x: x["day"]), "trades": trades, "accounts": accounts}
 
     # ---- demo ----
-    def seed_demo(self, accounts: list[str], days: int = 45) -> int:
-        """Modo simulador: un mes y medio de operaciones inventadas (con deriva positiva) si no hay ninguna guardada."""
+    def seed_demo(self, accounts: list[str], days: int = 45, end_balances: dict[str, float] | None = None) -> int:
+        """Modo simulador: un mes y medio de operaciones inventadas (con deriva positiva) si no hay ninguna guardada. El
+        saldo diario se reconstruye hacia atrás desde el saldo actual del simulador para que la curva enlace con hoy."""
         if not self.store or self.store.count_trades() > 0:
             return 0
         rng = random.Random(7)
         n = 0
         today = self.now().date()
+        history: dict[str, list[tuple[str, float, float]]] = {acc: [] for acc in accounts}   # cuenta -> (día, neto, retiro)
+        withdrawals_done = 0
+        running = {acc: 0.0 for acc in accounts}
         for back in range(days, 0, -1):
             d = today - timedelta(days=back)
             if d.weekday() >= 5 or rng.random() < 0.12:
@@ -200,5 +266,25 @@ class PerformanceService:
                         c, cost = self.store.get_commissions(d.isoformat()).get(acc, (0, 0.0))
                         self.store.save_commission(acc, d.isoformat(), c + 2 * qty, round(cost + 2 * 2.0 * qty, 2))
                 self.store.save_daily_pnl(acc, d.isoformat(), round(total + rng.uniform(-5, 5), 2), datetime(d.year, d.month, d.day, 16).isoformat())
+                running[acc] += total
+                withdrawal = 0.0
+                if running[acc] > 3000 and withdrawals_done < 3 and rng.random() < 0.5:
+                    withdrawals_done += 1
+                    withdrawal = 1500.0 if withdrawals_done < 3 else 1350.0
+                    running[acc] -= withdrawal
+                    self.store.add_cash_event({"account_id": acc, "day": d.isoformat(), "kind": "withdrawal", "amount": withdrawal,
+                                               "paid": round(withdrawal * 0.9, 2), "status": "completed", "note": "Retiro de demostración",
+                                               "created_at": datetime(d.year, d.month, d.day, 17).isoformat(timespec="seconds")})
+                history[acc].append((d.isoformat(), total, withdrawal))
+        for acc, rows in history.items():
+            end = float((end_balances or {}).get(acc, 50000.0))
+            balance = end - sum(t for _, t, _ in rows) + sum(w for _, _, w in rows)
+            for day_, total, withdrawal in rows:
+                balance = round(balance + total - withdrawal, 2)
+                self.store.save_balance_day(acc, day_, balance, f"{day_}T16:00:00")
+        if accounts:
+            self.store.add_cash_event({"account_id": accounts[0], "day": today.isoformat(), "kind": "withdrawal", "amount": 1000.0, "paid": None,
+                                       "status": "pending", "note": "Solicitud de demostración pendiente",
+                                       "created_at": self.now().isoformat(timespec="seconds")})
         logger.info(f"Simulador: {n} operaciones de demostración generadas para el calendario")
         return n

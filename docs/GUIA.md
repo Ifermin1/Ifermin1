@@ -152,6 +152,22 @@ Hay dos vías, y se pueden usar las dos a la vez (*Riesgo → Avisos al teléfon
   del día es el que reporta el bróker (NinjaTrader); las operaciones se reconstruyen con los fills que ve el engine
   (maestra, seguidoras y manuales), así que solo hay operaciones desde que el engine está en marcha. La sesión que abre a
   la hora de cierre (17:00 por defecto, `DRAWDOWN_EOD_TIME`) cuenta como el día siguiente, como en CME.
+- **Análisis** es la revisión de tu gestión operación por operación, con un periodo (30 d, 90 d, año, todo) y una cuenta:
+  - *Duración y riesgo*: el gráfico **Tiempo vs. resultado** (un punto por operación, eje de tiempo logarítmico, línea de
+    60 s y línea de tu referencia de pérdida; pasa el cursor para ver la operación y tócala para ver su detalle),
+    **Gestión del riesgo por operación** (qué porcentaje de pérdidas queda dentro de tu referencia, cuántas la superan y
+    la mayor; bruto, comisiones y neto; cuánto aportan los trades cortos a las ganancias) y **Operaciones, una por una**
+    (filtros por duración y resultado, orden, *Exportar CSV*). El conmutador *Bruto / Neto* cambia la clasificación.
+  - *Pendientes y registros*: anota aquí los **retiros** que pides al prop firm (importe, fecha, estado, y lo recibido
+    tras el reparto cuando te lo paguen: *Marcar pagado*), depósitos o resets, y ve las posiciones aún abiertas.
+  - *Balance y retiros*: último saldo reportado por NinjaTrader, neto acumulado, retiros descontados e importes
+    pagados; el gráfico **Saldo y resultado acumulado** (saldo reportado frente a saldo inicial + neto sin retiros: la
+    distancia son los retiros), la **conciliación** (saldo esperado frente a reportado) y la **actividad diaria** con la
+    verificación de cada jornada (*Coincide* si el P&L del bróker y el historial cuadran; *Falta historial* si el bróker
+    reporta P&L de un día en el que el engine no vio operaciones; *Revisar* si no cuadran).
+  - *Datos y criterios*: tus parámetros (comisión por contrato, tolerancia de breakeven, referencia de pérdida, límite de
+    operación corta, saldo inicial, usar o no las comisiones anotadas por el engine), el estado del historial y cómo se
+    calcula cada indicador. Los parámetros se guardan en el engine y valen en todos tus dispositivos.
 - **Cuentas** muestra los mismos paneles con los mandos de copia (multiplicador, interruptor, ⚙ opciones de ejecución).
 - **Auditoría** filtra por texto, cuenta, familia (*Copia*, *Bloqueos*, *Errores*, *Riesgo*, *Sistema*) o *Solo importantes*;
   *Copiar* y *.txt* exportan exactamente lo filtrado.

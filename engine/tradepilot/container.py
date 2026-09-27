@@ -106,7 +106,7 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
     replication.performance = performance
     if cfg.ENGINE_MODE != "ninja" and cfg.MOCK_DEMO_HISTORY and cfg.DB_PATH != ":memory:":
         try:
-            performance.seed_demo(list(getattr(bridge, "accounts", {}).keys()) or ["Sim101", "Sim102"])
+            performance.seed_demo(list(getattr(bridge, "accounts", {}).keys()) or ["Sim101", "Sim102"], end_balances=getattr(bridge, "accounts", None))
         except Exception as exc:
             logger.warning(f"No se pudo generar el histórico de demostración: {exc}")
     async def _after_sync() -> None:
