@@ -607,3 +607,4 @@ table.an-table tr.total td { border-top: 2px solid var(--line-2); }
 .an-filters { align-items: center; } .an-filters select { width: auto; padding: 7px 10px; font-size: 12px; }
 .an-rows.two > div { flex-direction: column; align-items: flex-start; gap: 2px; }
 @media (max-width: 600px) { .an-tabs { flex-wrap: wrap; } table.an-table td, table.an-table th { padding: 7px 6px; font-size: 11.5px; } }
+.kill-banner { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }

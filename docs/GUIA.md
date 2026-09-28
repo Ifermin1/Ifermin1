@@ -298,6 +298,18 @@ Hay dos vías, y se pueden usar las dos a la vez (*Riesgo → Avisos al teléfon
 
 ---
 
+### "No está copiando": lo primero que mirar
+
+Si la maestra opera y las seguidoras no entran, abre **Auditoría** y mira el motivo de los `BLOCKED`:
+
+- `kill switch global activo desde …` → alguien pulsó **DETENER** (barra de estado), **DETENER TODO** (Riesgo) o **Pausar
+  copia** (mapa de Copiar). El kill switch **se conserva aunque reinicies el engine o el PC**: al arrancar, la auditoría
+  avisa con `KILL_SWITCH_PERSISTED` y todas las páginas muestran el aviso rojo *COPIA DETENIDA* con el botón **Reanudar
+  copia**. Hasta reanudar, cada entrada de la maestra queda bloqueada y las seguidoras aparecen DESINCRONIZADAS.
+- `fuera de horario` / `sesión cerrada` → el horario de Riesgo; *Reabrir sesión* si quieres operar fuera de él.
+- `límite de pérdida diaria`, `objetivo alcanzado`, `drawdown` → límites por cuenta (Riesgo → Editar / Reanudar).
+- `cuenta bloqueada por el prop firm` → el bróker rechazó por administración; la cuenta se desactivó sola.
+
 ## 7. Emergencias
 
 - **Parar todo ahora:** *Riesgo → DETENER TODO* con "y cerrar posiciones" e "incluida la maestra" marcados. Bloquea todas las

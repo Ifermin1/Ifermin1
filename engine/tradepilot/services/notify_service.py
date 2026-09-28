@@ -28,10 +28,10 @@ TITLES: dict[str, tuple[str, str]] = {
     "ADDON_SILENT": ("📵", "Sin heartbeat del addon"), "ADDON_DOWN": ("📵", "Addon caído"), "ADDON_BACK": ("📶", "Addon de vuelta"),
     "ADDON_RESTART": ("🔁", "Addon reiniciado"), "GAP": ("📉", "Mensajes perdidos"), "ERROR": ("❗", "Error"),
     "ENTRY_MISSED": ("🚫", "Entrada no ejecutada"), "BLOCKED": ("⛔", "Copia bloqueada"), "TRIMMED": ("✂️", "Copia recortada"),
-    "FOLLOWER_FILL": ("💱", "Fill"), "MASTER_RECEIVED": ("📥", "Operación del maestro"), "ENGINE_START": ("🟦", "Engine arrancado"),
+    "FOLLOWER_FILL": ("💱", "Fill"), "MASTER_RECEIVED": ("📥", "Operación del maestro"), "ENGINE_START": ("🟦", "Engine arrancado"), "KILL_SWITCH_PERSISTED": ("🛑", "Kill switch sigue activo"),
 }
 DEFAULT_EVENTS = ["DAILY_LOSS_LIMIT", "DAILY_LOSS_WARNING", "DAILY_PROFIT_TARGET", "DAILY_PROFIT_WARNING", "DRAWDOWN_LIMIT",
-                  "DRAWDOWN_WARNING", "KILL_SWITCH_ON", "KILL_SWITCH_OFF", "FLATTEN", "SCHEDULED_FLATTEN", "NAKED_CLOSE",
+                  "DRAWDOWN_WARNING", "KILL_SWITCH_ON", "KILL_SWITCH_OFF", "KILL_SWITCH_PERSISTED", "FLATTEN", "SCHEDULED_FLATTEN", "NAKED_CLOSE",
                   "FOLLOWER_REJECTED", "ACCOUNT_LOCKED", "DESYNC", "OVERCLOSE_FIX", "ADDON_SILENT", "ADDON_DOWN", "ADDON_BACK",
                   "ADDON_RESTART", "GAP", "ERROR", "ENTRY_MISSED"]
 

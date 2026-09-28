@@ -995,3 +995,16 @@ async def test_analysis_params_are_persisted(client: AsyncClient):
     r = await client.get("/api/ui/analysis")
     assert r.json() == {"commission_rt": 4.5, "be_tolerance": 2.0, "loss_reference": 300.0, "short_seconds": 45, "start_balance": 50000.0, "use_engine_commissions": False}
     assert (await client.put("/api/ui/analysis", json={"commission_rt": -1})).status_code == 422
+
+
+async def test_blocked_by_kill_switch_explains_since_when_and_how_to_resume(client: AsyncClient, container):
+    await client.post("/api/risk/kill-switch", json={"active": True, "reason": "pausa desde el mapa"})
+    ok, why = container.risk.allows("Sim102", 1, "NQ 12-26", "BUY")
+    assert not ok and "kill switch global activo desde" in why and "pausa desde el mapa" in why and "Reanudar" in why
+    container.risk.warn_if_persisted()
+    r = await client.get("/api/audit?limit=5&event_type=KILL_SWITCH_PERSISTED")
+    assert r.status_code == 200 and len(r.json()) == 1 and "sigue ACTIVO" in r.json()[0]["message"]
+    await client.post("/api/risk/kill-switch", json={"active": False})
+    assert container.risk.allows("Sim102", 1, "NQ 12-26", "BUY")[0]
+    container.risk.warn_if_persisted()
+    assert len((await client.get("/api/audit?limit=5&event_type=KILL_SWITCH_PERSISTED")).json()) == 1

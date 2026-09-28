@@ -60,7 +60,7 @@ export function Dashboard() {
       )}
       {risk?.kill_switch && (
         <Card className="alert-card">
-          <strong>Kill switch activo.</strong> No se está replicando ninguna orden. {risk.kill_switch_reason && <>Motivo: {risk.kill_switch_reason}.</>}
+          <strong>COPIA DETENIDA (kill switch){risk.kill_switch_at ? ` desde ${new Date(risk.kill_switch_at).toLocaleString("es-ES", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}` : ""}.</strong> Ninguna entrada se replica: cada operación de la maestra queda como BLOCKED en la auditoría y las seguidoras se desincronizan. {risk.kill_switch_reason && <>Motivo: {risk.kill_switch_reason}. </>}Pulsa <b>Reanudar</b> en la barra de estado para volver a copiar.
         </Card>
       )}
 

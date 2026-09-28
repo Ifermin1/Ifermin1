@@ -53,6 +53,18 @@ export function StatusStrip({ className = "" }: { className?: string }) {
 
 const BUILT = new Date(__BUILD__);
 const fmtBuild = (d: Date) => d.toLocaleString("es-ES", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
+/** Botón "Reanudar" del aviso global de kill switch (sin cerrar posiciones). */
+function KillResume() {
+  const { client, setRisk } = useStore();
+  const [busy, setBusy] = useState(false);
+  return (
+    <button className="primary small-btn" disabled={busy || !client} data-testid="kill-resume"
+            onClick={async () => { if (!client) return; setBusy(true); try { setRisk(await client.killSwitch(false)); } catch (ex) { alert(ex instanceof Error ? ex.message : String(ex)); } finally { setBusy(false); } }}>
+      Reanudar copia
+    </button>
+  );
+}
+
 /** El engine sirve una consola compilada después que la que tiene cargada el navegador (caché o app instalada). */
 const staleBuild = (webBuild: string | null | undefined) => !!webBuild && new Date(webBuild).getTime() - BUILT.getTime() > 3 * 60000;
 async function hardReload() {
@@ -102,6 +114,12 @@ export function Shell({ route, onRoute, children }: { route: Route; onRoute: (r:
           </div>
         </header>
         <main className="content">
+          {risk?.kill_switch && route !== "dashboard" && (
+            <div className="banner bad kill-banner" data-testid="kill-banner">
+              <span><b>COPIA DETENIDA (kill switch)</b>{risk.kill_switch_at ? ` desde ${new Date(risk.kill_switch_at).toLocaleString("es-ES", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}` : ""}{risk.kill_switch_reason ? ` · ${risk.kill_switch_reason}` : ""}. Ninguna entrada se replica hasta reanudar.</span>
+              <KillResume />
+            </div>
+          )}
           {stale && (
             <div className="banner update" data-testid="stale-banner">
               <b>Hay una versión nueva de la consola</b> (compilada el {fmtBuild(new Date(health!.web_build!))}; esta es del {fmtBuild(BUILT)}).

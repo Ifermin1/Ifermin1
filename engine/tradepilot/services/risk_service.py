@@ -290,6 +290,18 @@ class RiskService:
             await self.flatten_all(include_master=flatten_master, reason="kill switch")
         return state
 
+    def kill_switch_detail(self) -> str:
+        """Texto para los BLOCKED y avisos: desde cuándo y por qué está activo, y cómo reanudar."""
+        since = f" desde {self.kill_switch_at.strftime('%d/%m %H:%M')}" if self.kill_switch_at else ""
+        why = f" · motivo: {self.kill_switch_reason}" if self.kill_switch_reason else ""
+        return f"kill switch global activo{since}{why} → pulsa Reanudar en la barra de estado"
+
+    def warn_if_persisted(self) -> None:
+        """Al arrancar: si el kill switch quedó activo de una sesión anterior, dejarlo bien claro en la auditoría."""
+        if self.kill_switch:
+            self.audit.log("KILL_SWITCH_PERSISTED", f"El kill switch sigue ACTIVO de una sesión anterior ({self.kill_switch_detail()}). "
+                           "No se copiará ninguna entrada hasta reanudar.")
+
     def set_kill_switch(self, active: bool, reason: str | None = None) -> RiskState:
         self.kill_switch = active
         self.kill_switch_reason = reason if active else None
@@ -413,7 +425,7 @@ class RiskService:
     def allows(self, account_id: str, quantity: int, symbol: str = "", action: str = "") -> tuple[bool, str | None]:
         """¿Se puede enviar una orden de `quantity` a `account_id`?"""
         if self.kill_switch:
-            return False, "kill switch global activo"
+            return False, self.kill_switch_detail()
         ok, reason = self._in_window()
         if not ok:
             return False, reason

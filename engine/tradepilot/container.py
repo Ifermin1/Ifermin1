@@ -42,6 +42,7 @@ class Container:
         await self.replication.start()
         await self.accounts.start()
         self.audit.log("ENGINE_START", f"Engine iniciado en modo {self.settings.ENGINE_MODE}")
+        self.risk.warn_if_persisted()
         logger.info(f"TradePilot X engine listo (modo={self.settings.ENGINE_MODE})")
         if self.settings.API_HOST in ("0.0.0.0", "::"):
             urls = console_urls(self.settings.API_PORT)
