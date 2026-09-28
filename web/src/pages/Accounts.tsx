@@ -22,7 +22,7 @@ export function Accounts() {
   const [manage, setManage] = useState(false);
   const [openOpts, setOpenOpts] = useState<string | null>(null);
   const [q, setQ] = useState("");
-  const [filter, setFilter] = useState<"connected" | "enabled" | "all">("connected");
+  const [filter, setFilter] = useState<"connected" | "enabled" | "hidden" | "all">("connected");
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [msel, setMsel] = useState<Set<string>>(new Set());   // cuentas marcadas en la gestión (acciones en lote)
@@ -62,10 +62,29 @@ export function Accounts() {
   });
   const forget = (acc: string) => guard(acc, async () => { if (confirm(`¿Olvidar ${acc}? Volverá a aparecer si NinjaTrader la reporta.`)) await client!.forgetAccount(acc); });
   const toggleMsel = (id: string) => setMsel((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  /** Vincula varias cuentas a la maestra de golpe: pregunta un multiplicador para las que no tienen regla (las que ya la
+   *  tienen conservan el suyo y solo se activan). */
+  const linkMany = (ids: string[], what: string) => guard("__all", async () => {
+    if (!master) { alert("Elige primero la cuenta maestra."); return; }
+    const targets = ids.filter((id) => id.toLowerCase() !== master.toLowerCase() && !linkOf(id)?.enabled);
+    if (!targets.length) { alert(`${what}: ya copian todas a ${master}.`); return; }
+    const v = prompt(`Vincular ${targets.length} cuentas a ${master}:\n${targets.join(", ")}\n\nMultiplicador para las que no tienen regla (las que ya la tienen conservan el suyo):`, "1");
+    if (v === null) return;
+    const m = Number(v.replace(",", "."));
+    if (!(m > 0)) { alert("Multiplicador no válido."); return; }
+    const errors: string[] = []; let next = rules;
+    for (const id of targets) {
+      const prev = linkOf(id);
+      try { const r = await client!.link(id, master, prev?.multiplier ?? m, true); next = [...next.filter((x) => x.id !== r.id), r]; }
+      catch (ex) { errors.push(`${id}: ${ex instanceof Error ? ex.message : String(ex)}`); }
+    }
+    setRules(next); setMsel(new Set());
+    if (errors.length) throw new Error(errors.join("; "));
+  });
   const bulkAccounts = (action: "enable" | "disable" | "auto" | "forget") => guard("__bulk", async () => {
     const ids = [...msel].filter((id) => id !== master && (action !== "forget" || !accounts.find((a) => a.account_id === id)?.reported));
     if (!ids.length) { alert(action === "forget" ? "Solo se pueden olvidar cuentas que NinjaTrader ya no reporta." : "Nada que hacer con las marcadas."); return; }
-    const ask = { enable: `¿Activar ${ids.length} cuentas?`, disable: `¿Desactivar ${ids.length} cuentas? Quedan ocultas y nunca reciben copias.`,
+    const ask = { enable: `¿Mostrar ${ids.length} cuentas? Vuelven a Inicio, Cuentas y Copiar y pueden recibir copias.`, disable: `¿Ocultar ${ids.length} cuentas? Desaparecen de Inicio, Cuentas y Copiar y nunca reciben copias.`,
                   auto: `¿Volver a modo automático ${ids.length} cuentas? (activa = conectada)`, forget: `¿Olvidar ${ids.length} cuentas que NinjaTrader ya no reporta?` }[action];
     if (!confirm(`${ask}\n\n${ids.join(", ")}`)) return;
     const errors: string[] = [];
@@ -89,7 +108,7 @@ export function Accounts() {
   const rank = (a: Account) => (a.connected ? 0 : a.enabled ? 1 : a.reported ? 2 : 3);
   const needle = q.trim().toLowerCase();
   const managed = accounts
-    .filter((a) => filter === "all" || (filter === "connected" ? !!a.connected : a.enabled))
+    .filter((a) => filter === "all" || (filter === "connected" ? !!a.connected : filter === "hidden" ? !a.enabled : a.enabled))
     .filter((a) => !needle || a.account_id.toLowerCase().includes(needle) || a.alias.toLowerCase().includes(needle) || a.connection.toLowerCase().includes(needle))
     .sort((x, y) => rank(x) - rank(y) || x.account_id.localeCompare(y.account_id));
 
@@ -112,7 +131,10 @@ export function Accounts() {
       </Card>
 
       <Card title={`Seguidoras · ${linked} de ${followers.length} copiando`}
-            right={<button className="ghost" onClick={() => setManage(!manage)}>{manage ? "Cerrar gestión" : `Gestionar cuentas${hidden ? ` (${hidden} ocultas)` : ""}`}</button>}>
+            right={<div className="chips">
+              {followers.length > 0 && <button className="primary small-btn" disabled={busy === "__all" || !master} onClick={() => void linkMany(followers.map((a) => a.account_id), "Seguidoras activas")} data-testid="link-all">Vincular todas</button>}
+              <button className="ghost" onClick={() => setManage(!manage)}>{manage ? "Cerrar gestión" : `Gestionar cuentas${hidden ? ` (${hidden} ocultas)` : ""}`}</button>
+            </div>}>
         {followers.length === 0 ? <Empty>{accounts.length ? "Todas las cuentas están desactivadas. Actívalas en “Gestionar cuentas”." : "Esperando cuentas del bróker…"}</Empty> : (
           <div className="panels">
             {followers.map((a) => {
@@ -159,19 +181,20 @@ export function Accounts() {
 
       {manage && (
         <Card title={`Todas las cuentas · ${accounts.length} conocidas, ${connectedCount} conectadas, ${enabledCount} activas`}>
-          <p className="muted small">Todo lo que NinjaTrader conoce, conectado o no. Por defecto una cuenta está <b>activa mientras está conectada</b> y se oculta al desconectarse (modo <i>auto</i>). Si tocas su interruptor queda fijada a mano; con <i>auto</i> vuelve a la política automática. Una cuenta oculta nunca recibe copias.</p>
+          <p className="muted small">Todo lo que NinjaTrader conoce, conectado o no. <b>Ocultar</b> una cuenta la quita de Inicio, Cuentas, Copiar y de las cuentas en juego, y nunca recibe copias; <b>Mostrar</b> la devuelve. Por defecto una cuenta se muestra <b>mientras está conectada</b> y se oculta al desconectarse (modo <i>auto</i>); si la ocultas o muestras a mano queda fijada, y con <i>auto</i> vuelve a la política automática.</p>
           <div className="manage-bar">
             <input placeholder="Buscar cuenta, alias o conexión…" value={q} onChange={(e) => setQ(e.target.value)} />
             <div className="chips">
-              {([["connected", `Conectadas (${connectedCount})`], ["enabled", `Activas (${enabledCount})`], ["all", `Todas (${accounts.length})`]] as const).map(([k, l]) => (
+              {([["connected", `Conectadas (${connectedCount})`], ["enabled", `Visibles (${enabledCount})`], ["hidden", `Ocultas (${hidden})`], ["all", `Todas (${accounts.length})`]] as const).map(([k, l]) => (
                 <button key={k} className={`chip-btn ${filter === k ? "active" : ""}`} onClick={() => setFilter(k)}>{l}</button>))}
             </div>
           </div>
           <div className="manage-bar bulk-bar">
             <span className="muted small">{msel.size ? `${msel.size} marcadas` : "Marca cuentas para actuar sobre varias a la vez"}</span>
             {msel.size > 0 && <div className="chips">
-              <button className="chip-btn" disabled={busy === "__bulk"} onClick={() => void bulkAccounts("enable")}>Activar marcadas</button>
-              <button className="chip-btn" disabled={busy === "__bulk"} onClick={() => void bulkAccounts("disable")}>Desactivar marcadas</button>
+              <button className="chip-btn" disabled={busy === "__all"} onClick={() => void linkMany([...msel].filter((id) => accounts.find((a) => a.account_id === id)?.enabled), "Marcadas")} title="Solo las visibles">Vincular marcadas</button>
+              <button className="chip-btn" disabled={busy === "__bulk"} onClick={() => void bulkAccounts("enable")}>Mostrar marcadas</button>
+              <button className="chip-btn" disabled={busy === "__bulk"} onClick={() => void bulkAccounts("disable")} data-testid="hide-selected">Ocultar marcadas</button>
               <button className="chip-btn" disabled={busy === "__bulk"} onClick={() => void bulkAccounts("auto")}>Modo auto</button>
               <button className="chip-btn danger" disabled={busy === "__bulk"} onClick={() => void bulkAccounts("forget")} title="Solo las que NinjaTrader ya no reporta">Olvidar marcadas</button>
               <button className="chip-btn" onClick={() => setMsel(new Set())}>Desmarcar</button>
@@ -180,7 +203,7 @@ export function Accounts() {
           {managed.length === 0 && <Empty>Nada que mostrar con este filtro.</Empty>}
           <div className="table-wrap"><table className="manage">
             <thead><tr><th><input type="checkbox" title="Marcar las visibles" checked={managed.length > 0 && managed.slice(0, 300).every((a) => msel.has(a.account_id))}
-              onChange={(e) => setMsel(e.target.checked ? new Set(managed.slice(0, 300).map((a) => a.account_id)) : new Set())} /></th><th>Activa</th><th>Cuenta</th><th>Alias</th><th>Conexión</th><th className="num">Saldo</th><th>Vista</th><th></th></tr></thead>
+              onChange={(e) => setMsel(e.target.checked ? new Set(managed.slice(0, 300).map((a) => a.account_id)) : new Set())} /></th><th>Visible</th><th>Cuenta</th><th>Alias</th><th>Conexión</th><th className="num">Saldo</th><th>Vista</th><th></th></tr></thead>
             <tbody>{managed.slice(0, 300).map((a) => (
               <tr key={a.account_id} className={`${a.enabled ? "" : "off"} ${msel.has(a.account_id) ? "selected" : ""}`}>
                 <td><input type="checkbox" checked={msel.has(a.account_id)} onChange={() => toggleMsel(a.account_id)} /></td>
@@ -193,7 +216,8 @@ export function Accounts() {
                 <td><ConnBadge a={a} /></td>
                 <td className="num">{money(a.balance)}</td>
                 <td className="muted nowrap">{ago(a.updated_at)}</td>
-                <td>{!a.reported && <button className="ghost danger" onClick={() => void forget(a.account_id)}>Olvidar</button>}</td>
+                <td className="nowrap">{a.account_id !== master && <button className="ghost small-btn" disabled={busy === a.account_id} onClick={() => void setEnabled(a.account_id, !a.enabled)} data-testid={`hide-${a.account_id}`}>{a.enabled ? "Ocultar" : "Mostrar"}</button>}
+                  {!a.reported && <button className="ghost danger small-btn" onClick={() => void forget(a.account_id)}>Olvidar</button>}</td>
               </tr>
             ))}</tbody>
           </table></div>

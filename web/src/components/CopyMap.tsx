@@ -152,6 +152,32 @@ export function CopyMap() {
   const plainRuleOf = (follower: string) => rules.find((r) => same(r.follower_account, follower) && !r.symbol_filter);
   const templateOf = (m: string) => rules.find((r) => same(r.master_account, m) && !r.symbol_filter && r.enabled) ?? rules.find((r) => same(r.master_account, m) && !r.symbol_filter);
   async function refreshRules() { if (client) try { setRules(await client.rules()); } catch { /* se queda lo que hay */ } }
+  /** Todas las cuentas visibles que no copian a la maestra activa pasan a copiarla (las que ya tienen regla conservan su multiplicador). */
+  async function linkAll() {
+    if (!client || busy || !master) return;
+    const targets = nodes.filter((n) => !same(n.id, master) && (n.role !== "master") && !(plainRuleOf(n.id)?.enabled && same(plainRuleOf(n.id)!.master_account, master))).map((n) => n.id);
+    if (!targets.length) { setToast({ kind: "info", text: `Todas las cuentas visibles ya copian a ${master}.` }); return; }
+    const v = prompt(`Vincular ${targets.length} cuentas a ${master}:\n${targets.join(", ")}\n\nMultiplicador para las que no tienen regla (las que ya la tienen conservan el suyo):`, "1");
+    if (v === null) return;
+    const m = Number(v.replace(",", "."));
+    if (!(m > 0)) { setToast({ kind: "bad", text: "Multiplicador no válido." }); return; }
+    setBusy(true);
+    const errors: string[] = []; let next = rules;
+    try {
+      for (const id of targets) {
+        const prev = plainRuleOf(id);
+        try {
+          const r = await client.link(id, master, prev?.multiplier ?? m, true, optsOf(prev));
+          next = next.filter((x) => x.id !== r.id).concat(r);
+          if (prev && !same(prev.master_account, master)) { await client.unlink(id, prev.master_account); next = next.filter((x) => x.id !== prev.id); }
+        } catch (ex) { errors.push(`${id}: ${ex instanceof Error ? ex.message : String(ex)}`); }
+      }
+      setRules(next);
+      setToast(errors.length ? { kind: "bad", text: `Vinculadas ${targets.length - errors.length} de ${targets.length}. ${errors.join("; ")}` } : { kind: "ok", text: `${targets.length} cuentas copian ahora a ${master}.` });
+      if (errors.length) await refreshRules();
+    } finally { setBusy(false); }
+  }
+
   async function linkFollower(follower: string, to: string, extra: { multiplier?: number; enabled?: boolean } & ExecOptions = {}) {
     if (!client || busy) return false;
     const prev = plainRuleOf(follower);
@@ -295,6 +321,7 @@ export function CopyMap() {
         <div className="chips">
           <div className="view-tabs" data-testid="map-view"><button className={view === "flow" ? "active" : ""} onClick={() => setView("flow")}>Flujo</button><button className={view === "cables" ? "active" : ""} onClick={() => setView("cables")}>Cables</button></div>
           <button className="chip-btn" onClick={reorder} title="Colocación automática para esta vista">Reordenar</button>
+          <button className="chip-btn" onClick={() => void linkAll()} disabled={busy || !master} title="Todas las cuentas visibles pasan a copiar a la maestra activa" data-testid="map-link-all">Vincular todas</button>
           <label className="inline small"><input type="checkbox" checked={!!layout?.show_offline} onChange={(e) => persist({ ...current(), show_offline: e.target.checked })} /> ver desconectadas</label>
         </div>
         <div className="chips">
