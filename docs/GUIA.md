@@ -169,6 +169,9 @@ Hay dos vías, y se pueden usar las dos a la vez (*Riesgo → Avisos al teléfon
     operación corta, saldo inicial, usar o no las comisiones anotadas por el engine), el estado del historial y cómo se
     calcula cada indicador. Los parámetros se guardan en el engine y valen en todos tus dispositivos.
 - **Cuentas** muestra los mismos paneles con los mandos de copia (multiplicador, interruptor, ⚙ opciones de ejecución).
+  Cada panel tiene el **Objetivo** de ganancia neta del día editable (escribe la cifra y sal del campo): al alcanzarlo el
+  engine deja de copiar a esa cuenta y la marca *objetivo logrado*; la barra muestra cuánto falta. Es el mismo valor que
+  en Riesgo → Límites por cuenta. **Objetivo para todas** lo fija de golpe en todas las seguidoras (útil en evaluaciones).
   **Vincular todas** pone a copiar a la maestra todas las seguidoras visibles de golpe (pide un multiplicador para las que
   no tienen regla; las que ya la tienen conservan el suyo). En **Gestionar cuentas**, *Ocultar* quita una cuenta de Inicio,
   Cuentas, Copiar y de las cuentas en juego, y nunca recibe copias; *Mostrar* la devuelve; el filtro *Ocultas* las lista, y

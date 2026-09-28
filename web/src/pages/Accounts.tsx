@@ -16,7 +16,7 @@ function ConnBadge({ a }: { a: Account }) {
 /** Cuentas: la maestra, las seguidoras activas con su interruptor de copia, y un
  *  panel de gestión con todas las cuentas que NinjaTrader conoce. */
 export function Accounts() {
-  const { client, accounts, rules, setRules, risk, health, audit, prices } = useStore();
+  const { client, accounts, rules, setRules, risk, setRisk, health, audit, prices } = useStore();
   const detected = health?.bridge.master_account ?? null;
   const [master, setMaster] = useState<string>(detected ?? "");
   const [manage, setManage] = useState(false);
@@ -46,6 +46,27 @@ export function Accounts() {
   const setEnabled = (acc: string, enabled: boolean) => guard(acc, async () => { await client!.setAccount(acc, { enabled }); });
   const setAuto = (acc: string) => guard(acc, async () => { await client!.setAccount(acc, { auto: true }); });
   const setAlias = (acc: string, alias: string) => guard(acc, async () => { await client!.setAccount(acc, { alias }); });
+  /** Objetivo de ganancia del día (mismo límite que en Riesgo): conserva el resto de límites de la cuenta. */
+  const targetBody = (acc: string, target: number) => {
+    const l = limits.get(acc);
+    return { account_id: acc, max_daily_loss: l?.max_daily_loss ?? 0, max_daily_profit: target, max_position_size: l?.max_position_size ?? 0,
+             max_trailing_drawdown: l?.max_trailing_drawdown ?? 0, drawdown_mode: l?.drawdown_mode ?? "intraday" as const, drawdown_floor_cap: l?.drawdown_floor_cap ?? 0,
+             drawdown_buffer: l?.drawdown_buffer ?? 0, trading_halted: !!l?.trading_halted && l.halted_reason !== "daily_profit" };
+  };
+  const setTarget = (acc: string, target: number) => guard(acc, async () => {
+    await client!.upsertLimit(targetBody(acc, target)); setRisk(await client!.risk());
+  });
+  const setTargetAll = () => guard("__target", async () => {
+    const ids = followers.map((a) => a.account_id);
+    if (!ids.length) return;
+    const v = prompt(`Objetivo de ganancia neta del día para ${ids.length} seguidoras (0 = sin objetivo). Al alcanzarlo, el engine deja de copiar a esa cuenta:`, String(limits.get(ids[0])?.max_daily_profit || ""));
+    if (v === null) return;
+    const target = Math.max(0, Number(v.replace(",", ".")) || 0);
+    const errors: string[] = [];
+    for (const id of ids) { try { await client!.upsertLimit(targetBody(id, target)); } catch (ex) { errors.push(`${id}: ${ex instanceof Error ? ex.message : String(ex)}`); } }
+    setRisk(await client!.risk());
+    if (errors.length) throw new Error(errors.join("; "));
+  });
   const changeMaster = (acc: string) => guard("__master", async () => {
     if (!acc || acc === detected) { setMaster(acc); return; }
     if (!confirm(`¿Cambiar la cuenta maestra a ${acc}?\n\nA partir de ahora se replicarán las operaciones de ${acc}. Las cuentas que copiaban a ${detected ?? "la anterior"} dejan de copiar hasta que las vincules a la nueva.`)) return;
@@ -122,7 +143,7 @@ export function Accounts() {
           </select>
         </div>
         {masterAcc && <div className="panels one"><AccountPanel a={masterAcc} role="master" prices={prices} busy={busy === masterAcc.account_id} limit={limits.get(masterAcc.account_id)}
-                                                       onFlatten={() => void flatten(masterAcc.account_id)} /></div>}
+                                                       onFlatten={() => void flatten(masterAcc.account_id)} onTarget={(t) => void setTarget(masterAcc.account_id, t)} /></div>}
         {detected && master && master !== detected && (
           <p className="error">El addon sigue publicando <b>{detected}</b>; el cambio a {master} no se aplicó.</p>
         )}
@@ -133,6 +154,7 @@ export function Accounts() {
       <Card title={`Seguidoras · ${linked} de ${followers.length} copiando`}
             right={<div className="chips">
               {followers.length > 0 && <button className="primary small-btn" disabled={busy === "__all" || !master} onClick={() => void linkMany(followers.map((a) => a.account_id), "Seguidoras activas")} data-testid="link-all">Vincular todas</button>}
+              {followers.length > 0 && <button className="small-btn" disabled={busy === "__target"} onClick={() => void setTargetAll()} title="Mismo objetivo de ganancia del día para todas las seguidoras" data-testid="target-all">Objetivo para todas</button>}
               <button className="ghost" onClick={() => setManage(!manage)}>{manage ? "Cerrar gestión" : `Gestionar cuentas${hidden ? ` (${hidden} ocultas)` : ""}`}</button>
             </div>}>
         {followers.length === 0 ? <Empty>{accounts.length ? "Todas las cuentas están desactivadas. Actívalas en “Gestionar cuentas”." : "Esperando cuentas del bróker…"}</Empty> : (
@@ -142,7 +164,7 @@ export function Accounts() {
               return (
                 <AccountPanel key={a.account_id} a={a} role="follower" link={link} limit={limits.get(a.account_id)} prices={prices} busy={busy === a.account_id}
                               lastFill={lastFill(a.account_id)} lastReject={lastReject(a.account_id)}
-                              onFlatten={() => void flatten(a.account_id)} onResync={() => void resync(a.account_id)}
+                              onFlatten={() => void flatten(a.account_id)} onResync={() => void resync(a.account_id)} onTarget={(t) => void setTarget(a.account_id, t)}
                               controls={<>
                                 <label className="mult">x<input type="number" step="0.1" min="0.1" value={link?.multiplier ?? 1} disabled={busy === a.account_id || !master}
                                   onChange={(e) => { const m = Number(e.target.value); if (m > 0 && link) void apply(a.account_id, link.enabled, m); }}

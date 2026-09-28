@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { Account, AuditEvent, Drawdown, RiskLimit, Rule, WorkingOrder } from "../lib/api";
 import type { PriceMap } from "../lib/store";
 import { ago, money, pointValue, pts, root, signedMoney, time } from "../lib/format";
@@ -55,9 +55,35 @@ const kind = (o: WorkingOrder, pos: number): "Stop" | "TP" | "Límite" | "Orden"
 };
 const orderPrice = (o: WorkingOrder) => o.stop_price || o.limit_price;
 
-export function AccountPanel({ a, role, link, limit, lastFill, lastReject, prices, busy, onFlatten, onResync, controls, children, compact }: {
+/** Objetivo de ganancia del día editable desde el panel (para las evaluaciones: al llegar, el engine pausa la cuenta). */
+function TargetRow({ value, pnl, halted, busy, onChange }: { value: number; pnl: number; halted: boolean; busy?: boolean; onChange: (v: number) => void }) {
+  const [draft, setDraft] = useState(String(value || ""));
+  useEffect(() => { setDraft(String(value || "")); }, [value]);
+  const commit = () => { const v = Math.max(0, Number(draft.replace(",", ".")) || 0); if (v !== value) onChange(v); };
+  const pct = value > 0 ? Math.min(100, Math.max(0, (pnl / value) * 100)) : null;
+  const left = value > 0 ? value - pnl : null;
+  return (
+    <div className="ap-target" data-testid="target-row">
+      <label className="ap-target-edit" title="Objetivo de ganancia neta del día: al alcanzarlo el engine deja de copiar a esta cuenta (queda la posición abierta). Es el mismo valor que en Riesgo → Límites por cuenta.">
+        <span className="stat-label">Objetivo</span>
+        <span className="ap-target-input">$<input type="number" min="0" step="10" value={draft} placeholder="sin objetivo" disabled={busy} data-testid="target-input"
+          onChange={(e) => setDraft(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} /></span>
+      </label>
+      {pct !== null && (
+        <div className="ap-target-meter" title={`${pct.toFixed(0)} % del objetivo`}>
+          <div className="meter"><i className={halted ? "ok" : pct >= 80 ? "warn" : "accent"} style={{ width: `${pct}%` }} /></div>
+          <span className={`small ${halted ? "ok" : "muted"}`}>{halted ? "objetivo logrado · pausada" : left! > 0 ? `${pct.toFixed(0)} % · quedan ${money(left!)}` : "alcanzado"}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function AccountPanel({ a, role, link, limit, lastFill, lastReject, prices, busy, onFlatten, onResync, controls, children, compact, onTarget }: {
   a: Account; role: "master" | "follower"; link?: Rule; limit?: RiskLimit; lastFill?: AuditEvent; lastReject?: AuditEvent;
   prices: PriceMap; busy?: boolean; onFlatten?: () => void; onResync?: () => void; controls?: ReactNode; children?: ReactNode; compact?: boolean;
+  /** Si se pasa, el panel muestra el objetivo del día editable. */
+  onTarget?: (target: number) => void;
 }) {
   const copying = role === "follower" && !!link?.enabled;
   const gross = livePnl(a, prices);
@@ -93,6 +119,7 @@ export function AccountPanel({ a, role, link, limit, lastFill, lastReject, price
           <span className={`ap-pnl-value ${tone}`}>{pnl.live && "≈ "}{signedMoney(pnl.value)}</span>
           <span className="muted small">{money(a.balance)} · {ago(a.updated_at)}</span>
         </div>
+        {onTarget && <TargetRow value={limit?.max_daily_profit ?? 0} pnl={pnl.value} halted={!!limit?.trading_halted && limit.halted_reason === "daily_profit"} busy={busy} onChange={onTarget} />}
         {(fees > 0 || a.contracts_today > 0) && (
           <div className="ap-fees muted small" data-testid="fees" title="Comisiones estimadas: contratos ejecutados hoy × tarifa por contrato y lado (Riesgo → Comisiones)">
             bruto {signedMoney(gross.value)} · comisiones <span className="bad">−{money(fees)}</span> ({a.contracts_today} contr.)

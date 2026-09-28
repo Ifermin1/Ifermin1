@@ -608,3 +608,12 @@ table.an-table tr.total td { border-top: 2px solid var(--line-2); }
 .an-rows.two > div { flex-direction: column; align-items: flex-start; gap: 2px; }
 @media (max-width: 600px) { .an-tabs { flex-wrap: wrap; } table.an-table td, table.an-table th { padding: 7px 6px; font-size: 11.5px; } }
 .kill-banner { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+/* objetivo del día en el panel de cuenta */
+.ap-target { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.ap-target-edit { flex-direction: row; align-items: center; gap: 8px; }
+.ap-target-input { display: inline-flex; align-items: center; gap: 2px; color: var(--muted); }
+.ap-target-input input { width: 112px; padding: 5px 8px; font-variant-numeric: tabular-nums; }
+.ap-target-meter { display: flex; align-items: center; gap: 8px; flex: 1 1 160px; min-width: 0; }
+.ap-target-meter .meter { flex: 1 1 80px; height: 6px; border-radius: 3px; background: var(--hl); overflow: hidden; }
+.ap-target-meter .meter i { display: block; height: 100%; border-radius: 3px; }
+.ap-target-meter .meter i.accent { background: var(--accent); } .ap-target-meter .meter i.warn { background: var(--warn); } .ap-target-meter .meter i.ok { background: var(--ok); }
