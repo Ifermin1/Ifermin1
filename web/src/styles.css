@@ -617,3 +617,11 @@ table.an-table tr.total td { border-top: 2px solid var(--line-2); }
 .ap-target-meter .meter { flex: 1 1 80px; height: 6px; border-radius: 3px; background: var(--hl); overflow: hidden; }
 .ap-target-meter .meter i { display: block; height: 100%; border-radius: 3px; }
 .ap-target-meter .meter i.accent { background: var(--accent); } .ap-target-meter .meter i.warn { background: var(--warn); } .ap-target-meter .meter i.ok { background: var(--ok); }
+/* perfil de prop firm */
+.chip.profile { background: rgba(56,189,248,.12); color: var(--accent); border-color: rgba(56,189,248,.35); }
+.profile-editor { display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 10px; background: var(--panel-3); border: 1px solid var(--line); margin-top: 4px; }
+.pe-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.pe-row label { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; color: var(--muted); min-width: 0; }
+.pe-row input, .pe-row select { padding: 6px 8px; font-size: 13px; }
+.pe-summary b { color: var(--text); }
+.pe-others { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }

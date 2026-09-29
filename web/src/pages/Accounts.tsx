@@ -3,6 +3,7 @@ import { useStore } from "../lib/store";
 import { ago, money } from "../lib/format";
 import { Card, Empty } from "../components/ui";
 import { AccountPanel } from "../components/AccountPanel";
+import { ProfileEditor, type ProfileResult } from "../components/ProfileEditor";
 import type { Account, ExecOptions, Rule } from "../lib/api";
 
 const label = (a: Account) => a.alias ? `${a.alias} · ${a.account_id}` : a.account_id;
@@ -21,6 +22,7 @@ export function Accounts() {
   const [master, setMaster] = useState<string>(detected ?? "");
   const [manage, setManage] = useState(false);
   const [openOpts, setOpenOpts] = useState<string | null>(null);
+  const [openProfile, setOpenProfile] = useState<string | null>(null);   // cuenta con el editor de prop firm abierto
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<"connected" | "enabled" | "hidden" | "all">("connected");
   const [busy, setBusy] = useState<string | null>(null);
@@ -52,6 +54,26 @@ export function Accounts() {
     return { account_id: acc, max_daily_loss: l?.max_daily_loss ?? 0, max_daily_profit: target, max_position_size: l?.max_position_size ?? 0,
              max_trailing_drawdown: l?.max_trailing_drawdown ?? 0, drawdown_mode: l?.drawdown_mode ?? "intraday" as const, drawdown_floor_cap: l?.drawdown_floor_cap ?? 0,
              drawdown_buffer: l?.drawdown_buffer ?? 0, trading_halted: !!l?.trading_halted && l.halted_reason !== "daily_profit" };
+  };
+  /** Perfil de prop firm: guarda firma/plan/tamaño en la cuenta y los límites en Riesgo (para varias cuentas a la vez). */
+  const applyProfile = async (acc: string, r: ProfileResult, alsoTo: string[]) => {
+    setBusy(acc); setErr(null);
+    try {
+      const errors: string[] = [];
+      for (const id of [acc, ...alsoTo]) {
+        try {
+          await client!.setAccount(id, { firm: r.firm, plan: r.plan, plan_size: r.size });
+          if (r.firm) {
+            const l = limits.get(id);
+            await client!.upsertLimit({ account_id: id, max_daily_loss: r.dailyLoss, max_daily_profit: r.target, max_position_size: r.contracts,
+                                        max_trailing_drawdown: r.drawdown, drawdown_mode: r.dd, drawdown_floor_cap: r.cap, drawdown_buffer: r.buffer,
+                                        trading_halted: !!l?.trading_halted && !!l.halted_reason && l.halted_reason !== "daily_profit" });
+          }
+        } catch (ex) { errors.push(`${id}: ${ex instanceof Error ? ex.message : String(ex)}`); }
+      }
+      setRisk(await client!.risk());
+      if (errors.length) throw new Error(errors.join("; "));
+    } finally { setBusy(null); }
   };
   const setTarget = (acc: string, target: number) => guard(acc, async () => {
     await client!.upsertLimit(targetBody(acc, target)); setRisk(await client!.risk());
@@ -143,7 +165,11 @@ export function Accounts() {
           </select>
         </div>
         {masterAcc && <div className="panels one"><AccountPanel a={masterAcc} role="master" prices={prices} busy={busy === masterAcc.account_id} limit={limits.get(masterAcc.account_id)}
-                                                       onFlatten={() => void flatten(masterAcc.account_id)} onTarget={(t) => void setTarget(masterAcc.account_id, t)} /></div>}
+                                                       onFlatten={() => void flatten(masterAcc.account_id)} onTarget={(t) => void setTarget(masterAcc.account_id, t)}
+                                                       controls={<button className={`ghost small-btn ${openProfile === masterAcc.account_id ? "active" : ""}`} onClick={() => setOpenProfile(openProfile === masterAcc.account_id ? null : masterAcc.account_id)} data-testid={`profile-${masterAcc.account_id}`}>Prop firm</button>}>
+          {openProfile === masterAcc.account_id && <ProfileEditor a={masterAcc} limit={limits.get(masterAcc.account_id)} followers={followers} busy={busy === masterAcc.account_id}
+                                                                  onApply={(r, also) => applyProfile(masterAcc.account_id, r, also)} onClose={() => setOpenProfile(null)} />}
+        </AccountPanel></div>}
         {detected && master && master !== detected && (
           <p className="error">El addon sigue publicando <b>{detected}</b>; el cambio a {master} no se aplicó.</p>
         )}
@@ -174,8 +200,11 @@ export function Accounts() {
                                     onChange={(e) => void apply(a.account_id, e.target.checked, link?.multiplier ?? 1)} /><span />
                                 </label>
                                 {link && <button className="ghost danger small-btn" disabled={busy === a.account_id} onClick={() => void remove(a.account_id)} title="Quitar vínculo">✕</button>}
+                                <button className={`ghost small-btn ${openProfile === a.account_id ? "active" : ""}`} title="Prop firm y tipo de cuenta (drawdown, objetivo, contratos)" onClick={() => { setOpenProfile(openProfile === a.account_id ? null : a.account_id); setOpenOpts(null); }} data-testid={`profile-${a.account_id}`}>Prop firm</button>
                                 <button className={`ghost small-btn ${openOpts === a.account_id ? "active" : ""}`} title="Opciones de ejecución" onClick={() => setOpenOpts(openOpts === a.account_id ? null : a.account_id)}>⚙</button>
                               </>}>
+                  {openProfile === a.account_id && <ProfileEditor a={a} limit={limits.get(a.account_id)} followers={followers.filter((x) => x.account_id !== a.account_id)} busy={busy === a.account_id}
+                                                                 onApply={(r, also) => applyProfile(a.account_id, r, also)} onClose={() => setOpenProfile(null)} />}
                   {openOpts === a.account_id && (
                     <div className="exec-opts">
                       <label>Símbolo destino<input placeholder="igual que la maestra · ej. MNQ" defaultValue={link?.target_root ?? ""}

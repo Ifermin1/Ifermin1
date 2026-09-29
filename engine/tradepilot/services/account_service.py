@@ -34,7 +34,8 @@ class AccountService:
             self.accounts[row["account_id"]] = AccountSnapshot(
                 account_id=row["account_id"], balance=row["last_balance"] or 0.0, net_liquidity=row["last_balance"] or 0.0,
                 enabled=bool(row["enabled"]), enabled_source=row["enabled_source"] or "auto",
-                alias=row["alias"] or "", reported=False,
+                alias=row["alias"] or "", reported=False, firm=(row["firm"] if "firm" in row.keys() else "") or "",
+                plan=(row["plan"] if "plan" in row.keys() else "") or "", plan_size=float((row["plan_size"] if "plan_size" in row.keys() else 0) or 0),
                 updated_at=datetime.fromisoformat(row["last_seen"]) if row["last_seen"] else datetime.now())
         self._task: asyncio.Task | None = None
         self._running = False
@@ -234,13 +235,20 @@ class AccountService:
         pk = self._peaks.get(account_id)
         if pk is None:
             return None
+        if mode == "static":
+            limit = self.limits_provider().get(account_id)
+            if limit and limit.drawdown_floor_cap > 0:
+                return limit.drawdown_floor_cap + limit.max_trailing_drawdown
         return pk.get("peak_eod") if mode == "eod" else pk.get("peak_balance") if mode == "closed" else pk.get("peak_equity")
 
     def _compute_drawdown(self, snap: AccountSnapshot, pk: dict, equity: float) -> None:
         limit = self.limits_provider().get(snap.account_id)
         mode = limit.drawdown_mode if limit else "intraday"
         closed = mode == "closed"
-        if mode == "eod":
+        if mode == "static" and limit and limit.drawdown_floor_cap > 0:
+            # suelo fijo (Apex Static, Tradeify Select…): no hay marca de agua; el "máximo" es solo suelo + drawdown
+            peak, peak_at, value = limit.drawdown_floor_cap + limit.max_trailing_drawdown, None, equity
+        elif mode == "eod":
             # el suelo se fija con el balance del último cierre; la caída se mide en tiempo real con el flotante
             peak, peak_at, value = pk.get("peak_eod") or snap.balance, pk.get("peak_eod_day"), equity
             if peak_at:
@@ -254,7 +262,7 @@ class AccountService:
                               drawdown=round(max(0.0, peak - value), 2))
         if limit and limit.max_trailing_drawdown > 0:
             floor = peak - limit.max_trailing_drawdown
-            if limit.drawdown_floor_cap > 0 and floor >= limit.drawdown_floor_cap:
+            if limit.drawdown_floor_cap > 0 and (floor >= limit.drawdown_floor_cap or mode == "static"):
                 floor, dd.locked = limit.drawdown_floor_cap, True
             dd.limit, dd.buffer, dd.floor = limit.max_trailing_drawdown, limit.drawdown_buffer, round(floor, 2)
             dd.room = round(value - floor, 2)
@@ -334,8 +342,10 @@ class AccountService:
         return True if snap is None else snap.enabled
 
     async def set_settings(self, account_id: str, enabled: bool | None = None, alias: str | None = None,
-                           auto: bool = False) -> AccountSnapshot:
-        """enabled fija la cuenta a mano (source=user); auto=True vuelve a la política automática."""
+                           auto: bool = False, firm: str | None = None, plan: str | None = None,
+                           plan_size: float | None = None) -> AccountSnapshot:
+        """enabled fija la cuenta a mano (source=user); auto=True vuelve a la política automática; firm/plan/plan_size
+        guardan el perfil del prop firm (los tres a la vez)."""
         snap = self.accounts.get(account_id)
         if snap is None:
             snap = self.accounts[account_id] = AccountSnapshot(account_id=account_id, reported=False, updated_at=datetime.now())
@@ -348,8 +358,12 @@ class AccountService:
             snap.enabled_source = source = "user"
         if alias is not None:
             snap.alias = alias.strip()
+        profile = None
+        if firm is not None:
+            snap.firm, snap.plan, snap.plan_size = firm.strip(), (plan or "").strip(), float(plan_size or 0)
+            profile = (snap.firm, snap.plan, snap.plan_size)
         if self.store:
-            self.store.set_account_settings(account_id, enabled, alias, source)
+            self.store.set_account_settings(account_id, enabled, alias, source, profile)
         await self.publish_accounts()
         return snap
 

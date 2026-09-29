@@ -6,7 +6,7 @@ import type { Commissions, RiskLimit } from "../lib/api";
 import { NotifyCard } from "../components/NotifyCard";
 import { DrawdownMeter, ddTone } from "../components/AccountPanel";
 
-const MODE_LABEL: Record<string, string> = { intraday: "dinámico", eod: "EOD", closed: "cerrado" };
+const MODE_LABEL: Record<string, string> = { intraday: "dinámico", eod: "EOD", closed: "cerrado", static: "estático" };
 
 export function Risk() {
   const { client, risk, setRisk, accounts } = useStore();
@@ -15,7 +15,7 @@ export function Risk() {
   const [maxProfit, setMaxProfit] = useState("0");
   const [maxSize, setMaxSize] = useState("0");
   const [maxDd, setMaxDd] = useState("0");
-  const [ddMode, setDdMode] = useState<"intraday" | "eod" | "closed">("intraday");
+  const [ddMode, setDdMode] = useState<"intraday" | "eod" | "closed" | "static">("intraday");
   const [ddCap, setDdCap] = useState("0");
   const [ddBuffer, setDdBuffer] = useState("0");
   const [halted, setHalted] = useState(false);
@@ -225,8 +225,8 @@ export function Risk() {
           <label>Ganancia diaria máx. ($)<input type="number" min="0" value={maxProfit} onChange={(e) => setMaxProfit(e.target.value)} /></label>
           <label>Posición máx. (contratos)<input type="number" min="0" value={maxSize} onChange={(e) => setMaxSize(e.target.value)} /></label>
           <label>Drawdown máx. del prop firm ($)<input type="number" min="0" value={maxDd} onChange={(e) => setMaxDd(e.target.value)} title="Cuánto puede caer la cuenta desde el máximo que llegó a valer antes de que el prop firm la cierre (APEX 50K: 2500)" /></label>
-          <label>Tipo de drawdown<select value={ddMode} onChange={(e) => setDdMode(e.target.value as "intraday" | "eod" | "closed")} title="Dinámico: el máximo sube tick a tick con el flotante (APEX trailing, MFF). EOD: el máximo solo se actualiza con el balance al cierre del día (APEX EOD, Topstep); la caída se vigila igual en tiempo real">
-            <option value="intraday">Dinámico (intradía, con flotante)</option><option value="eod">EOD (balance al cierre del día)</option><option value="closed">Solo cerrado (balance intradía)</option></select></label>
+          <label>Tipo de drawdown<select value={ddMode} onChange={(e) => setDdMode(e.target.value as "intraday" | "eod" | "closed" | "static")} title="Dinámico: el máximo sube tick a tick con el flotante (APEX trailing, MFF). EOD: el máximo solo se actualiza con el balance al cierre del día (APEX EOD, Topstep); la caída se vigila igual en tiempo real">
+            <option value="intraday">Dinámico (intradía, con flotante)</option><option value="eod">EOD (balance al cierre del día)</option><option value="static">Estático (suelo fijo = "se bloquea en")</option><option value="closed">Solo cerrado (balance intradía)</option></select></label>
           <label>El suelo se bloquea en ($)<input type="number" min="0" value={ddCap} onChange={(e) => setDdCap(e.target.value)} title="0 = el suelo sube siempre con el máximo. APEX: balance inicial + 100 (50K → 50100)" /></label>
           <label>Cerrar cuando falten ($)<input type="number" min="0" value={ddBuffer} onChange={(e) => setDdBuffer(e.target.value)} title="Colchón: el engine pausa y cierra la cuenta cuando le quedan estos dólares (o menos) hasta el suelo" /></label>
           <label className="inline"><input type="checkbox" checked={halted} onChange={(e) => setHalted(e.target.checked)} /> Pausar cuenta</label>

@@ -13,11 +13,11 @@ export type Position = { account_id: string; symbol: string; quantity: number; a
 export type WorkingOrder = { order_id: string; master_order_id: string; action: string; symbol: string; quantity: number; filled: number;
                              order_type: string; limit_price: number; stop_price: number; state: string };
 /** Drawdown dinámico (trailing) como lo mide el prop firm: distancia entre el máximo que llegó a valer la cuenta y su valor actual. */
-export type Drawdown = { equity: number; mode: "intraday" | "eod" | "closed"; peak: number; peak_at: string | null; drawdown: number; limit: number;
+export type Drawdown = { equity: number; mode: "intraday" | "eod" | "closed" | "static"; peak: number; peak_at: string | null; drawdown: number; limit: number;
                          floor: number | null; room: number | null; pct: number | null; buffer: number; locked: boolean };
 export type Account = { account_id: string; balance: number; net_liquidity: number; daily_pnl: number; contracts_today: number; commissions_today: number; net_pnl: number;
                         open_positions: Position[]; updated_at: string;
-                        enabled: boolean; enabled_source: "auto" | "user"; alias: string; connected: boolean | null; connection: string; reported: boolean;
+                        enabled: boolean; enabled_source: "auto" | "user"; alias: string; firm: string; plan: string; plan_size: number; connected: boolean | null; connection: string; reported: boolean;
                         realized_pnl: number; unrealized_pnl: number; desync: boolean; desync_detail: string; working_orders: WorkingOrder[]; drawdown: Drawdown };
 /** Tick de precio del addon (topic market.price), indexado por raíz del símbolo (NQ, MNQ…). */
 export type Price = { symbol: string; last: number; bid: number; ask: number; at: number };
@@ -29,7 +29,7 @@ export type ExecOptions = { target_root?: string | null; entry_mode?: "market" |
 export type AuditEvent = { id: number | null; timestamp: string; event_type: string; source_account: string | null;
                            target_account: string | null; message: string; details: Record<string, unknown> | null };
 export type RiskLimit = { account_id: string; max_daily_loss: number; max_daily_profit: number; max_position_size: number;
-                          max_trailing_drawdown: number; drawdown_mode: "intraday" | "eod" | "closed"; drawdown_floor_cap: number; drawdown_buffer: number;
+                          max_trailing_drawdown: number; drawdown_mode: "intraday" | "eod" | "closed" | "static"; drawdown_floor_cap: number; drawdown_buffer: number;
                           trading_halted: boolean; halted_reason: string; halted_at: string | null };
 export type Schedule = { enabled: boolean; window_start: string; flatten_at: string; include_master: boolean; last_flatten_day: string };
 export type Commissions = { enabled: boolean; default_per_side: number; rates: Record<string, number> };
@@ -105,7 +105,7 @@ export function makeClient(s: Session) {
     createRule: (b: Pick<Rule, "master_account" | "follower_account" | "multiplier" | "symbol_filter" | "enabled">) => req<Rule>("/api/rules", { method: "POST", body: JSON.stringify(b) }),
     updateRule: (id: string, b: Partial<Rule>) => req<Rule>(`/api/rules/${id}`, { method: "PATCH", body: JSON.stringify(b) }),
     deleteRule: (id: string) => req<void>(`/api/rules/${id}`, { method: "DELETE" }),
-    setAccount: (id: string, body: { enabled?: boolean; alias?: string; auto?: boolean }) =>
+    setAccount: (id: string, body: { enabled?: boolean; alias?: string; auto?: boolean; firm?: string; plan?: string; plan_size?: number }) =>
       req<Account>(`/api/accounts/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) }),
     forgetAccount: (id: string) => req<void>(`/api/accounts/${encodeURIComponent(id)}`, { method: "DELETE" }),
     setMaster: (account: string) => req<{ master_account: string }>("/api/master", { method: "POST", body: JSON.stringify({ account }) }),

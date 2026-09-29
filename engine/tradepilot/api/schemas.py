@@ -77,7 +77,7 @@ class RiskLimitUpsert(BaseModel):
     max_daily_profit: float = Field(default=0.0, ge=0)
     max_position_size: int = Field(default=0, ge=0)
     max_trailing_drawdown: float = Field(default=0.0, ge=0)
-    drawdown_mode: str = Field(default="intraday", pattern="^(intraday|eod|closed)$")
+    drawdown_mode: str = Field(default="intraday", pattern="^(intraday|eod|closed|static)$")
     drawdown_floor_cap: float = Field(default=0.0, ge=0)
     drawdown_buffer: float = Field(default=0.0, ge=0)
     trading_halted: bool = False
@@ -105,6 +105,10 @@ class AccountSettings(BaseModel):
     enabled: Optional[bool] = None
     alias: Optional[str] = Field(default=None, max_length=40)
     auto: bool = False   # volver a la política automática (activa = conectada)
+    # perfil del prop firm (se guardan los tres juntos cuando viene firm; firm "" = sin perfil)
+    firm: Optional[str] = Field(default=None, max_length=40)
+    plan: Optional[str] = Field(default=None, max_length=40)
+    plan_size: Optional[float] = Field(default=None, ge=0)
 
 
 class MasterRequest(BaseModel):

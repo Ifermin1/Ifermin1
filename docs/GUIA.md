@@ -169,6 +169,13 @@ Hay dos vías, y se pueden usar las dos a la vez (*Riesgo → Avisos al teléfon
     operación corta, saldo inicial, usar o no las comisiones anotadas por el engine), el estado del historial y cómo se
     calcula cada indicador. Los parámetros se guardan en el engine y valen en todos tus dispositivos.
 - **Cuentas** muestra los mismos paneles con los mandos de copia (multiplicador, interruptor, ⚙ opciones de ejecución).
+  El botón **Prop firm** de cada panel abre el perfil de la cuenta: eliges la firma (Apex, Topstep, MyFundedFutures, Take
+  Profit Trader, Tradeify, Bulenox, Earn2Trade u otro), el tipo de cuenta (evaluación, financiada, static…) y el tamaño, y
+  el catálogo rellena el **tipo de drawdown** (dinámico intradía, EOD o estático), su importe, dónde se bloquea el suelo
+  (p. ej. Apex PA: saldo inicial + 100), el objetivo, la pérdida diaria y los contratos máximos. Todo se puede retocar
+  antes de *Aplicar perfil*, y se puede aplicar a varias cuentas a la vez. El panel muestra el perfil (p. ej. "Apex 50K ·
+  PA · DD dinámico") y el engine vigila el drawdown con ese tipo desde ese momento. Los importes del catálogo son
+  orientativos: confírmalos en la web de la firma. *Quitar perfil* borra la etiqueta y conserva los límites.
   Cada panel tiene el **Objetivo** de ganancia neta del día editable (escribe la cifra y sal del campo): al alcanzarlo el
   engine deja de copiar a esa cuenta y la marca *objetivo logrado*; la barra muestra cuánto falta. Es el mismo valor que
   en Riesgo → Límites por cuenta. **Objetivo para todas** lo fija de golpe en todas las seguidoras (útil en evaluaciones).
@@ -310,7 +317,9 @@ Si la maestra opera y las seguidoras no entran, abre **Auditoría** y mira el mo
   avisa con `KILL_SWITCH_PERSISTED` y todas las páginas muestran el aviso rojo *COPIA DETENIDA* con el botón **Reanudar
   copia**. Hasta reanudar, cada entrada de la maestra queda bloqueada y las seguidoras aparecen DESINCRONIZADAS.
 - `fuera de horario` / `sesión cerrada` → el horario de Riesgo; *Reabrir sesión* si quieres operar fuera de él.
-- `límite de pérdida diaria`, `objetivo alcanzado`, `drawdown` → límites por cuenta (Riesgo → Editar / Reanudar).
+- `límite de pérdida diaria`, `objetivo alcanzado`, `drawdown` → límites por cuenta (Riesgo → Editar / Reanudar). Si
+  acabas de aplicar un perfil de prop firm y la cuenta se pausó por drawdown, el tamaño elegido no corresponde con el
+  saldo real (el suelo quedó por encima del saldo): corrige el perfil y reanuda.
 - `cuenta bloqueada por el prop firm` → el bróker rechazó por administración; la cuenta se desactivó sola.
 
 ## 7. Emergencias

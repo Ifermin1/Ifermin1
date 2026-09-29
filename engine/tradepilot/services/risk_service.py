@@ -383,7 +383,7 @@ class RiskService:
                     peak = snap.drawdown.peak
                 floor = peak - limit.max_trailing_drawdown
                 if limit.drawdown_floor_cap > 0:
-                    floor = min(floor, limit.drawdown_floor_cap)
+                    floor = limit.drawdown_floor_cap if limit.drawdown_mode == "static" else min(floor, limit.drawdown_floor_cap)
                 value = snap.balance if limit.drawdown_mode == "closed" else snap.drawdown.equity
                 if value - floor <= limit.drawdown_buffer:
                     raise ValueError(f"{limit.account_id} sigue a {value - floor:,.2f} del suelo del drawdown ({floor:,.2f}): no se "

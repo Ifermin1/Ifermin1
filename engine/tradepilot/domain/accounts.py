@@ -69,7 +69,7 @@ class DrawdownSnapshot(DomainModel):
     """Drawdown dinámico (trailing) de la cuenta, como lo mide un prop firm: la distancia entre el máximo que llegó a
     valer la cuenta (marca de agua) y lo que vale ahora. `equity` = balance + flotante."""
     equity: float = 0.0
-    mode: str = "intraday"                  # "intraday" (dinámico, con flotante) | "eod" (balance al cierre del día) | "closed"
+    mode: str = "intraday"                  # "intraday" (dinámico, con flotante) | "eod" (balance al cierre del día) | "closed" | "static" (suelo fijo)
     peak: float = 0.0                       # máximo alcanzado según el modo
     peak_at: Optional[datetime] = None
     drawdown: float = 0.0                   # peak - valor actual (>= 0)
@@ -97,6 +97,10 @@ class AccountSnapshot(DomainModel):
     enabled: bool = True               # desactivada = oculta y nunca recibe copias
     enabled_source: str = "auto"       # "auto": sigue el estado de conexión; "user": fijada a mano
     alias: str = ""
+    # perfil del prop firm (informativo; los límites reales están en RiskLimit): p. ej. "apex", "pa", 50000
+    firm: str = ""
+    plan: str = ""
+    plan_size: float = 0.0
     connected: Optional[bool] = None
     connection: str = ""
     reported: bool = True              # False = el bróker no la reportó en la última sincronización

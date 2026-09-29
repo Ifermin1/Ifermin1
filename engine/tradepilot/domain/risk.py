@@ -17,6 +17,7 @@ class RiskLimit(DomainModel):
     drawdown_mode: str = "intraday"     # "intraday": dinámico, el máximo sube con el flotante tick a tick (APEX trailing, MFF…);
                                         # "eod": el máximo solo se actualiza con el balance al cierre del día (APEX EOD, Topstep MLL);
                                         # "closed": máximo del balance cerrado intradía (antiguo)
+                                        # "static": el suelo no se mueve: es drawdown_floor_cap (saldo inicial − drawdown)
     drawdown_floor_cap: float = 0.0     # 0 = el suelo sube siempre; si no, el suelo se bloquea al llegar a este valor (APEX: inicial + 100)
     drawdown_buffer: float = 0.0        # colchón en USD: el engine pausa y cierra cuando faltan <= esto para el suelo
     trading_halted: bool = False

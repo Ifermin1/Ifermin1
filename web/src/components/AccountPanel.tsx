@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { Account, AuditEvent, Drawdown, RiskLimit, Rule, WorkingOrder } from "../lib/api";
 import type { PriceMap } from "../lib/store";
+import { DD_SHORT, profileLabel, planOf } from "../lib/propfirms";
 import { ago, money, pointValue, pts, root, signedMoney, time } from "../lib/format";
 
 /** Estimación en vivo del P&L del día: lo realizado que reporta NinjaTrader más lo flotante
@@ -105,6 +106,7 @@ export function AccountPanel({ a, role, link, limit, lastFill, lastReject, price
         </div>
         <div className="ap-badges">
           {role === "master" ? <span className="badge accent">maestra</span> : copying ? <span className="badge ok">copiando ×{link!.multiplier}</span> : <span className="badge muted">sin copiar</span>}
+          {profileLabel(a.firm, a.plan, a.plan_size) && <span className="chip profile" title={`${profileLabel(a.firm, a.plan, a.plan_size)} · ${DD_SHORT[(planOf(a.firm, a.plan)?.dd ?? (dd.mode === "static" ? "static" : dd.mode === "eod" ? "eod" : "intraday"))]}`} data-testid="profile-chip">{profileLabel(a.firm, a.plan, a.plan_size)} · {DD_SHORT[dd.mode === "static" ? "static" : dd.mode === "eod" ? "eod" : "intraday"]}</span>}
           {link?.target_root && <span className="chip">→ {link.target_root}</span>}
           {limit?.trading_halted && <span className={`badge ${limit.halted_reason === "daily_profit" ? "ok" : "bad"}`}>{limit.halted_reason === "daily_profit" ? "objetivo logrado" : limit.halted_reason === "daily_loss" ? "pérdida diaria" : limit.halted_reason === "drawdown" ? "drawdown" : "pausada"}</span>}
           {ddHot && <span className="badge bad">drawdown {dd.pct!.toFixed(0)} %</span>}
@@ -130,7 +132,7 @@ export function AccountPanel({ a, role, link, limit, lastFill, lastReject, price
           <div className="dd-line">
             <span className="stat-label">Drawdown</span>
             <span className={`num ${dd.drawdown > 0 ? "bad" : "muted"}`}>{dd.drawdown > 0 ? `−${money(dd.drawdown)}` : "0"}</span>
-            <span className="muted">desde el máximo {dd.mode === "eod" ? "EOD " : ""}{money(dd.peak)}{dd.peak_at && !compact && dd.mode !== "eod" ? ` (${time(dd.peak_at)})` : ""}</span>
+            <span className="muted">{dd.mode === "static" ? "suelo fijo (estático)" : `desde el máximo ${dd.mode === "eod" ? "EOD " : ""}${money(dd.peak)}${dd.peak_at && !compact && dd.mode !== "eod" ? ` (${time(dd.peak_at)})` : ""}`}</span>
             {dd.floor !== null && <span className={ddTone(dd)}>· suelo {money(dd.floor)}{dd.locked ? " (bloqueado)" : ""} · quedan {money(dd.room ?? 0)}</span>}
           </div>
           {dd.pct !== null && <DrawdownMeter d={dd} />}

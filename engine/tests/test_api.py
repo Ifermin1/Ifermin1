@@ -1008,3 +1008,25 @@ async def test_blocked_by_kill_switch_explains_since_when_and_how_to_resume(clie
     assert container.risk.allows("Sim102", 1, "NQ 12-26", "BUY")[0]
     container.risk.warn_if_persisted()
     assert len((await client.get("/api/audit?limit=5&event_type=KILL_SWITCH_PERSISTED")).json()) == 1
+
+
+async def test_account_profile_is_persisted_and_static_drawdown_has_fixed_floor(client: AsyncClient, container):
+    r = await client.patch("/api/accounts/Sim102", json={"firm": "apex", "plan": "static", "plan_size": 100000})
+    assert r.status_code == 200 and r.json()["firm"] == "apex" and r.json()["plan"] == "static" and r.json()["plan_size"] == 100000
+    row = next(a for a in container.store.get_accounts() if a["account_id"] == "Sim102")
+    assert (row["firm"], row["plan"], row["plan_size"]) == ("apex", "static", 100000.0)
+    # drawdown estático: suelo fijo en saldo inicial − drawdown, marcado como bloqueado
+    bal = container.accounts.accounts["Sim102"].balance
+    r = await client.put("/api/risk/limits", json={"account_id": "Sim102", "max_trailing_drawdown": 625, "drawdown_mode": "static",
+                                                   "drawdown_floor_cap": round(bal - 625, 2)})
+    assert r.status_code == 200, r.text
+    container.accounts.refresh_drawdown("Sim102")
+    dd = container.accounts.accounts["Sim102"].drawdown
+    assert dd.mode == "static" and dd.locked and dd.floor == round(bal - 625, 2) and dd.limit == 625
+    assert abs(dd.room - 625) < 1.0
+    r = await client.get("/api/accounts")
+    acc = next(a for a in r.json() if a["account_id"] == "Sim102")
+    assert acc["drawdown"]["mode"] == "static" and acc["drawdown"]["locked"] is True
+    assert (await client.put("/api/risk/limits", json={"account_id": "Sim102", "drawdown_mode": "weird"})).status_code == 422
+    await client.delete("/api/risk/limits/Sim102")
+    await client.patch("/api/accounts/Sim102", json={"firm": "", "plan": "", "plan_size": 0})

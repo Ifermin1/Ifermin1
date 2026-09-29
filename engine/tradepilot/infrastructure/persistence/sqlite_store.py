@@ -81,6 +81,9 @@ class SQLiteStore:
                 self._conn.execute("ALTER TABLE accounts ADD COLUMN enabled_source TEXT DEFAULT 'auto'")
             if "last_connected" not in cols:
                 self._conn.execute("ALTER TABLE accounts ADD COLUMN last_connected TEXT")
+            for col, ddl in (("firm", "TEXT DEFAULT ''"), ("plan", "TEXT DEFAULT ''"), ("plan_size", "REAL DEFAULT 0")):
+                if col not in cols:
+                    self._conn.execute(f"ALTER TABLE accounts ADD COLUMN {col} {ddl}")
             rule_cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(replication_rules)").fetchall()}
             for col, ddl in (("target_root", "TEXT"), ("entry_mode", "TEXT DEFAULT 'market'"), ("tolerance_ticks", "INTEGER DEFAULT 2"),
                              ("entry_timeout_s", "INTEGER DEFAULT 5"), ("entry_fallback", "TEXT DEFAULT 'market'")):
@@ -198,9 +201,11 @@ class SQLiteStore:
                 (account_id, enabled, when, when, balance, when if connected else None))
 
     def set_account_settings(self, account_id: str, enabled: bool | None = None, alias: str | None = None,
-                             source: str | None = None) -> None:
+                             source: str | None = None, profile: tuple[str, str, float] | None = None) -> None:
         with self._lock, self._conn:
             self._conn.execute("INSERT OR IGNORE INTO accounts (account_id, enabled, alias) VALUES (?, 1, '')", (account_id,))
+            if profile is not None:
+                self._conn.execute("UPDATE accounts SET firm = ?, plan = ?, plan_size = ? WHERE account_id = ?", (*profile, account_id))
             if enabled is not None:
                 self._conn.execute("UPDATE accounts SET enabled = ? WHERE account_id = ?", (enabled, account_id))
             if source is not None:
