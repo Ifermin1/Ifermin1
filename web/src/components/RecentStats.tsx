@@ -3,19 +3,21 @@ import type { AnalysisData, Client } from "../lib/api";
 import { byHour, dayStats, tradeStats, netOf } from "../lib/stats";
 import { EquityCurve, SignedBars } from "../components/charts";
 import { moneyShort } from "../lib/format";
+import { useThrottled } from "../lib/hooks";
 
 /* Tarjeta de Inicio: los últimos 30 días en cifras (neto, aciertos, factor de beneficio, esperanza, drawdown máximo,
  * mejor y peor jornada), la curva de capital y el neto por hora de entrada. Mismas definiciones que Análisis → Estadísticas. */
 const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 export function RecentStats({ client, account = "", lastFillId, onMore }: { client: Client; account?: string; lastFillId: number | null; onMore: () => void }) {
   const [data, setData] = useState<AnalysisData | null>(null);
+  const trigger = useThrottled(lastFillId, 5000);     // como mucho una recarga cada 5 s aunque lleguen fills seguidos
   useEffect(() => {
     let alive = true;
     const from = new Date(); from.setDate(from.getDate() - 30);
     const to = new Date(); to.setDate(to.getDate() + 1);
-    const t = window.setTimeout(() => client.analysis(iso(from), iso(to), account).then((d) => { if (alive) setData(d); }).catch(() => {}), lastFillId === null ? 0 : 1500);
-    return () => { alive = false; window.clearTimeout(t); };
-  }, [client, account, lastFillId]);
+    client.analysis(iso(from), iso(to), account).then((d) => { if (alive) setData(d); }).catch(() => {});
+    return () => { alive = false; };
+  }, [client, account, trigger]);
   const trades = data?.trades ?? [];
   const ts = useMemo(() => tradeStats(trades, netOf), [trades]);
   const ds = useMemo(() => dayStats((data?.days ?? []).filter((d) => d.trades || d.pnl_broker !== null).map((d) => ({ day: d.day, net: Math.round(((d.trades ? d.pnl_trades : (d.pnl_broker ?? 0)) - d.commissions) * 100) / 100 }))), [data]);

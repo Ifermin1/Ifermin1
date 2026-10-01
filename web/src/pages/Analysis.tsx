@@ -3,6 +3,7 @@ import { useStore } from "../lib/store";
 import type { AnalysisData, AnalysisDay, AnalysisParams, CashEvent, CashEventInput, Trade } from "../lib/api";
 import { Card, Empty, Kpi } from "../components/ui";
 import { Icon } from "../components/Icons";
+import { useThrottled } from "../lib/hooks";
 import { EquityCurve, HistogramChart, SignedBars } from "../components/charts";
 import { byAccount, byHour, bySide, bySymbol, byWeekday, dayStats, histogram, tradeStats, type TradeLike } from "../lib/stats";
 
@@ -65,7 +66,8 @@ export function Analysis() {
   const [params, setParams] = useState<AnalysisParams>(DEFAULT_PARAMS);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
-  const lastFillId = audit.find((a) => a.event_type === "FOLLOWER_FILL" || a.event_type === "ACCOUNT_FILL" || a.event_type === "MASTER_RECEIVED")?.id ?? null;
+  // los fills llegan por WebSocket: se recarga como mucho cada 2 s (una ráfaga continua no pospone la recarga)
+  const lastFillId = useThrottled(audit.find((a) => a.event_type === "FOLLOWER_FILL" || a.event_type === "ACCOUNT_FILL" || a.event_type === "MASTER_RECEIVED")?.id ?? null, 2000);
   const from = rangeFrom(range);
   const to = useMemo(() => { const d = new Date(); d.setDate(d.getDate() + 1); return iso(d); }, []);
 
@@ -73,9 +75,9 @@ export function Analysis() {
   useEffect(() => {
     if (!client) return;
     let alive = true;
-    const t = window.setTimeout(() => client.analysis(from, to, account).then((d) => { if (alive) { setData(d); setError(null); } })
-      .catch((e) => { if (alive) setError(e instanceof Error ? e.message : String(e)); }), lastFillId === null ? 0 : 800);
-    return () => { alive = false; window.clearTimeout(t); };
+    client.analysis(from, to, account).then((d) => { if (alive) { setData(d); setError(null); } })
+      .catch((e) => { if (alive) setError(e instanceof Error ? e.message : String(e)); });
+    return () => { alive = false; };
   }, [client, from, to, account, lastFillId, tick]);
   const reload = () => setTick((n) => n + 1);
   const go = (t: Tab) => { setTab(t); window.location.hash = `analysis/${t}`; };

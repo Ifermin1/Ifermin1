@@ -6,6 +6,7 @@ import { Card, Empty, Kpi } from "../components/ui";
 import { Icon } from "../components/Icons";
 import { ShareModal, type ShareData } from "../components/ShareCard";
 import { NewsPanel } from "../components/NewsPanel";
+import { useThrottled } from "../lib/hooks";
 
 /* Calendario de rendimiento: un mes de un vistazo (P&L neto por día, operaciones, aciertos), indicadores del mes,
  * curva acumulada y el detalle de un día con sus operaciones. Verde/rojo con tres intensidades según el tamaño del día. */
@@ -37,13 +38,13 @@ export function Performance() {
   const [ddWidth, setDdWidth] = useState(500);
   const ddBox = useRef<HTMLDivElement>(null);
   const key = monthKey(cursor);
-  const lastTradeId = audit.find((a) => a.event_type === "FOLLOWER_FILL" || a.event_type === "MASTER_RECEIVED" || a.event_type === "ACCOUNT_FILL")?.id ?? null;
+  const lastTradeId = useThrottled(audit.find((a) => a.event_type === "FOLLOWER_FILL" || a.event_type === "MASTER_RECEIVED" || a.event_type === "ACCOUNT_FILL")?.id ?? null, 2000);
 
   useEffect(() => {
     if (!client) return;
     let alive = true;
-    const t = window.setTimeout(() => client.month(key, account).then((m) => { if (alive) setData(m); }).catch(() => {}), lastTradeId === null ? 0 : 600);
-    return () => { alive = false; window.clearTimeout(t); };
+    client.month(key, account).then((m) => { if (alive) setData(m); }).catch(() => {});
+    return () => { alive = false; };
   }, [client, key, account, lastTradeId]);
   useEffect(() => {
     if (!box.current) return;
