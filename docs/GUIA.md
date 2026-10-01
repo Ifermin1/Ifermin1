@@ -127,12 +127,16 @@ Hay dos vías, y se pueden usar las dos a la vez (*Riesgo → Avisos al teléfon
 - **Vista compacta**: el botón ▥ de la esquina superior derecha reduce márgenes y tamaños para ver más cuentas en pantalla
   (ideal en el teléfono). Se recuerda en ese navegador.
 - **Tema claro u oscuro**: el botón ☀/☾ junto al anterior. También se recuerda en ese navegador.
-- **Inicio** es la sala de control: avisos rojos, indicadores del día, el **gráfico de P&L** (una línea por cuenta; rangos
+- **Inicio** es la sala de control: la tarjeta **Avisos** agrupa todo lo que requiere atención (kill switch, addon,
+  seguidoras desincronizadas, cuentas pausadas por pérdida, drawdown, corte del día u objetivo, con las cuentas como chips
+  y un botón para ir a Riesgo o Cuentas), los indicadores del día, el **gráfico de P&L** (una línea por cuenta; rangos
   `1h`, `4h`, `hoy`; toca el gráfico para ver los valores a una hora; pulsa una cuenta de la leyenda para ocultarla; *Tabla*
   muestra las mismas cifras cada 5 minutos), la tarjeta **Calidad de ejecución** (¿entran todas las seguidoras al precio del
   maestro? porcentaje al mismo precio, deslizamiento medio en ticks, tiempo en bróker, la peor seguidora; un gráfico por
   operación con un punto por seguidora y otro por seguidora con su media; los botones *Entrar al precio del maestro* /
   *Entrar a mercado* cambian de golpe el modo de entrada de todas las seguidoras; ver `docs/PLAN_MISMO_PRECIO.md`) y las
+  la tarjeta **Últimos 30 días** (neto, aciertos, factor de beneficio, esperanza por operación, drawdown máximo, mejor y
+  peor día, la curva de capital y el neto por hora de entrada; mismas definiciones que Análisis → Estadísticas) y las
   **cuentas en juego**: maestra y seguidoras que copian, cada una con su P&L,
   posición (con distancia al mercado en puntos y dólares), **stops y take profits vivos** con su distancia al precio,
   último fill o rechazo y el botón *Cerrar*.
@@ -153,6 +157,11 @@ Hay dos vías, y se pueden usar las dos a la vez (*Riesgo → Avisos al teléfon
   (maestra, seguidoras y manuales), así que solo hay operaciones desde que el engine está en marcha. La sesión que abre a
   la hora de cierre (17:00 por defecto, `DRAWDOWN_EOD_TIME`) cuenta como el día siguiente, como en CME.
 - **Análisis** es la revisión de tu gestión operación por operación, con un periodo (30 d, 90 d, año, todo) y una cuenta:
+  - *Estadísticas*: indicadores (resultado, aciertos, factor de beneficio, esperanza por operación y en R, fracción de
+    Kelly, media ganadora/perdedora y ratio, mayor ganancia/pérdida, drawdown máximo y % del máximo, Sharpe, Sortino y
+    Calmar anualizados, rachas máximas y actual), la **curva de capital** con el drawdown sombreado, la **distribución**
+    del resultado por operación, el neto **por hora de entrada**, **por día de la semana**, **por símbolo y dirección** y
+    **por cuenta** (gráfica y tabla). El conmutador Bruto/Neto cambia todas las cifras.
   - *Duración y riesgo*: el gráfico **Tiempo vs. resultado** (un punto por operación, eje de tiempo logarítmico, línea de
     60 s y línea de tu referencia de pérdida; pasa el cursor para ver la operación y tócala para ver su detalle),
     **Gestión del riesgo por operación** (qué porcentaje de pérdidas queda dentro de tu referencia, cuántas la superan y

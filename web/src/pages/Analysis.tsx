@@ -3,19 +3,21 @@ import { useStore } from "../lib/store";
 import type { AnalysisData, AnalysisDay, AnalysisParams, CashEvent, CashEventInput, Trade } from "../lib/api";
 import { Card, Empty, Kpi } from "../components/ui";
 import { Icon } from "../components/Icons";
+import { EquityCurve, HistogramChart, SignedBars } from "../components/charts";
+import { byAccount, byHour, bySide, bySymbol, byWeekday, dayStats, histogram, tradeStats, type TradeLike } from "../lib/stats";
 
 /* Análisis de operaciones: duración vs. resultado, gestión del riesgo por operación, operaciones una por una, retiros y
  * pagos, balance con conciliación diaria y los criterios de cálculo. Todo sale de las operaciones reconstruidas por el
  * engine (fills de maestra y seguidoras), del P&L y saldo que reporta NinjaTrader y de los movimientos de caja anotados. */
 
-type Tab = "duration" | "records" | "balance" | "criteria";
+type Tab = "stats" | "duration" | "records" | "balance" | "criteria";
 type Range = "30" | "90" | "ytd" | "all";
 type Mode = "gross" | "net";
 type Kind = "gain" | "loss" | "be" | "none";
 type Row = { t: Trade; gross: number; fee: number; net: number; value: number; dur: number | null; kind: Kind; short: boolean };
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: "duration", label: "Duración y riesgo" }, { id: "records", label: "Pendientes y registros" },
+  { id: "stats", label: "Estadísticas" }, { id: "duration", label: "Duración y riesgo" }, { id: "records", label: "Pendientes y registros" },
   { id: "balance", label: "Balance y retiros" }, { id: "criteria", label: "Datos y criterios" },
 ];
 const DEFAULT_PARAMS: AnalysisParams = { commission_rt: 5, be_tolerance: 0, loss_reference: 250, short_seconds: 60, start_balance: null, use_engine_commissions: true };
@@ -55,7 +57,7 @@ const download = (name: string, text: string) => {
 
 export function Analysis() {
   const { client, accounts, health, audit } = useStore();
-  const [tab, setTab] = useState<Tab>(() => { const m = window.location.hash.match(/analysis\/(\w+)/); return (TABS.find((t) => t.id === m?.[1])?.id ?? "duration"); });
+  const [tab, setTab] = useState<Tab>(() => { const m = window.location.hash.match(/analysis\/(\w+)/); return (TABS.find((t) => t.id === m?.[1])?.id ?? "stats"); });
   const [range, setRange] = useState<Range>("90");
   const [account, setAccount] = useState("");
   const [mode, setMode] = useState<Mode>("gross");
@@ -128,7 +130,7 @@ export function Analysis() {
                 {accountOptions.map((id) => <option key={id} value={id}>{label(id)}{id === master ? " · maestra" : ""}</option>)}
               </select>
             </label>
-            {tab === "duration" && (
+            {(tab === "duration" || tab === "stats") && (
               <div className="view-tabs" data-testid="an-mode">
                 <button className={mode === "gross" ? "active" : ""} onClick={() => setMode("gross")}>Bruto</button>
                 <button className={mode === "net" ? "active" : ""} onClick={() => setMode("net")}>Neto</button>
@@ -138,6 +140,7 @@ export function Analysis() {
         </div>
       </Card>
       {error && <div className="banner bad">No se pudo cargar el análisis: {error}</div>}
+      {tab === "stats" && <StatsTab rows={rows} days={days} params={params} mode={mode} label={label} />}
       {tab === "duration" && <DurationTab rows={rows} risk={risk} params={params} mode={mode} label={label} />}
       {tab === "records" && <RecordsTab cash={cash} accounts={accountOptions} account={account} label={label} onChange={reload} />}
       {tab === "balance" && <BalanceTab days={days} rows={rows} cash={cash} params={params} account={account} label={label} />}
@@ -621,5 +624,86 @@ function CriteriaTab({ params, onSave, data, rows, account, label }: { params: A
         </div>
       </Card>
     </>
+  );
+}
+
+
+/* ================================ Estadísticas ================================ */
+const num = (x: number | null, d = 2, suffix = "") => (x === null ? "—" : x === Infinity ? "∞" : `${x.toLocaleString("es-ES", { minimumFractionDigits: d, maximumFractionDigits: d })}${suffix}`);
+function StatsTab({ rows, days, params, mode, label }: { rows: Row[]; days: AnalysisDay[]; params: AnalysisParams; mode: Mode; label: (id: string) => string }) {
+  const trades: TradeLike[] = useMemo(() => rows.map((r) => ({ ...r.t, commissions: r.fee })), [rows]);
+  const value = (t: TradeLike) => (mode === "gross" ? t.pnl : Math.round((t.pnl - t.commissions) * 100) / 100);
+  const ts = useMemo(() => tradeStats(trades, value, params.be_tolerance), [trades, mode, params.be_tolerance]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const dayNet = useMemo(() => {
+    const feeByDay = new Map<string, number>();
+    for (const r of rows) feeByDay.set(r.t.day, (feeByDay.get(r.t.day) ?? 0) + r.fee);
+    return days.filter((d) => d.trades || d.pnl_broker !== null).map((d) => {
+      const gross = d.trades ? d.pnl_trades : (d.pnl_broker ?? 0);
+      const fee = mode === "gross" ? 0 : params.use_engine_commissions ? d.commissions : (feeByDay.get(d.day) ?? 0);
+      return { day: d.day, net: Math.round((gross - fee) * 100) / 100 };
+    });
+  }, [days, rows, params, mode]);
+  const ds = useMemo(() => dayStats(dayNet), [dayNet]);
+  const modeLabel = mode === "gross" ? "bruto" : "neto";
+  const tone = (x: number) => (x > 0 ? "ok" : x < 0 ? "bad" : "muted");
+  return (
+    <>
+      <div className="kpis an-kpis stats-kpis" data-testid="stats-kpis">
+        <Kpi label={`Resultado ${modeLabel}`} icon="wallet" value={dollars(mode === "gross" ? ts.gross : ts.net)} tone={tone(mode === "gross" ? ts.gross : ts.net)} sub={`${ts.n} operaciones · ${ds.n} jornadas`} />
+        <Kpi label="Aciertos" icon="target" value={ts.winRate === null ? "—" : `${Math.round(ts.winRate * 100)} %`} ring={ts.winRate === null ? null : ts.winRate * 100} tone={ts.winRate === null ? "muted" : ts.winRate >= 0.5 ? "ok" : "warn"} sub={`${ts.wins} ganadoras · ${ts.losses} perdedoras · ${ts.be} BE`} />
+        <Kpi label="Factor de beneficio" icon="scale" value={num(ts.pf)} tone={ts.pf === null ? "muted" : ts.pf >= 1.5 ? "ok" : ts.pf >= 1 ? "warn" : "bad"} sub={`ganado ${dollars(ts.grossProfit)} ÷ perdido ${dollars(ts.grossLoss)}`} />
+        <Kpi label="Esperanza por operación" icon="trendUp" value={ts.expectancy === null ? "—" : dollars(ts.expectancy)} tone={ts.expectancy === null ? "muted" : tone(ts.expectancy)} sub={ts.rExpectancy !== null ? `${num(ts.rExpectancy)} R · Kelly ${num(ts.kelly !== null ? ts.kelly * 100 : null, 0, " %")}` : "neto medio por operación"} />
+        <Kpi label="Media gan. / perd." icon="layers" value={<>{ts.avgWin === null ? "—" : <span className="ok">{dollars(ts.avgWin)}</span>} <span className="muted">/</span> {ts.avgLoss === null ? "—" : <span className="bad">{dollars(-ts.avgLoss)}</span>}</>} bar={[ts.avgWin ?? 0, ts.avgLoss ?? 0]} sub={ts.payoff !== null ? `ratio ${num(ts.payoff)} · mayor ${dollars(ts.largestWin)} / ${dollars(ts.largestLoss)}` : "por operación"} />
+        <Kpi label="Drawdown máximo" icon="thumbDown" value={ds.maxDd ? dollars(-ds.maxDd) : "—"} tone={ds.maxDd ? (ds.maxDdPct !== null && ds.maxDdPct > 0.5 ? "bad" : "warn") : "muted"} sub={ds.maxDdPct !== null ? `${Math.round(ds.maxDdPct * 100)} % del máximo acumulado (${dollars(ds.peak)})` : "sobre la curva acumulada"} />
+        <Kpi label="Sharpe · Sortino" icon="gauge" value={<>{num(ds.sharpe, 1)} <span className="muted">·</span> {num(ds.sortino, 1)}</>} tone={ds.sharpe === null ? "muted" : ds.sharpe >= 1.5 ? "ok" : ds.sharpe >= 0.5 ? "warn" : "bad"} sub={`anualizados · Calmar ${num(ds.calmar, 1)}`} />
+        <Kpi label="Rachas" icon="flame" value={<>{ts.maxWinStreak} <span className="muted">/</span> {ts.maxLossStreak}</>} tone={ts.currentStreak > 0 ? "ok" : ts.currentStreak < 0 ? "bad" : "muted"} sub={`máx. ganadoras / perdedoras · ahora ${ts.currentStreak > 0 ? `+${ts.currentStreak}` : ts.currentStreak}${ds.streak ? ` · ${Math.abs(ds.streak)} días ${ds.streak > 0 ? "verdes" : "rojos"}` : ""}`} />
+      </div>
+      <div className="an-two wide-left">
+        <Card title="Curva de capital" icon="trendUp" right={<span className="muted small">acumulado {modeLabel} por jornada · sombreado = drawdown desde el máximo</span>}>
+          <EquityCurve points={ds.equity} testId="equity-chart" />
+          <div className="an-rows two">
+            <div><span>Mejor jornada</span><b className="ok">{ds.best ? `${dollars(ds.best.net)} · ${dayShort(ds.best.day)}` : "—"}</b></div>
+            <div><span>Peor jornada</span><b className="bad">{ds.worst && ds.worst.net < 0 ? `${dollars(ds.worst.net)} · ${dayShort(ds.worst.day)}` : "—"}</b></div>
+            <div><span>Jornadas verdes / rojas</span><b>{ds.green} / {ds.red}</b></div>
+            <div><span>Media por jornada · desviación</span><b>{ds.avg === null ? "—" : dollars(ds.avg)} · {ds.dailyStd === null ? "—" : dollars(ds.dailyStd)}</b></div>
+          </div>
+        </Card>
+        <Card title="Distribución del resultado" icon="activity" right={<span className="muted small">operaciones por tramo de {modeLabel}</span>}>
+          <HistogramChart bins={histogram(trades, value)} testId="hist-chart" />
+          <div className="an-rows two">
+            <div><span>Desviación típica por operación</span><b>{ts.stdDev === null ? "—" : dollars(ts.stdDev)}</b></div>
+            <div><span>Duración media ganadoras / perdedoras</span><b>{fmtDur(ts.avgDurWin === null ? null : Math.round(ts.avgDurWin))} / {fmtDur(ts.avgDurLoss === null ? null : Math.round(ts.avgDurLoss))}</b></div>
+          </div>
+        </Card>
+      </div>
+      <div className="an-two">
+        <Card title="Por hora de entrada" icon="clock" right={<span className="muted small">hora local · {modeLabel}</span>}>
+          <SignedBars data={byHour(trades, value)} testId="hour-chart" />
+        </Card>
+        <Card title="Por día de la semana" icon="calendar" right={<span className="muted small">{modeLabel}</span>}>
+          <SignedBars data={byWeekday(trades, value)} testId="weekday-chart" />
+        </Card>
+      </div>
+      <div className="an-two">
+        <Card title="Por símbolo y dirección" icon="layers">
+          <SignedBars data={[...bySymbol(trades, value), ...bySide(trades, value)]} height={160} testId="symbol-chart" />
+          <BucketTable data={[...bySymbol(trades, value), ...bySide(trades, value)]} />
+        </Card>
+        <Card title="Por cuenta" icon="users">
+          <SignedBars data={byAccount(trades, value).map((b) => ({ ...b, label: label(b.key) }))} height={160} testId="account-chart" />
+          <BucketTable data={byAccount(trades, value).map((b) => ({ ...b, label: label(b.key) }))} />
+        </Card>
+      </div>
+      <p className="muted small">Definiciones: factor de beneficio = suma de ganancias ÷ suma de pérdidas. Esperanza = resultado medio por operación; en R, dividido por la pérdida media. Kelly = aciertos − (1 − aciertos) ÷ ratio ganancia/pérdida (fracción teórica de riesgo; úsalo como referencia, no como regla). Sharpe y Sortino = media diaria ÷ desviación (total o solo de los días negativos) × √252. Calmar = resultado anualizado ÷ drawdown máximo. Drawdown máximo = mayor caída de la curva acumulada desde su máximo en el periodo.</p>
+    </>
+  );
+}
+function BucketTable({ data }: { data: { key: string; label: string; n: number; net: number; winRate: number | null }[] }) {
+  if (!data.length) return null;
+  return (
+    <div className="table-wrap"><table className="trades an-table bucket-table">
+      <thead><tr><th>Grupo</th><th className="num">Operaciones</th><th className="num">Aciertos</th><th className="num">Resultado</th><th className="num">Media</th></tr></thead>
+      <tbody>{data.map((b) => <tr key={b.key}><td>{b.label}</td><td className="num">{b.n}</td><td className="num">{b.winRate === null ? "—" : `${Math.round(b.winRate * 100)} %`}</td><td className={`num ${b.net > 0 ? "ok" : b.net < 0 ? "bad" : ""}`}>{dollars(b.net)}</td><td className="num">{b.n ? dollars(b.net / b.n) : "—"}</td></tr>)}</tbody>
+    </table></div>
   );
 }

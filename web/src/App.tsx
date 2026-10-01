@@ -22,7 +22,7 @@ function Inner() {
   return (
     <Shell route={route} onRoute={go}>
       {error && <div className="banner bad">Sin conexión con el engine: {error}</div>}
-      {route === "dashboard" && <Dashboard />}
+      {route === "dashboard" && <Dashboard onRoute={go} />}
       {route === "performance" && <Performance />}
       {route === "analysis" && <Analysis />}
       {route === "accounts" && <Accounts />}
