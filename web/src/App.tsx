@@ -6,11 +6,10 @@ import { Dashboard } from "./pages/Dashboard";
 import { Performance } from "./pages/Performance";
 import { Analysis } from "./pages/Analysis";
 import { Accounts } from "./pages/Accounts";
-import { Replicator } from "./pages/Replicator";
 import { Risk } from "./pages/Risk";
 import { Audit } from "./pages/Audit";
 
-const ROUTES: Route[] = ["dashboard", "performance", "analysis", "accounts", "replicator", "risk", "audit"];
+const ROUTES: Route[] = ["dashboard", "performance", "analysis", "accounts", "risk", "audit"];
 const fromHash = (): Route => { const h = window.location.hash.replace("#", "").split("/")[0] as Route; return ROUTES.includes(h) ? h : "dashboard"; };
 
 function Inner() {
@@ -26,7 +25,6 @@ function Inner() {
       {route === "performance" && <Performance />}
       {route === "analysis" && <Analysis />}
       {route === "accounts" && <Accounts />}
-      {route === "replicator" && <Replicator />}
       {route === "risk" && <Risk />}
       {route === "audit" && <Audit />}
     </Shell>

@@ -5,14 +5,13 @@ import { Icon, type IconName } from "./Icons";
 import { livePnl } from "./AccountPanel";
 import { signedMoney } from "../lib/format";
 
-export type Route = "dashboard" | "performance" | "analysis" | "accounts" | "replicator" | "risk" | "audit";
+export type Route = "dashboard" | "performance" | "analysis" | "accounts" | "risk" | "audit";
 
 const NAV: { id: Route; label: string; icon: IconName }[] = [
   { id: "dashboard", label: "Inicio", icon: "home" },
   { id: "performance", label: "Calendario", icon: "calendar" },
   { id: "analysis", label: "Análisis", icon: "activity" },
   { id: "accounts", label: "Cuentas", icon: "users" },
-  { id: "replicator", label: "Copiar", icon: "copy" },
   { id: "risk", label: "Riesgo", icon: "shield" },
   { id: "audit", label: "Auditoría", icon: "list" },
 ];

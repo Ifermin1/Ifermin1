@@ -8,8 +8,8 @@ import { money } from "../lib/format";
  * los límites en Riesgo (el engine vigila el drawdown con ese tipo desde ese momento). */
 export type ProfileResult = { firm: string; plan: string; size: number; dd: DdType; drawdown: number; cap: number; target: number; dayCut: number; dailyLoss: number; contracts: number; buffer: number };
 
-export function ProfileEditor({ a, limit, followers, onApply, onClose, busy }: {
-  a: Account; limit?: RiskLimit; followers: Account[]; busy?: boolean; onClose: () => void;
+export function ProfileEditor({ a, limit, followers, onApply, onClose, busy, preselect = [] }: {
+  a: Account; limit?: RiskLimit; followers: Account[]; busy?: boolean; onClose: () => void; preselect?: string[];
   onApply: (r: ProfileResult, alsoTo: string[]) => Promise<void>;
 }) {
   const [firm, setFirm] = useState(a.firm || "apex");
@@ -23,7 +23,7 @@ export function ProfileEditor({ a, limit, followers, onApply, onClose, busy }: {
   const [dailyLoss, setDailyLoss] = useState(String(limit?.max_daily_loss || ""));
   const [contracts, setContracts] = useState(String(limit?.max_position_size || ""));
   const [buffer, setBuffer] = useState(String(limit?.drawdown_buffer || "100"));
-  const [others, setOthers] = useState<Set<string>>(new Set());
+  const [others, setOthers] = useState<Set<string>>(new Set(preselect));
   const [err, setErr] = useState<string | null>(null);
   const f = firmOf(firm); const p = planOf(firm, plan);
 

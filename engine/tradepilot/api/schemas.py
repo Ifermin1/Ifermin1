@@ -30,15 +30,6 @@ class DiscoverChatRequest(BaseModel):
     bot_token: Optional[str] = None
 
 
-class CopyMapLayout(BaseModel):
-    """Disposición del mapa de cuentas (pestaña Copiar): posiciones por vista, vista elegida y grupos visuales de
-    maestras. Solo presentación: no toca reglas ni órdenes."""
-    view: str = Field(default="flow", pattern="^(flow|cables)$")
-    positions: dict[str, dict[str, dict[str, float]]] = Field(default_factory=dict)   # vista -> cuenta -> {x, y}
-    links: list[dict[str, str]] = Field(default_factory=list)                          # [{"a": maestra principal, "b": maestra vinculada}]
-    show_offline: bool = False
-
-
 class EntryPreset(BaseModel):
     """Mismo modo de entrada para todas las seguidoras de la maestra (botones de "Calidad de ejecución")."""
     entry_mode: str = Field(pattern="^(market|limit)$")

@@ -177,7 +177,7 @@ Hay dos vías, y se pueden usar las dos a la vez (*Riesgo → Avisos al teléfon
   - *Datos y criterios*: tus parámetros (comisión por contrato, tolerancia de breakeven, referencia de pérdida, límite de
     operación corta, saldo inicial, usar o no las comisiones anotadas por el engine), el estado del historial y cómo se
     calcula cada indicador. Los parámetros se guardan en el engine y valen en todos tus dispositivos.
-- **Cuentas** muestra los mismos paneles con los mandos de copia (multiplicador, interruptor, ⚙ opciones de ejecución).
+- **Cuentas** es la tabla de todas las cuentas con los mandos de copia (ver punto 7 de la sección 4).
   El botón **Prop firm** de cada panel abre el perfil de la cuenta: eliges la firma (Apex, Topstep, MyFundedFutures, Take
   Profit Trader, Tradeify, Bulenox, Earn2Trade u otro), el tipo de cuenta (evaluación, financiada, static…) y el tamaño, y
   el catálogo rellena el **tipo de drawdown** (dinámico intradía, EOD o estático), su importe, dónde se bloquea el suelo
@@ -194,10 +194,8 @@ Hay dos vías, y se pueden usar las dos a la vez (*Riesgo → Avisos al teléfon
   **Corte para todas** y **Objetivo para todas** los fijan de golpe en todas las seguidoras. Son los mismos valores que
   en Riesgo → Límites por cuenta, donde además se ve cuánto lleva cada cuenta.
   **Vincular todas** pone a copiar a la maestra todas las seguidoras visibles de golpe (pide un multiplicador para las que
-  no tienen regla; las que ya la tienen conservan el suyo). En **Gestionar cuentas**, *Ocultar* quita una cuenta de Inicio,
-  Cuentas, Copiar y de las cuentas en juego, y nunca recibe copias; *Mostrar* la devuelve; el filtro *Ocultas* las lista, y
-  con varias marcadas puedes ocultarlas, mostrarlas o vincularlas a la vez. En el mapa de **Copiar** también hay
-  *Vincular todas*.
+  no tienen regla; las que ya la tienen conservan el suyo). *Ocultar* quita una cuenta de Inicio y de la lista (queda en el
+  filtro *Ocultas*) y nunca recibe copias; *Mostrar* la devuelve.
 - **Auditoría** filtra por texto, cuenta, familia (*Copia*, *Bloqueos*, *Errores*, *Riesgo*, *Sistema*) o *Solo importantes*;
   *Copiar* y *.txt* exportan exactamente lo filtrado.
 
@@ -259,16 +257,16 @@ Hay dos vías, y se pueden usar las dos a la vez (*Riesgo → Avisos al teléfon
      manda la entrada como límite al precio de fill del maestro más la tolerancia; si no se llena en la *Espera*, "A mercado
      lo que falte" o "Cancelar (no entrar)". Con "Cancelar", la seguidora puede quedarse fuera de una operación (aparece
      `ENTRY_MISSED`). Las salidas van siempre a mercado o con su propia orden. Requiere addon v1.7.
-7. **Copiar** (pestaña): el **mapa de cuentas**. Cada cuenta es una tarjeta; las líneas son las reglas de copia (verde:
-   copiando; gris discontinua: pausada; ámbar punteada: regla de una maestra que no es la activa, no replica). Arrastra una
-   seguidora sobre una maestra para que copie a esa maestra (crea o cambia su regla con el multiplicador que tuviera);
-   toca una tarjeta para abrir su panel (maestra, multiplicador, símbolo destino, entrada, pausar, desconectar). Arrastra
-   una maestra sobre otra para **agruparlas**: la segunda hereda la configuración de la primera (se pide confirmación) y
-   quedan unidas por una línea azul; nunca se copian entre sí. *Flujo* ordena de izquierda a derecha con curvas; *Cables*
-   dibuja una red con líneas ortogonales; la vista y las posiciones se guardan en el engine y se ven igual en el
-   teléfono. Con el teclado: Enter abre el panel, las flechas mueven la tarjeta y Supr desconecta. *Pausar copia* es el
-   kill switch sin cerrar posiciones. Las reglas con filtro de símbolo (solo `NQ`, por ejemplo) están en *Reglas
-   avanzadas*. Nada de lo que se hace en el mapa envía órdenes: solo cambia reglas.
+7. **Cuentas** es el centro de mando de la copia: una tabla con todas las cuentas (la maestra primero). En cada fila:
+   estado (copiando, pausada, sin regla, desincronizada, oculta, corte hecho, evaluación superada…), el interruptor de
+   copia y el multiplicador, el P&L neto de hoy, las barras de corte del día, objetivo de la evaluación y drawdown, la
+   posición abierta y los botones *Igualar* y *Cerrar*. Con **▾** se despliega el detalle: panel completo, *Prop firm*,
+   *Opciones de ejecución* (símbolo destino, entrada límite), quitar regla, ocultar/mostrar y alias. Marca varias filas
+   para actuar en lote: vincular, pausar o reanudar copia, corte del día, objetivo, prop firm, cerrar posiciones, ocultar,
+   mostrar u olvidar. Arriba: *Pausar toda la copia* (kill switch sin cerrar posiciones), *Vincular todas*, *Corte para
+   todas* y *Objetivo para todas*. Filtros *Copiando / Visibles / Ocultas / Todas*, búsqueda y orden por estado, P&L,
+   % del objetivo, drawdown o nombre. Las reglas con filtro de símbolo (copiar solo NQ, por ejemplo) están en la tarjeta
+   del final. Nada de esto envía órdenes salvo *Cerrar*, *Igualar* y *Cerrar posiciones*.
 
 ---
 
@@ -327,7 +325,7 @@ Hay dos vías, y se pueden usar las dos a la vez (*Riesgo → Avisos al teléfon
 Si la maestra opera y las seguidoras no entran, abre **Auditoría** y mira el motivo de los `BLOCKED`:
 
 - `kill switch global activo desde …` → alguien pulsó **DETENER** (barra de estado), **DETENER TODO** (Riesgo) o **Pausar
-  copia** (mapa de Copiar). El kill switch **se conserva aunque reinicies el engine o el PC**: al arrancar, la auditoría
+  toda la copia** (Cuentas). El kill switch **se conserva aunque reinicies el engine o el PC**: al arrancar, la auditoría
   avisa con `KILL_SWITCH_PERSISTED` y todas las páginas muestran el aviso rojo *COPIA DETENIDA* con el botón **Reanudar
   copia**. Hasta reanudar, cada entrada de la maestra queda bloqueada y las seguidoras aparecen DESINCRONIZADAS.
 - `fuera de horario` / `sesión cerrada` → el horario de Riesgo; *Reabrir sesión* si quieres operar fuera de él.
