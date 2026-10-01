@@ -51,10 +51,36 @@ export function Accounts() {
   /** Objetivo de ganancia del día (mismo límite que en Riesgo): conserva el resto de límites de la cuenta. */
   const targetBody = (acc: string, target: number) => {
     const l = limits.get(acc);
-    return { account_id: acc, max_daily_loss: l?.max_daily_loss ?? 0, max_daily_profit: target, max_position_size: l?.max_position_size ?? 0,
+    return { account_id: acc, max_daily_loss: l?.max_daily_loss ?? 0, max_daily_profit: target, profit_goal: l?.profit_goal ?? 0, start_balance: l?.start_balance ?? 0,
+             max_position_size: l?.max_position_size ?? 0,
              max_trailing_drawdown: l?.max_trailing_drawdown ?? 0, drawdown_mode: l?.drawdown_mode ?? "intraday" as const, drawdown_floor_cap: l?.drawdown_floor_cap ?? 0,
              drawdown_buffer: l?.drawdown_buffer ?? 0, trading_halted: !!l?.trading_halted && l.halted_reason !== "daily_profit" };
   };
+  /** Objetivo de la evaluación (acumulado sobre el saldo inicial); conserva el resto de límites. */
+  const goalBody = (acc: string, goal: number, start: number) => {
+    const l = limits.get(acc);
+    return { ...targetBody(acc, l?.max_daily_profit ?? 0), profit_goal: goal, start_balance: goal > 0 ? start : (l?.start_balance ?? 0),
+             trading_halted: !!l?.trading_halted && l.halted_reason !== "profit_goal" };
+  };
+  const setGoal = (acc: string, goal: number, start: number) => guard(acc, async () => {
+    if (goal > 0 && !(start > 0)) { const v = prompt(`Saldo inicial de ${acc} (desde dónde se cuenta el objetivo):`, String(Math.round(accounts.find((a) => a.account_id === acc)?.balance ?? 0))); if (v === null) return; start = Number(v.replace(",", ".")) || 0; if (!(start > 0)) throw new Error("Saldo inicial no válido."); }
+    await client!.upsertLimit(goalBody(acc, goal, start)); setRisk(await client!.risk());
+  });
+  const setGoalAll = () => guard("__goal", async () => {
+    const ids = followers.map((a) => a.account_id);
+    if (!ids.length) return;
+    const v = prompt(`Objetivo de la evaluación para ${ids.length} seguidoras (ganancia neta acumulada sobre el saldo inicial; 0 = sin objetivo). Al alcanzarlo, el engine cierra y deja de copiar a esa cuenta:`, String(limits.get(ids[0])?.profit_goal || ""));
+    if (v === null) return;
+    const goal = Math.max(0, Number(v.replace(",", ".")) || 0);
+    const errors: string[] = [];
+    for (const id of ids) {
+      const a = accounts.find((x) => x.account_id === id)!;
+      const start = limits.get(id)?.start_balance || a.plan_size || Math.round(a.balance - a.net_pnl);
+      try { await client!.upsertLimit(goalBody(id, goal, start)); } catch (ex) { errors.push(`${id}: ${ex instanceof Error ? ex.message : String(ex)}`); }
+    }
+    setRisk(await client!.risk());
+    if (errors.length) throw new Error(errors.join("; "));
+  });
   /** Perfil de prop firm: guarda firma/plan/tamaño en la cuenta y los límites en Riesgo (para varias cuentas a la vez). */
   const applyProfile = async (acc: string, r: ProfileResult, alsoTo: string[]) => {
     setBusy(acc); setErr(null);
@@ -65,7 +91,7 @@ export function Accounts() {
           await client!.setAccount(id, { firm: r.firm, plan: r.plan, plan_size: r.size });
           if (r.firm) {
             const l = limits.get(id);
-            await client!.upsertLimit({ account_id: id, max_daily_loss: r.dailyLoss, max_daily_profit: r.target, max_position_size: r.contracts,
+            await client!.upsertLimit({ account_id: id, max_daily_loss: r.dailyLoss, max_daily_profit: r.dayCut, profit_goal: r.target, start_balance: r.target > 0 ? r.size : (l?.start_balance ?? 0), max_position_size: r.contracts,
                                         max_trailing_drawdown: r.drawdown, drawdown_mode: r.dd, drawdown_floor_cap: r.cap, drawdown_buffer: r.buffer,
                                         trading_halted: !!l?.trading_halted && !!l.halted_reason && l.halted_reason !== "daily_profit" });
           }
@@ -81,7 +107,7 @@ export function Accounts() {
   const setTargetAll = () => guard("__target", async () => {
     const ids = followers.map((a) => a.account_id);
     if (!ids.length) return;
-    const v = prompt(`Objetivo de ganancia neta del día para ${ids.length} seguidoras (0 = sin objetivo). Al alcanzarlo, el engine deja de copiar a esa cuenta:`, String(limits.get(ids[0])?.max_daily_profit || ""));
+    const v = prompt(`Corte de ganancias del día (NETO, descontadas comisiones) para ${ids.length} seguidoras (0 = sin corte). Al alcanzarlo, el engine cierra la posición de esa cuenta y deja de copiarle hasta mañana:`, String(limits.get(ids[0])?.max_daily_profit || ""));
     if (v === null) return;
     const target = Math.max(0, Number(v.replace(",", ".")) || 0);
     const errors: string[] = [];
@@ -165,7 +191,7 @@ export function Accounts() {
           </select>
         </div>
         {masterAcc && <div className="panels one"><AccountPanel a={masterAcc} role="master" prices={prices} busy={busy === masterAcc.account_id} limit={limits.get(masterAcc.account_id)}
-                                                       onFlatten={() => void flatten(masterAcc.account_id)} onTarget={(t) => void setTarget(masterAcc.account_id, t)}
+                                                       onFlatten={() => void flatten(masterAcc.account_id)} onTarget={(t) => void setTarget(masterAcc.account_id, t)} onGoal={(g, s) => void setGoal(masterAcc.account_id, g, s)}
                                                        controls={<button className={`ghost small-btn ${openProfile === masterAcc.account_id ? "active" : ""}`} onClick={() => setOpenProfile(openProfile === masterAcc.account_id ? null : masterAcc.account_id)} data-testid={`profile-${masterAcc.account_id}`}>Prop firm</button>}>
           {openProfile === masterAcc.account_id && <ProfileEditor a={masterAcc} limit={limits.get(masterAcc.account_id)} followers={followers} busy={busy === masterAcc.account_id}
                                                                   onApply={(r, also) => applyProfile(masterAcc.account_id, r, also)} onClose={() => setOpenProfile(null)} />}
@@ -180,7 +206,8 @@ export function Accounts() {
       <Card title={`Seguidoras · ${linked} de ${followers.length} copiando`}
             right={<div className="chips">
               {followers.length > 0 && <button className="primary small-btn" disabled={busy === "__all" || !master} onClick={() => void linkMany(followers.map((a) => a.account_id), "Seguidoras activas")} data-testid="link-all">Vincular todas</button>}
-              {followers.length > 0 && <button className="small-btn" disabled={busy === "__target"} onClick={() => void setTargetAll()} title="Mismo objetivo de ganancia del día para todas las seguidoras" data-testid="target-all">Objetivo para todas</button>}
+              {followers.length > 0 && <button className="small-btn" disabled={busy === "__target"} onClick={() => void setTargetAll()} title="Mismo corte de ganancias del día (neto) para todas las seguidoras" data-testid="target-all">Corte para todas</button>}
+              {followers.length > 0 && <button className="small-btn" disabled={busy === "__goal"} onClick={() => void setGoalAll()} title="Mismo objetivo de evaluación (acumulado) para todas las seguidoras" data-testid="goal-all">Objetivo para todas</button>}
               <button className="ghost" onClick={() => setManage(!manage)}>{manage ? "Cerrar gestión" : `Gestionar cuentas${hidden ? ` (${hidden} ocultas)` : ""}`}</button>
             </div>}>
         {followers.length === 0 ? <Empty>{accounts.length ? "Todas las cuentas están desactivadas. Actívalas en “Gestionar cuentas”." : "Esperando cuentas del bróker…"}</Empty> : (
@@ -190,7 +217,7 @@ export function Accounts() {
               return (
                 <AccountPanel key={a.account_id} a={a} role="follower" link={link} limit={limits.get(a.account_id)} prices={prices} busy={busy === a.account_id}
                               lastFill={lastFill(a.account_id)} lastReject={lastReject(a.account_id)}
-                              onFlatten={() => void flatten(a.account_id)} onResync={() => void resync(a.account_id)} onTarget={(t) => void setTarget(a.account_id, t)}
+                              onFlatten={() => void flatten(a.account_id)} onResync={() => void resync(a.account_id)} onTarget={(t) => void setTarget(a.account_id, t)} onGoal={(g, s) => void setGoal(a.account_id, g, s)}
                               controls={<>
                                 <label className="mult">x<input type="number" step="0.1" min="0.1" value={link?.multiplier ?? 1} disabled={busy === a.account_id || !master}
                                   onChange={(e) => { const m = Number(e.target.value); if (m > 0 && link) void apply(a.account_id, link.enabled, m); }}

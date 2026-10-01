@@ -19,7 +19,8 @@ from tradepilot.infrastructure.persistence.sqlite_store import SQLiteStore
 # tipo -> (icono, título corto). Lo que no está aquí se manda con el tipo tal cual si el usuario lo activa.
 TITLES: dict[str, tuple[str, str]] = {
     "DAILY_LOSS_LIMIT": ("🛑", "Límite de pérdida diaria"), "DAILY_LOSS_WARNING": ("⚠️", "Cerca del límite de pérdida"),
-    "DAILY_PROFIT_TARGET": ("🎯", "Objetivo de ganancia alcanzado"), "DAILY_PROFIT_WARNING": ("🟢", "Cerca del objetivo de ganancia"),
+    "DAILY_PROFIT_TARGET": ("🎯", "Corte del día alcanzado"), "DAILY_PROFIT_WARNING": ("🟢", "Cerca del corte del día"),
+    "PROFIT_GOAL": ("🏆", "Objetivo de la evaluación alcanzado"), "PROFIT_GOAL_WARNING": ("🟢", "Cerca del objetivo de la evaluación"),
     "DRAWDOWN_LIMIT": ("🛑", "Límite de drawdown"), "DRAWDOWN_WARNING": ("⚠️", "Drawdown al 80 %"),
     "KILL_SWITCH_ON": ("🛑", "Kill switch activado"), "KILL_SWITCH_OFF": ("▶️", "Replicación reanudada"),
     "FLATTEN": ("✂️", "Cierre de cuenta"), "SCHEDULED_FLATTEN": ("⏰", "Cierre programado"), "NAKED_CLOSE": ("🚨", "Stop rechazado: cuenta cerrada"),
@@ -30,7 +31,7 @@ TITLES: dict[str, tuple[str, str]] = {
     "ENTRY_MISSED": ("🚫", "Entrada no ejecutada"), "BLOCKED": ("⛔", "Copia bloqueada"), "TRIMMED": ("✂️", "Copia recortada"),
     "FOLLOWER_FILL": ("💱", "Fill"), "MASTER_RECEIVED": ("📥", "Operación del maestro"), "ENGINE_START": ("🟦", "Engine arrancado"), "KILL_SWITCH_PERSISTED": ("🛑", "Kill switch sigue activo"),
 }
-DEFAULT_EVENTS = ["DAILY_LOSS_LIMIT", "DAILY_LOSS_WARNING", "DAILY_PROFIT_TARGET", "DAILY_PROFIT_WARNING", "DRAWDOWN_LIMIT",
+DEFAULT_EVENTS = ["DAILY_LOSS_LIMIT", "DAILY_LOSS_WARNING", "DAILY_PROFIT_TARGET", "DAILY_PROFIT_WARNING", "PROFIT_GOAL", "DRAWDOWN_LIMIT",
                   "DRAWDOWN_WARNING", "KILL_SWITCH_ON", "KILL_SWITCH_OFF", "KILL_SWITCH_PERSISTED", "FLATTEN", "SCHEDULED_FLATTEN", "NAKED_CLOSE",
                   "FOLLOWER_REJECTED", "ACCOUNT_LOCKED", "DESYNC", "OVERCLOSE_FIX", "ADDON_SILENT", "ADDON_DOWN", "ADDON_BACK",
                   "ADDON_RESTART", "GAP", "ERROR", "ENTRY_MISSED"]

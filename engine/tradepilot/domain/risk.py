@@ -10,7 +10,10 @@ from tradepilot.domain import DomainModel
 class RiskLimit(DomainModel):
     account_id: str
     max_daily_loss: float = 0.0       # 0 = sin límite (USD, P&L del día realizado + flotante)
-    max_daily_profit: float = 0.0     # 0 = sin objetivo (USD): al alcanzarlo se pausa y cierra para asegurar la ganancia
+    max_daily_profit: float = 0.0     # 0 = sin corte (USD): corte del día en NETO; al alcanzarlo se pausa y cierra para asegurar la ganancia
+    # Objetivo de la evaluación (acumulado): ganancia neta sobre el saldo inicial. Al alcanzarlo se pausa y cierra.
+    profit_goal: float = 0.0          # 0 = sin objetivo (USD por encima de start_balance)
+    start_balance: float = 0.0        # saldo inicial de la cuenta (tamaño del plan); 0 = objetivo desactivado
     max_position_size: int = 0        # 0 = sin límite (contratos por orden y de posición resultante)
     # Drawdown dinámico (trailing) del prop firm: se mide desde el máximo que llegó a valer la cuenta
     max_trailing_drawdown: float = 0.0  # 0 = solo observar; USD que la cuenta puede caer desde su máximo
@@ -21,7 +24,7 @@ class RiskLimit(DomainModel):
     drawdown_floor_cap: float = 0.0     # 0 = el suelo sube siempre; si no, el suelo se bloquea al llegar a este valor (APEX: inicial + 100)
     drawdown_buffer: float = 0.0        # colchón en USD: el engine pausa y cierra cuando faltan <= esto para el suelo
     trading_halted: bool = False
-    halted_reason: str = ""           # "" manual; "daily_loss" / "daily_profit" / "drawdown" cuando lo pausó el engine
+    halted_reason: str = ""           # "" manual; "daily_loss" / "daily_profit" / "profit_goal" / "drawdown" cuando lo pausó el engine
     halted_at: Optional[datetime] = None
 
 

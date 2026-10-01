@@ -28,7 +28,7 @@ export type Rule = { id: string; master_account: string; follower_account: strin
 export type ExecOptions = { target_root?: string | null; entry_mode?: "market" | "limit"; tolerance_ticks?: number; entry_timeout_s?: number; entry_fallback?: "market" | "cancel" };
 export type AuditEvent = { id: number | null; timestamp: string; event_type: string; source_account: string | null;
                            target_account: string | null; message: string; details: Record<string, unknown> | null };
-export type RiskLimit = { account_id: string; max_daily_loss: number; max_daily_profit: number; max_position_size: number;
+export type RiskLimit = { account_id: string; max_daily_loss: number; max_daily_profit: number; profit_goal: number; start_balance: number; max_position_size: number;
                           max_trailing_drawdown: number; drawdown_mode: "intraday" | "eod" | "closed" | "static"; drawdown_floor_cap: number; drawdown_buffer: number;
                           trading_halted: boolean; halted_reason: string; halted_at: string | null };
 export type Schedule = { enabled: boolean; window_start: string; flatten_at: string; include_master: boolean; last_flatten_day: string };

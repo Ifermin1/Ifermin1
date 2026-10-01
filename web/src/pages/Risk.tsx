@@ -13,6 +13,8 @@ export function Risk() {
   const [account, setAccount] = useState("");
   const [maxLoss, setMaxLoss] = useState("0");
   const [maxProfit, setMaxProfit] = useState("0");
+  const [goal, setGoal] = useState("0");
+  const [start, setStart] = useState("0");
   const [maxSize, setMaxSize] = useState("0");
   const [maxDd, setMaxDd] = useState("0");
   const [ddMode, setDdMode] = useState<"intraday" | "eod" | "closed" | "static">("intraday");
@@ -68,19 +70,19 @@ export function Risk() {
     if (!confirm("¿Levantar el bloqueo del cierre programado de hoy? Las copias se reanudan ahora.")) return;
     setRisk(await client!.reopenSession());
   }
-  const body = (l: RiskLimit, trading_halted: boolean) => ({ account_id: l.account_id, max_daily_loss: l.max_daily_loss, max_daily_profit: l.max_daily_profit, max_position_size: l.max_position_size,
+  const body = (l: RiskLimit, trading_halted: boolean) => ({ account_id: l.account_id, max_daily_loss: l.max_daily_loss, max_daily_profit: l.max_daily_profit, profit_goal: l.profit_goal, start_balance: l.start_balance, max_position_size: l.max_position_size,
     max_trailing_drawdown: l.max_trailing_drawdown, drawdown_mode: l.drawdown_mode, drawdown_floor_cap: l.drawdown_floor_cap, drawdown_buffer: l.drawdown_buffer, trading_halted });
-  function reset() { setAccount(""); setMaxLoss("0"); setMaxProfit("0"); setMaxSize("0"); setMaxDd("0"); setDdMode("intraday"); setDdCap("0"); setDdBuffer("0"); setHalted(false); }
+  function reset() { setAccount(""); setMaxLoss("0"); setMaxProfit("0"); setGoal("0"); setStart("0"); setMaxSize("0"); setMaxDd("0"); setDdMode("intraday"); setDdCap("0"); setDdBuffer("0"); setHalted(false); }
   async function save(e: FormEvent) {
     e.preventDefault();
     try {
-      await client!.upsertLimit({ account_id: account, max_daily_loss: Number(maxLoss) || 0, max_daily_profit: Number(maxProfit) || 0, max_position_size: Number(maxSize) || 0,
+      await client!.upsertLimit({ account_id: account, max_daily_loss: Number(maxLoss) || 0, max_daily_profit: Number(maxProfit) || 0, profit_goal: Number(goal) || 0, start_balance: Number(start) || 0, max_position_size: Number(maxSize) || 0,
         max_trailing_drawdown: Number(maxDd) || 0, drawdown_mode: ddMode, drawdown_floor_cap: Number(ddCap) || 0, drawdown_buffer: Number(ddBuffer) || 0, trading_halted: halted });
       setRisk(await client!.risk()); reset();
     } catch (ex) { alert(ex instanceof Error ? ex.message : String(ex)); }
   }
   function edit(l: RiskLimit) {
-    setAccount(l.account_id); setMaxLoss(String(l.max_daily_loss)); setMaxProfit(String(l.max_daily_profit)); setMaxSize(String(l.max_position_size)); setHalted(l.trading_halted);
+    setAccount(l.account_id); setMaxLoss(String(l.max_daily_loss)); setMaxProfit(String(l.max_daily_profit)); setGoal(String(l.profit_goal)); setStart(String(l.start_balance)); setMaxSize(String(l.max_position_size)); setHalted(l.trading_halted);
     setMaxDd(String(l.max_trailing_drawdown)); setDdMode(l.drawdown_mode); setDdCap(String(l.drawdown_floor_cap)); setDdBuffer(String(l.drawdown_buffer));
     document.getElementById("limit-form")?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
@@ -98,7 +100,7 @@ export function Risk() {
     for (const l of ids) {
       try {
         if (action === "remove") await client!.deleteLimit(l.account_id);
-        else if (action === "apply") await client!.upsertLimit({ ...body(l, l.trading_halted), max_daily_loss: Number(maxLoss) || 0, max_daily_profit: Number(maxProfit) || 0, max_position_size: Number(maxSize) || 0,
+        else if (action === "apply") await client!.upsertLimit({ ...body(l, l.trading_halted), max_daily_loss: Number(maxLoss) || 0, max_daily_profit: Number(maxProfit) || 0, profit_goal: Number(goal) || 0, start_balance: Number(start) || l.start_balance || 0, max_position_size: Number(maxSize) || 0,
           max_trailing_drawdown: Number(maxDd) || 0, drawdown_mode: ddMode, drawdown_floor_cap: Number(ddCap) || 0, drawdown_buffer: Number(ddBuffer) || 0 });
         else await client!.upsertLimit(body(l, action === "halt"));
       } catch (ex) { errors.push(`${l.account_id}: ${ex instanceof Error ? ex.message : String(ex)}`); }
@@ -222,7 +224,9 @@ export function Risk() {
         <form className="rule-form" id="limit-form" onSubmit={save}>
           <label>Cuenta<input list="accts2" value={account} onChange={(e) => setAccount(e.target.value)} required /></label>
           <label>Pérdida diaria máx. ($)<input type="number" min="0" value={maxLoss} onChange={(e) => setMaxLoss(e.target.value)} /></label>
-          <label>Ganancia diaria máx. ($)<input type="number" min="0" value={maxProfit} onChange={(e) => setMaxProfit(e.target.value)} /></label>
+          <label>Corte del día, neto ($)<input type="number" min="0" value={maxProfit} onChange={(e) => setMaxProfit(e.target.value)} title="Ganancia neta del día (bruto − comisiones) a la que el engine cierra la posición y deja de copiar a la cuenta hasta mañana" /></label>
+          <label>Objetivo de la evaluación ($)<input type="number" min="0" value={goal} onChange={(e) => setGoal(e.target.value)} title="Ganancia neta acumulada sobre el saldo inicial. Al alcanzarla el engine cierra y pausa la cuenta (evaluación superada)" /></label>
+          <label>Saldo inicial ($)<input type="number" min="0" value={start} onChange={(e) => setStart(e.target.value)} title="Desde dónde se cuenta el objetivo de la evaluación (tamaño del plan)" /></label>
           <label>Posición máx. (contratos)<input type="number" min="0" value={maxSize} onChange={(e) => setMaxSize(e.target.value)} /></label>
           <label>Drawdown máx. del prop firm ($)<input type="number" min="0" value={maxDd} onChange={(e) => setMaxDd(e.target.value)} title="Cuánto puede caer la cuenta desde el máximo que llegó a valer antes de que el prop firm la cierre (APEX 50K: 2500)" /></label>
           <label>Tipo de drawdown<select value={ddMode} onChange={(e) => setDdMode(e.target.value as "intraday" | "eod" | "closed" | "static")} title="Dinámico: el máximo sube tick a tick con el flotante (APEX trailing, MFF). EOD: el máximo solo se actualiza con el balance al cierre del día (APEX EOD, Topstep); la caída se vigila igual en tiempo real">
@@ -248,20 +252,22 @@ export function Risk() {
             </div>}
           </div>
           <div className="table-wrap"><table className="limits">
-            <thead><tr><th><input type="checkbox" checked={allSel} title="Marcar todas" onChange={(e) => setSel(e.target.checked ? new Set(risk.limits.map((l) => l.account_id)) : new Set())} /></th><th>Cuenta</th><th className="num">Pérdida máx.</th><th className="num">Ganancia máx.</th><th className="num">P&L hoy (neto)</th><th className="num">Posición máx.</th><th className="num">Drawdown máx.</th><th>Estado</th><th></th></tr></thead>
+            <thead><tr><th><input type="checkbox" checked={allSel} title="Marcar todas" onChange={(e) => setSel(e.target.checked ? new Set(risk.limits.map((l) => l.account_id)) : new Set())} /></th><th>Cuenta</th><th className="num">Pérdida máx.</th><th className="num">Corte del día</th><th className="num">Objetivo evaluación</th><th className="num">P&L hoy (neto)</th><th className="num">Posición máx.</th><th className="num">Drawdown máx.</th><th>Estado</th><th></th></tr></thead>
             <tbody>{risk.limits.map((l) => {
               const acc = accounts.find((a) => a.account_id === l.account_id);
               const pnl = acc?.net_pnl ?? acc?.daily_pnl ?? 0;
               const ref = pnl < 0 ? l.max_daily_loss : l.max_daily_profit;
               const pct = ref ? Math.min(100, Math.max(0, (Math.abs(pnl) / ref) * 100)) : 0;
               const cls = !ref ? (pnl < 0 ? "warn" : "ok") : pnl < 0 ? (pct >= 80 ? "bad" : "warn") : (pct >= 80 ? "warn" : "ok");
-              const badge = l.halted_reason === "daily_loss" ? "pausada · pérdida diaria" : l.halted_reason === "daily_profit" ? "pausada · objetivo de ganancia" : l.halted_reason === "drawdown" ? "pausada · drawdown" : "pausada";
+              const badge = l.halted_reason === "daily_loss" ? "pausada · pérdida diaria" : l.halted_reason === "daily_profit" ? "pausada · corte del día" : l.halted_reason === "profit_goal" ? "pausada · evaluación superada" : l.halted_reason === "drawdown" ? "pausada · drawdown" : "pausada";
+              const gained = acc && l.start_balance > 0 ? acc.balance + acc.unrealized_pnl - (acc.commissions_today || 0) - l.start_balance : null;
               return (
                 <tr key={l.account_id} className={sel.has(l.account_id) ? "selected" : ""}><td><input type="checkbox" checked={sel.has(l.account_id)} onChange={() => toggleSel(l.account_id)} /></td><td><b>{l.account_id}</b></td><td className="num">{l.max_daily_loss || "—"}</td><td className="num">{l.max_daily_profit || "—"}</td>
+                  <td className="num">{l.profit_goal ? <>{l.profit_goal}<span className="muted small"> desde {l.start_balance}{gained !== null ? ` · llevas ${signedMoney(gained)} (${Math.min(100, Math.max(0, (gained / l.profit_goal) * 100)).toFixed(0)} %)` : ""}</span></> : "—"}</td>
                   <td className={`num ${cls}`}>{acc ? money(pnl) : "—"}{ref ? <span className="muted small"> ({pct.toFixed(0)} % {pnl < 0 ? "de la pérdida" : "del objetivo"})</span> : null}{acc?.commissions_today ? <span className="muted small"> · neto de {money(acc.commissions_today)} de comisiones</span> : null}</td>
                   <td className="num">{l.max_position_size || "—"}</td>
                   <td className="num">{l.max_trailing_drawdown ? <>{l.max_trailing_drawdown}<span className="muted small"> {MODE_LABEL[l.drawdown_mode] ?? l.drawdown_mode}{l.drawdown_floor_cap ? ` · tope ${l.drawdown_floor_cap}` : ""}{l.drawdown_buffer ? ` · colchón ${l.drawdown_buffer}` : ""}</span></> : "—"}</td>
-                  <td>{l.trading_halted ? <span className={`badge ${l.halted_reason === "daily_profit" ? "ok" : "bad"}`}>{badge}</span> : <span className="badge ok">activa</span>}</td>
+                  <td>{l.trading_halted ? <span className={`badge ${l.halted_reason === "daily_profit" || l.halted_reason === "profit_goal" ? "ok" : "bad"}`}>{badge}</span> : <span className="badge ok">activa</span>}</td>
                   <td className="row-actions">{l.trading_halted && <button className="ghost small-btn" onClick={() => void client!.upsertLimit(body(l, false)).then(() => client!.risk()).then(setRisk).catch((ex) => alert(ex instanceof Error ? ex.message : String(ex)))}>Reanudar</button>}
                     <button className="ghost small-btn" onClick={() => edit(l)} title="Cargar en el formulario para cambiar los límites">Editar</button>
                     <button className="ghost small-btn danger" onClick={() => void remove(l.account_id)} title="Quitar los límites de esta cuenta">Quitar</button></td></tr>

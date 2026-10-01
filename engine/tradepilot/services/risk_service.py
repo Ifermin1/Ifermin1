@@ -194,13 +194,25 @@ class RiskService:
             return
         today = self._today()
         for acc, limit in list(self.limits.items()):
-            if limit.max_daily_loss <= 0 and limit.max_daily_profit <= 0:
+            goal_on = limit.profit_goal > 0 and limit.start_balance > 0
+            if limit.max_daily_loss <= 0 and limit.max_daily_profit <= 0 and not goal_on:
                 continue
             snap = self.accounts.accounts.get(acc)
             if snap is None or limit.trading_halted:
                 continue
             pnl = snap.net_pnl      # neto: bruto de NinjaTrader menos las comisiones estimadas del día
             fees = f" (bruto {snap.daily_pnl:,.2f}, comisiones {snap.commissions_today:,.2f})" if snap.commissions_today else ""
+            # objetivo de la evaluación: ganancia neta acumulada = valor actual (saldo + flotante − comisiones de hoy) − saldo inicial
+            gained = self.goal_progress(limit, snap)
+            if goal_on and gained is not None and gained >= limit.profit_goal:
+                await self._halt_daily(limit, snap, "profit_goal", "PROFIT_GOAL",
+                                       f"{acc}: ganancia neta acumulada +{gained:,.2f} sobre el saldo inicial {limit.start_balance:,.2f} alcanzó el "
+                                       f"objetivo de +{limit.profit_goal:,.2f}. Cuenta pausada y cerrada: evaluación superada.",
+                                       "objetivo de la evaluación", limit.profit_goal, {"gained": gained, "start_balance": limit.start_balance})
+                continue
+            if goal_on and gained is not None and gained >= 0.9 * limit.profit_goal and (acc, today, "goal") not in self._warned_80:
+                self._warned_80.add((acc, today, "goal"))
+                self.audit.log("PROFIT_GOAL_WARNING", f"{acc}: ganancia acumulada +{gained:,.2f}, al 90 % del objetivo de +{limit.profit_goal:,.2f}", target=acc)
             if limit.max_daily_loss > 0 and pnl <= -limit.max_daily_loss:
                 await self._halt_daily(limit, snap, "daily_loss", "DAILY_LOSS_LIMIT",
                                        f"{acc}: P&L neto del día {pnl:,.2f}{fees} alcanzó el límite de -{limit.max_daily_loss:,.2f}. "
@@ -252,6 +264,13 @@ class RiskService:
                                target=acc, details={"equity": dd.equity, "peak": dd.peak, "floor": dd.floor, "room": dd.room, "pct": dd.pct})
             elif (dd.pct or 0) < 50:
                 self._dd_warned.discard(acc)
+
+    @staticmethod
+    def goal_progress(limit: RiskLimit, snap) -> float | None:
+        """Ganancia neta acumulada sobre el saldo inicial (saldo + flotante − comisiones de hoy − inicial); None sin inicial."""
+        if limit.start_balance <= 0:
+            return None
+        return round(snap.balance + snap.unrealized_pnl - snap.commissions_today - limit.start_balance, 2)
 
     async def _halt_daily(self, limit: RiskLimit, snap, reason: str, event: str, message: str, why: str, value: float,
                           extra: dict | None = None) -> None:
@@ -377,6 +396,11 @@ class RiskService:
             if prev.halted_reason == "daily_profit" and limit.max_daily_profit > 0 and snap.net_pnl >= limit.max_daily_profit:
                 raise ValueError(f"{limit.account_id} sigue con P&L neto {snap.net_pnl:,.2f}, por encima del objetivo de "
                                  f"+{limit.max_daily_profit:,.2f}: no se reanuda hoy (sube el objetivo o quítalo si de verdad quieres seguir)")
+            if prev.halted_reason == "profit_goal" and limit.profit_goal > 0 and limit.start_balance > 0:
+                gained = self.goal_progress(limit, snap)
+                if gained is not None and gained >= limit.profit_goal:
+                    raise ValueError(f"{limit.account_id} sigue con +{gained:,.2f} acumulados, por encima del objetivo de la evaluación "
+                                     f"+{limit.profit_goal:,.2f}: no se reanuda (sube el objetivo o quítalo si de verdad quieres seguir)")
             if prev.halted_reason == "drawdown" and limit.max_trailing_drawdown > 0:
                 peak = self.accounts.peak_for(limit.account_id, limit.drawdown_mode)
                 if peak is None:
@@ -435,6 +459,7 @@ class RiskService:
         if limit.trading_halted:
             why = {"daily_loss": "límite de pérdida diaria",
                    "daily_profit": "objetivo de ganancia diaria alcanzado",
+                   "profit_goal": "objetivo de la evaluación alcanzado",
                    "drawdown": "límite de drawdown"}.get(limit.halted_reason, "pausa manual")
             return False, f"cuenta {account_id} en pausa ({why})"
         if limit.max_position_size:

@@ -176,9 +176,14 @@ Hay dos vías, y se pueden usar las dos a la vez (*Riesgo → Avisos al teléfon
   antes de *Aplicar perfil*, y se puede aplicar a varias cuentas a la vez. El panel muestra el perfil (p. ej. "Apex 50K ·
   PA · DD dinámico") y el engine vigila el drawdown con ese tipo desde ese momento. Los importes del catálogo son
   orientativos: confírmalos en la web de la firma. *Quitar perfil* borra la etiqueta y conserva los límites.
-  Cada panel tiene el **Objetivo** de ganancia neta del día editable (escribe la cifra y sal del campo): al alcanzarlo el
-  engine deja de copiar a esa cuenta y la marca *objetivo logrado*; la barra muestra cuánto falta. Es el mismo valor que
-  en Riesgo → Límites por cuenta. **Objetivo para todas** lo fija de golpe en todas las seguidoras (útil en evaluaciones).
+  Cada panel tiene dos importes editables (escribe la cifra y pulsa Enter), con barra de progreso y cuánto falta:
+  - **Corte del día**: ganancia **neta** del día (bruto menos comisiones) a la que el engine **cierra la posición de esa
+    cuenta y deja de copiarle hasta mañana**, cuenta por cuenta. Se reanuda a mano en Riesgo (solo si sigue por debajo).
+  - **Objetivo evaluación**: ganancia neta **acumulada** sobre el saldo inicial (saldo + flotante − comisiones de hoy −
+    inicial). Al alcanzarla el engine cierra y pausa la cuenta: evaluación superada. El saldo inicial sale del perfil de
+    prop firm (tamaño) o se pide la primera vez.
+  **Corte para todas** y **Objetivo para todas** los fijan de golpe en todas las seguidoras. Son los mismos valores que
+  en Riesgo → Límites por cuenta, donde además se ve cuánto lleva cada cuenta.
   **Vincular todas** pone a copiar a la maestra todas las seguidoras visibles de golpe (pide un multiplicador para las que
   no tienen regla; las que ya la tienen conservan el suyo). En **Gestionar cuentas**, *Ocultar* quita una cuenta de Inicio,
   Cuentas, Copiar y de las cuentas en juego, y nunca recibe copias; *Mostrar* la devuelve; el filtro *Ocultas* las lista, y

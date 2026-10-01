@@ -1030,3 +1030,32 @@ async def test_account_profile_is_persisted_and_static_drawdown_has_fixed_floor(
     assert (await client.put("/api/risk/limits", json={"account_id": "Sim102", "drawdown_mode": "weird"})).status_code == 422
     await client.delete("/api/risk/limits/Sim102")
     await client.patch("/api/accounts/Sim102", json={"firm": "", "plan": "", "plan_size": 0})
+
+
+async def test_profit_goal_halts_and_flattens_when_cumulative_net_gain_reaches_target(client: AsyncClient, container):
+    b = container.bridge
+    start = b.accounts["Sim102"]                      # saldo del simulador = saldo inicial de la "evaluación"
+    b.positions[("Sim102", "NQ 12-26")] = 1
+    await client.put("/api/accounts/Sim102/link", json={"master_account": "Sim101"})
+    r = await client.put("/api/risk/limits", json={"account_id": "Sim102", "profit_goal": 3000, "start_balance": start, "max_daily_profit": 5000})
+    assert r.status_code == 200 and r.json()["profit_goal"] == 3000 and r.json()["start_balance"] == start
+    b.noise = 0.0
+    b.accounts["Sim102"] = start + 2800.0; b.pnl = {"Sim102": 0.0}
+    await container.accounts.sync_once()
+    lim = container.risk.limits["Sim102"]
+    assert lim.trading_halted is False and any(a.event_type == "PROFIT_GOAL_WARNING" for a in container.audit.recent(5))
+    b.accounts["Sim102"] = start + 2950.0; b.unrealized["Sim102"] = 120.0      # flotante +120 → +3070 acumulado
+    await container.accounts.sync_once()
+    lim = container.risk.limits["Sim102"]
+    assert lim.trading_halted and lim.halted_reason == "profit_goal" and "Sim102" in b.flattened
+    ev = next(a for a in container.audit.recent(6) if a.event_type == "PROFIT_GOAL")
+    assert "evaluación superada" in ev.message and ev.details["gained"] >= 3000
+    ok, reason = container.risk.allows("Sim102", 1, "NQ 12-26", "BUY")
+    assert not ok and "objetivo de la evaluación" in reason
+    # por encima del objetivo no se reanuda; con un objetivo mayor sí
+    r = await client.put("/api/risk/limits", json={"account_id": "Sim102", "profit_goal": 3000, "start_balance": start, "trading_halted": False})
+    assert r.status_code == 409
+    r = await client.put("/api/risk/limits", json={"account_id": "Sim102", "profit_goal": 6000, "start_balance": start, "trading_halted": False})
+    assert r.status_code == 200 and r.json()["trading_halted"] is False
+    assert next(l for l in container.store.get_risk_limits() if l.account_id == "Sim102").profit_goal == 6000
+    await client.delete("/api/risk/limits/Sim102")

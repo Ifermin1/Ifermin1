@@ -50,7 +50,10 @@ export function Dashboard() {
         <Card className="alert-card"><strong>Límite de pérdida diaria alcanzado:</strong> {risk.limits.filter((l) => l.halted_reason === "daily_loss").map((l) => l.account_id).join(", ")}. Cuenta pausada y cerrada; se reanuda a mano en <i>Riesgo</i>.</Card>
       )}
       {risk?.limits.some((l) => l.trading_halted && l.halted_reason === "daily_profit") && (
-        <Card className="alert-card"><strong>Objetivo de ganancia diaria alcanzado:</strong> {risk.limits.filter((l) => l.halted_reason === "daily_profit").map((l) => l.account_id).join(", ")}. Cuenta pausada y cerrada para asegurar la ganancia; se reanuda a mano en <i>Riesgo</i>.</Card>
+        <Card className="alert-card"><strong>Corte del día alcanzado:</strong> {risk.limits.filter((l) => l.halted_reason === "daily_profit").map((l) => l.account_id).join(", ")}. Cuenta pausada y cerrada para asegurar la ganancia; se reanuda a mano en <i>Riesgo</i>.</Card>
+      )}
+      {risk?.limits.some((l) => l.trading_halted && l.halted_reason === "profit_goal") && (
+        <Card className="alert-card"><strong>Objetivo de la evaluación alcanzado:</strong> {risk.limits.filter((l) => l.halted_reason === "profit_goal").map((l) => l.account_id).join(", ")}. Cuenta pausada y cerrada: evaluación superada. Si quieres seguir operándola, sube o quita el objetivo en <i>Riesgo</i>.</Card>
       )}
       {risk?.limits.some((l) => l.trading_halted && l.halted_reason === "drawdown") && (
         <Card className="alert-card"><strong>Límite de drawdown alcanzado:</strong> {risk.limits.filter((l) => l.halted_reason === "drawdown").map((l) => l.account_id).join(", ")}. Cuenta pausada y cerrada antes de tocar el suelo del prop firm; se reanuda a mano en <i>Riesgo</i> (solo si vuelve a tener margen).</Card>

@@ -95,6 +95,9 @@ class SQLiteStore:
                 self._conn.execute("ALTER TABLE risk_limits ADD COLUMN halted_at TEXT")
             if "max_daily_profit" not in rcols:
                 self._conn.execute("ALTER TABLE risk_limits ADD COLUMN max_daily_profit REAL DEFAULT 0")
+            if "profit_goal" not in rcols:
+                self._conn.execute("ALTER TABLE risk_limits ADD COLUMN profit_goal REAL DEFAULT 0")
+                self._conn.execute("ALTER TABLE risk_limits ADD COLUMN start_balance REAL DEFAULT 0")
             pcols = {r["name"] for r in self._conn.execute("PRAGMA table_info(account_peaks)").fetchall()}
             if "peak_eod" not in pcols:
                 self._conn.execute("ALTER TABLE account_peaks ADD COLUMN peak_eod REAL")
@@ -164,7 +167,7 @@ class SQLiteStore:
                           max_position_size=r["max_position_size"] or 0, trading_halted=bool(r["trading_halted"]),
                           max_trailing_drawdown=r["max_trailing_drawdown"] or 0.0, drawdown_mode=r["drawdown_mode"] or "intraday",
                           drawdown_floor_cap=r["drawdown_floor_cap"] or 0.0, drawdown_buffer=r["drawdown_buffer"] or 0.0,
-                          halted_reason=r["halted_reason"] or "",
+                          halted_reason=r["halted_reason"] or "", profit_goal=r["profit_goal"] or 0.0, start_balance=r["start_balance"] or 0.0,
                           halted_at=datetime.fromisoformat(r["halted_at"]) if r["halted_at"] else None)
                 for r in rows]
 
@@ -172,11 +175,12 @@ class SQLiteStore:
         with self._lock, self._conn:
             self._conn.execute(
                 "INSERT OR REPLACE INTO risk_limits (account_id, max_daily_loss, max_daily_profit, max_position_size, trading_halted, "
-                "halted_reason, halted_at, max_trailing_drawdown, drawdown_mode, drawdown_floor_cap, drawdown_buffer) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "halted_reason, halted_at, max_trailing_drawdown, drawdown_mode, drawdown_floor_cap, drawdown_buffer, profit_goal, start_balance) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (limit.account_id, limit.max_daily_loss, limit.max_daily_profit, limit.max_position_size, limit.trading_halted,
                  limit.halted_reason, limit.halted_at.isoformat() if limit.halted_at else None,
-                 limit.max_trailing_drawdown, limit.drawdown_mode, limit.drawdown_floor_cap, limit.drawdown_buffer))
+                 limit.max_trailing_drawdown, limit.drawdown_mode, limit.drawdown_floor_cap, limit.drawdown_buffer,
+                 limit.profit_goal, limit.start_balance))
 
     def delete_risk_limit(self, account_id: str) -> bool:
         with self._lock, self._conn:

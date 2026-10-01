@@ -6,7 +6,7 @@ import { money } from "../lib/format";
 /* Editor del perfil de prop firm de una cuenta: firma → plan → tamaño rellenan los límites (drawdown y su tipo, suelo,
  * objetivo, pérdida diaria, contratos); todo es editable antes de aplicar. Al aplicar se guarda el perfil en la cuenta y
  * los límites en Riesgo (el engine vigila el drawdown con ese tipo desde ese momento). */
-export type ProfileResult = { firm: string; plan: string; size: number; dd: DdType; drawdown: number; cap: number; target: number; dailyLoss: number; contracts: number; buffer: number };
+export type ProfileResult = { firm: string; plan: string; size: number; dd: DdType; drawdown: number; cap: number; target: number; dayCut: number; dailyLoss: number; contracts: number; buffer: number };
 
 export function ProfileEditor({ a, limit, followers, onApply, onClose, busy }: {
   a: Account; limit?: RiskLimit; followers: Account[]; busy?: boolean; onClose: () => void;
@@ -18,7 +18,8 @@ export function ProfileEditor({ a, limit, followers, onApply, onClose, busy }: {
   const [dd, setDd] = useState<DdType>(limit?.drawdown_mode === "static" ? "static" : limit?.drawdown_mode === "eod" ? "eod" : "intraday");
   const [lock, setLock] = useState<Lock>("none");
   const [drawdown, setDrawdown] = useState(String(limit?.max_trailing_drawdown || ""));
-  const [target, setTarget] = useState(String(limit?.max_daily_profit || ""));
+  const [target, setTarget] = useState(String(limit?.profit_goal || ""));
+  const [dayCut, setDayCut] = useState(String(limit?.max_daily_profit || ""));
   const [dailyLoss, setDailyLoss] = useState(String(limit?.max_daily_loss || ""));
   const [contracts, setContracts] = useState(String(limit?.max_position_size || ""));
   const [buffer, setBuffer] = useState(String(limit?.drawdown_buffer || "100"));
@@ -41,7 +42,7 @@ export function ProfileEditor({ a, limit, followers, onApply, onClose, busy }: {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault(); setErr(null);
     if (dd === "static" && !size) { setErr("El drawdown estático necesita el tamaño (saldo inicial) de la cuenta."); return; }
-    try { await onApply({ firm, plan, size, dd, drawdown: ddN, cap, target: Number(target) || 0, dailyLoss: Number(dailyLoss) || 0, contracts: Number(contracts) || 0, buffer: Number(buffer) || 0 }, [...others]); onClose(); }
+    try { await onApply({ firm, plan, size, dd, drawdown: ddN, cap, target: Number(target) || 0, dayCut: Number(dayCut) || 0, dailyLoss: Number(dailyLoss) || 0, contracts: Number(contracts) || 0, buffer: Number(buffer) || 0 }, [...others]); onClose(); }
     catch (ex) { setErr(ex instanceof Error ? ex.message : String(ex)); }
   };
   return (
@@ -59,14 +60,15 @@ export function ProfileEditor({ a, limit, followers, onApply, onClose, busy }: {
         {dd === "static" && <label>Saldo inicial ($)<input type="number" min="0" step="1000" value={size || ""} onChange={(e) => setSize(Number(e.target.value) || 0)} data-testid="pe-start" /></label>}
       </div>
       <div className="pe-row">
-        <label>Objetivo del día ($)<input type="number" min="0" step="50" value={target} placeholder="0 = sin objetivo" onChange={(e) => setTarget(e.target.value)} data-testid="pe-target" /></label>
+        <label>Objetivo de la evaluación ($)<input type="number" min="0" step="50" value={target} placeholder="0 = sin objetivo" onChange={(e) => setTarget(e.target.value)} data-testid="pe-target" title="Ganancia neta acumulada sobre el saldo inicial (tamaño). Al llegar, el engine cierra y pausa la cuenta." /></label>
+        <label>Corte del día, neto ($)<input type="number" min="0" step="50" value={dayCut} placeholder="0 = sin corte" onChange={(e) => setDayCut(e.target.value)} data-testid="pe-daycut" title="Ganancia neta del día a la que el engine cierra la posición y deja de copiar hasta mañana." /></label>
         <label>Pérdida diaria máx. ($)<input type="number" min="0" step="50" value={dailyLoss} placeholder="0 = sin límite" onChange={(e) => setDailyLoss(e.target.value)} data-testid="pe-daily" /></label>
         <label>Contratos máx.<input type="number" min="0" step="1" value={contracts} placeholder="0 = sin límite" onChange={(e) => setContracts(e.target.value)} data-testid="pe-contracts" /></label>
         <label>Colchón ($)<input type="number" min="0" step="10" value={buffer} onChange={(e) => setBuffer(e.target.value)} title="El engine pausa y cierra la cuenta cuando faltan estos dólares para el suelo (el prop firm mide tick a tick; aquí cada 2 s)" /></label>
       </div>
       <p className="muted small pe-summary" data-testid="pe-summary">
         Resultado: drawdown <b>{DD_LABEL[dd]}</b> de <b>{money(ddN)}</b>{cap ? <> · suelo {dd === "static" ? "fijo en" : "bloqueado al llegar a"} <b>{money(cap)}</b></> : " · el suelo sube siempre"}
-        {Number(target) ? <> · objetivo {money(Number(target))}</> : null}{Number(dailyLoss) ? <> · pérdida diaria {money(Number(dailyLoss))}</> : null}{Number(contracts) ? <> · máx. {contracts} contratos</> : null}.
+        {Number(target) ? <> · objetivo de la evaluación {money(Number(target))} desde {money(size)}</> : null}{Number(dayCut) ? <> · corte del día {money(Number(dayCut))} neto</> : null}{Number(dailyLoss) ? <> · pérdida diaria {money(Number(dailyLoss))}</> : null}{Number(contracts) ? <> · máx. {contracts} contratos</> : null}.
         Importes orientativos del catálogo: confírmalos en la web de la firma.
       </p>
       {followers.length > 0 && (
@@ -82,7 +84,7 @@ export function ProfileEditor({ a, limit, followers, onApply, onClose, busy }: {
       <div className="chips">
         <button className="primary small-btn" type="submit" disabled={busy} data-testid="pe-apply">Aplicar perfil{others.size ? ` a ${others.size + 1} cuentas` : ""}</button>
         <button className="ghost small-btn" type="button" onClick={onClose}>Cancelar</button>
-        {a.firm && <button className="ghost small-btn" type="button" disabled={busy} onClick={async () => { try { await onApply({ firm: "", plan: "", size: 0, dd, drawdown: limit?.max_trailing_drawdown ?? 0, cap: limit?.drawdown_floor_cap ?? 0, target: limit?.max_daily_profit ?? 0, dailyLoss: limit?.max_daily_loss ?? 0, contracts: limit?.max_position_size ?? 0, buffer: limit?.drawdown_buffer ?? 0 }, []); onClose(); } catch (ex) { setErr(ex instanceof Error ? ex.message : String(ex)); } }} title="Quita la etiqueta del perfil; los límites se conservan">Quitar perfil</button>}
+        {a.firm && <button className="ghost small-btn" type="button" disabled={busy} onClick={async () => { try { await onApply({ firm: "", plan: "", size: 0, dd, drawdown: limit?.max_trailing_drawdown ?? 0, cap: limit?.drawdown_floor_cap ?? 0, target: limit?.profit_goal ?? 0, dayCut: limit?.max_daily_profit ?? 0, dailyLoss: limit?.max_daily_loss ?? 0, contracts: limit?.max_position_size ?? 0, buffer: limit?.drawdown_buffer ?? 0 }, []); onClose(); } catch (ex) { setErr(ex instanceof Error ? ex.message : String(ex)); } }} title="Quita la etiqueta del perfil; los límites se conservan">Quitar perfil</button>}
       </div>
     </form>
   );
