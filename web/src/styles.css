@@ -628,3 +628,11 @@ tr.expand-row > td { padding: 10px 12px 14px; background: var(--panel-2); border
 .expand-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
 .expand-head .chips { align-items: center; }
 table.acc-table th { white-space: nowrap; }
+/* cuenta líder (corona) */
+.leader-pick { flex-direction: row; align-items: center; gap: 8px; flex: 1 1 260px; max-width: 420px; }
+.leader-pick select { flex: 1; }
+.crown-badge { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 8px; background: rgba(251,191,36,.16); color: var(--warn); flex: none; }
+.crown-badge.inline { width: 18px; height: 18px; border-radius: 5px; margin-right: 6px; vertical-align: -3px; }
+.leader-badge { color: var(--warn); border-color: rgba(251,191,36,.5); gap: 4px; } .leader-badge::before { background: var(--warn); }
+table.acc-table tr[data-account].leader td { background: linear-gradient(90deg, rgba(251,191,36,.08), transparent 40%); }
+.leader-btn { color: var(--warn); gap: 4px; display: inline-flex; align-items: center; }

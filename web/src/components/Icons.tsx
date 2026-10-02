@@ -9,6 +9,7 @@ const P: Record<string, string> = {
   shield: "M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z",
   list: "M4 6h16M4 12h16M4 18h16",
   trophy: "M8 4h8v4a4 4 0 0 1-8 0zM8 5H5v2a3 3 0 0 0 3 3M16 5h3v2a3 3 0 0 1-3 3M12 12v4M9 20h6M10 16h4v4",
+  crown: "M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5zM5 19h14",
   thumbDown: "M17 3v10M3 13h9l-1.5 6a1.5 1.5 0 0 0 2.9.8L17 13V4H7a2 2 0 0 0-2 1.6L3.8 11A2 2 0 0 0 3 13z",
   trendUp: "M3 17l6-6 4 4 8-8M15 7h6v6",
   trendDown: "M3 7l6 6 4-4 8 8M15 17h6v-6",

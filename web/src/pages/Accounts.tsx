@@ -5,6 +5,7 @@ import { Card, Empty, Kpi } from "../components/ui";
 import { AccountPanel, livePnl, liveDrawdown } from "../components/AccountPanel";
 import { ProfileEditor, type ProfileResult } from "../components/ProfileEditor";
 import { DD_SHORT, profileLabel } from "../lib/propfirms";
+import { Icon } from "../components/Icons";
 import type { Account, ExecOptions, Rule } from "../lib/api";
 
 /* Cuentas: UNA tabla con todas las cuentas (maestra y seguidoras) y todo lo que se puede hacer con ellas: copiar o no,
@@ -156,7 +157,7 @@ export function Accounts() {
   const setAlias = (acc: string, alias: string) => guard(acc, async () => { await client!.setAccount(acc, { alias }); });
   const changeMaster = (acc: string) => guard("__master", async () => {
     if (!acc || acc === detected) return;
-    if (!confirm(`¿Cambiar la cuenta maestra a ${acc}?\n\nA partir de ahora se replicarán las operaciones de ${acc}. Las cuentas que copiaban a ${detected ?? "la anterior"} dejan de copiar hasta que las vincules a la nueva.`)) return;
+    if (!confirm(`¿Hacer líder a ${acc}?\n\nA partir de ahora se copiarán las operaciones de ${acc}. Las seguidoras de ${detected ?? "la líder anterior"} dejan de copiar hasta que las vincules a la nueva (botón "Vincular todas").`)) return;
     await client!.setMaster(acc);
   });
   const flatten = (acc: string) => guard(acc, async () => {
@@ -231,17 +232,21 @@ export function Accounts() {
 
   return (
     <div className="grid" data-testid="accounts">
-      <Card title="Cuenta maestra y copia" icon="users" right={<div className="chips">
+      <Card title="Cuenta líder y copia" icon="crown" right={<div className="chips">
         <button className={risk?.kill_switch ? "primary small-btn" : "small-btn"} disabled={busy === "__kill"} onClick={() => void pauseAll()} data-testid="pause-all" title="Kill switch sin cerrar posiciones">{risk?.kill_switch ? "Reanudar copia" : "Pausar toda la copia"}</button>
         <button className="primary small-btn" disabled={busy === "__bulk" || !master} onClick={() => void linkMany(followers.map((r) => r.a.account_id))} data-testid="link-all">Vincular todas</button>
         <button className="small-btn" disabled={busy === "__bulk"} onClick={() => void setTargetMany(followers.map((r) => r.a.account_id))} data-testid="target-all">Corte para todas</button>
         <button className="small-btn" disabled={busy === "__bulk"} onClick={() => void setGoalMany(followers.map((r) => r.a.account_id))} data-testid="goal-all">Objetivo para todas</button>
       </div>}>
         <div className="master-row">
-          <select value={master} disabled={busy === "__master"} onChange={(e) => void changeMaster(e.target.value)} data-testid="master-select">
-            {!master && <option value="">Esperando maestra del addon…</option>}
-            {accounts.map((a) => <option key={a.account_id} value={a.account_id}>{label(a)}{a.alias ? ` · ${a.account_id}` : ""}{a.account_id === detected ? " · maestra del addon" : ""}</option>)}
-          </select>
+          <label className="leader-pick" title="La cuenta líder es la que se copia: sus operaciones se replican en las demás">
+            <span className="crown-badge"><Icon name="crown" size={16} /></span>
+            <span className="small muted">Líder</span>
+            <select value={master} disabled={busy === "__master"} onChange={(e) => void changeMaster(e.target.value)} data-testid="master-select">
+              {!master && <option value="">Elige la cuenta líder…</option>}
+              {accounts.map((a) => <option key={a.account_id} value={a.account_id}>{a.account_id === detected ? "👑 " : ""}{label(a)}{a.alias ? ` · ${a.account_id}` : ""}</option>)}
+            </select>
+          </label>
           {masterRow && <div className="master-summary">
             <span className={`badge ${masterRow.a.connected ? "ok" : "bad"}`}>{masterRow.a.connected ? "conectada" : "desconectada"}</span>
             <span>P&L hoy <b className={masterRow.pnl > 0 ? "ok" : masterRow.pnl < 0 ? "bad" : ""}>{masterRow.live && "≈ "}{signedMoney(masterRow.pnl)}</b></span>
@@ -249,6 +254,7 @@ export function Accounts() {
             <span className="muted">{money(masterRow.a.balance)}</span>
           </div>}
         </div>
+        <p className="muted small">La <b>líder</b> es la cuenta que operas: todo lo que haga se copia en las seguidoras que tengan el interruptor activado. Para cambiarla elige otra en el desplegable o pulsa <b>Hacer líder</b> en su fila. El addon la guarda y sobrevive a reinicios (addon v1.2 o superior).</p>
         {risk?.kill_switch && <p className="error">Copia detenida (kill switch){risk.kill_switch_reason ? ` · ${risk.kill_switch_reason}` : ""}: ninguna cuenta copia hasta reanudar.</p>}
         {err && busy === null && <p className="error" data-testid="acc-error">{err}</p>}
         {msg && !err && <p className="ok small" data-testid="acc-msg">{msg}</p>}
@@ -298,21 +304,21 @@ export function Accounts() {
                   const halted = limit?.trading_halted ? limit.halted_reason : "";
                   const prof = profileLabel(a.firm, a.plan, a.plan_size);
                   return [
-                    <tr key={id} className={`${!a.enabled ? "off" : ""} ${msel.has(id) ? "selected" : ""} ${expanded ? "open" : ""} ${a.desync ? "row-desync" : ""}`} data-account={id} data-testid={`row-${id}`}>
+                    <tr key={id} className={`${!a.enabled ? "off" : ""} ${msel.has(id) ? "selected" : ""} ${expanded ? "open" : ""} ${a.desync ? "row-desync" : ""} ${m ? "leader" : ""}`} data-account={id} data-testid={`row-${id}`}>
                       <td><input type="checkbox" checked={msel.has(id)} onChange={() => toggleMsel(id)} /></td>
                       <td><div className="acc-cell">
-                        <b>{label(a)}</b>{a.alias && <span className="muted small">{id}</span>}
+                        <b>{m && <span className="crown-badge inline" title="Cuenta líder"><Icon name="crown" size={13} /></span>}{label(a)}</b>{a.alias && <span className="muted small">{id}</span>}
                         {prof && <span className="chip profile small">{prof} · {DD_SHORT[dd.mode === "static" ? "static" : dd.mode === "eod" ? "eod" : "intraday"]}</span>}
                       </div></td>
                       <td><div className="status-cell">
-                        {m ? <span className="badge accent">maestra</span> : null}
+                        {m ? <span className="badge accent leader-badge"><Icon name="crown" size={11} /> líder</span> : null}
                         {!a.enabled ? <span className="badge muted">oculta</span> : a.connected === false ? <span className="badge bad">desconectada</span> : !a.reported ? <span className="badge muted">no reportada</span> : null}
                         {a.desync && <span className="badge bad">desincronizada</span>}
                         {halted && <span className={`badge ${halted === "daily_profit" || halted === "profit_goal" ? "ok" : "bad"}`}>{{ daily_profit: "corte hecho", profit_goal: "evaluación superada", daily_loss: "pérdida diaria", drawdown: "drawdown" }[halted] ?? "pausada"}</span>}
                         {!m && a.enabled && !halted && (link ? (link.enabled ? (risk?.kill_switch ? <span className="badge warn">kill switch</span> : <span className="badge ok">copiando</span>) : <span className="badge warn">pausada</span>) : <span className="badge muted">sin regla</span>)}
                       </div></td>
                       <td><div className="copy-cell">
-                        {m ? <span className="muted small">origen</span> : <>
+                        {m ? <span className="muted small">se copia</span> : <>
                           <label className="switch small" title={link?.enabled ? "Dejar de copiar" : "Copiar a la maestra"}>
                             <input type="checkbox" checked={!!link?.enabled} disabled={busy === id || !master || !a.enabled} onChange={(e) => void apply(id, e.target.checked, link?.multiplier ?? 1)} data-testid={`copy-${id}`} /><span />
                           </label>
@@ -327,6 +333,7 @@ export function Accounts() {
                       <td>{dd.pct !== null ? <Meter value={dd.pct} of={100} invert text={`${dd.pct.toFixed(0)} % · quedan ${money(dd.room ?? 0)}`} /> : <span className={`small ${dd.drawdown > 0 ? "bad" : "muted"}`}>{dd.drawdown > 0 ? `−${money(dd.drawdown)}` : "0"}</span>}</td>
                       <td><div className="pos-cell">{a.open_positions.length ? a.open_positions.map((p) => <span key={p.symbol} className={`small ${p.quantity > 0 ? "ok" : "bad"}`}>{p.quantity > 0 ? "L" : "C"} {Math.abs(p.quantity)} {p.symbol.split(" ")[0]}</span>) : <span className="muted small">plana</span>}</div></td>
                       <td className="nowrap"><div className="row-actions">
+                        {!m && a.enabled && <button className="ghost small-btn leader-btn" disabled={busy === "__master"} onClick={() => void changeMaster(id)} title="Convertir esta cuenta en la líder (la que se copia)" data-testid={`lead-${id}`}><Icon name="crown" size={12} /> Hacer líder</button>}
                         {a.desync && <button className="ghost small-btn" disabled={busy === id} onClick={() => void resync(id)}>Igualar</button>}
                         {a.open_positions.length > 0 && <button className="danger small-btn" disabled={busy === id} onClick={() => void flatten(id)}>Cerrar</button>}
                         <button className={`ghost small-btn ${expanded ? "active" : ""}`} onClick={() => { setOpen(expanded ? null : id); setOpenProfile(null); setOpenOpts(null); setProfileAlso([]); }} data-testid={`expand-${id}`} aria-expanded={expanded} title="Detalle">{expanded ? "▴" : "▾"}</button>

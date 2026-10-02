@@ -257,7 +257,8 @@ Hay dos vías, y se pueden usar las dos a la vez (*Riesgo → Avisos al teléfon
      manda la entrada como límite al precio de fill del maestro más la tolerancia; si no se llena en la *Espera*, "A mercado
      lo que falte" o "Cancelar (no entrar)". Con "Cancelar", la seguidora puede quedarse fuera de una operación (aparece
      `ENTRY_MISSED`). Las salidas van siempre a mercado o con su propia orden. Requiere addon v1.7.
-7. **Cuentas** es el centro de mando de la copia: una tabla con todas las cuentas (la maestra primero). En cada fila:
+7. **Cuentas** es el centro de mando de la copia. Arriba eliges la **cuenta líder** (la que operas y se copia; lleva una
+   corona 👑): en el desplegable o con el botón *Hacer líder* de cualquier fila. Debajo, una tabla con todas las cuentas (la líder primero). En cada fila:
    estado (copiando, pausada, sin regla, desincronizada, oculta, corte hecho, evaluación superada…), el interruptor de
    copia y el multiplicador, el P&L neto de hoy, las barras de corte del día, objetivo de la evaluación y drawdown, la
    posición abierta y los botones *Igualar* y *Cerrar*. Con **▾** se despliega el detalle: panel completo, *Prop firm*,

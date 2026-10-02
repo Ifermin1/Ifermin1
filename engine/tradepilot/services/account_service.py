@@ -327,7 +327,7 @@ class AccountService:
 
     async def publish_accounts(self, force: bool = False) -> None:
         """Publica el snapshot solo si cambió algo relevante (con cientos de cuentas importa)."""
-        sig = tuple((a.account_id, a.balance, a.connected, a.enabled, a.alias, a.reported, a.desync, round(a.daily_pnl),
+        sig = tuple((a.account_id, a.balance, a.connected, a.enabled, a.alias, a.firm, a.plan, a.plan_size, a.reported, a.desync, round(a.daily_pnl),
                      round(a.drawdown.peak), a.drawdown.floor, a.drawdown.pct, a.contracts_today,
                      tuple((p.symbol, p.quantity) for p in a.open_positions),
                      tuple((o.order_id, o.quantity, o.filled, o.limit_price, o.stop_price, o.state) for o in a.working_orders))
