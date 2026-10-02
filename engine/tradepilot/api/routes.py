@@ -19,6 +19,38 @@ def _ver(v: str) -> tuple:
         return (0,)
 
 
+def weak_token(token: str) -> bool:
+    return len(token) < 16 or token.lower() in ("cambiame", "changeme", "password", "token")
+
+
+def public_url(c: Container) -> str | None:
+    """URL pública de la consola: PUBLIC_URL del .env o el fichero que escribe scripts/publish.ps1 (túnel)."""
+    from pathlib import Path
+    if c.settings.PUBLIC_URL.strip():
+        return c.settings.PUBLIC_URL.strip().rstrip("/")
+    try:
+        p = Path(c.settings.PUBLIC_URL_FILE)
+        if p.exists():
+            txt = p.read_text(encoding="utf-8").strip().splitlines()
+            return txt[0].strip().rstrip("/") if txt and txt[0].strip() else None
+    except Exception:
+        return None
+    return None
+
+
+@router.get("/public-url/qr.svg", include_in_schema=False)
+def public_url_qr(request: Request, url: str | None = None):
+    """QR (SVG) de la URL pública para escanearla con el teléfono; `url` permite pedir el de otra dirección."""
+    import qrcode
+    import qrcode.image.svg
+    from fastapi.responses import Response
+    target = (url or public_url(_c(request)) or "").strip()
+    if not target.startswith(("http://", "https://")):
+        raise HTTPException(404, "no hay URL pública configurada")
+    img = qrcode.make(target, image_factory=qrcode.image.svg.SvgPathImage, box_size=12, border=2)
+    return Response(content=img.to_string(), media_type="image/svg+xml", headers={"Cache-Control": "no-store"})
+
+
 @router.get("/health")
 def health(request: Request):
     c = _c(request)
@@ -37,6 +69,8 @@ def health(request: Request):
         "app": c.settings.APP_NAME,
         "mode": c.settings.ENGINE_MODE,
         "web_build": web_build,          # cuándo se compiló la consola que sirve el engine (para detectar cachés viejas)
+        "public_url": public_url(c),     # URL del túnel (scripts/publish.ps1) o PUBLIC_URL; None si no está publicada
+        "token_weak": weak_token(c.settings.API_TOKEN),
         "addon_outdated": outdated,
         "min_addon_version": c.settings.MIN_ADDON_VERSION,
         "bridge": c.accounts.health(),

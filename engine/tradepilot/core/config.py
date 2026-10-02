@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     API_PORT: int = 8000
     API_TOKEN: str = "cambiame"
     CORS_ORIGINS: str = "*"
+    # URL pública de la consola (túnel). Si está vacía se lee de PUBLIC_URL_FILE, que escribe scripts/publish.ps1.
+    PUBLIC_URL: str = ""
+    PUBLIC_URL_FILE: str = "data/public_url.txt"
     # Carpeta con el build de la consola web (se sirve desde el mismo proceso)
     WEB_DIST: str = "../web/dist"
 

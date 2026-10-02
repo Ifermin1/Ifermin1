@@ -38,6 +38,17 @@ def create_app(container: Container | None = None) -> FastAPI:
     app.add_middleware(CORSMiddleware, allow_origins=origins or ["*"], allow_methods=["*"], allow_headers=["*"])
     app.include_router(router)
 
+    @app.middleware("http")
+    async def security_headers(request, call_next):
+        # La consola puede estar publicada en Internet (túnel): cabeceras defensivas y HSTS cuando llega por HTTPS
+        resp = await call_next(request)
+        resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+        resp.headers.setdefault("X-Frame-Options", "DENY")
+        resp.headers.setdefault("Referrer-Policy", "no-referrer")
+        if request.headers.get("x-forwarded-proto", request.url.scheme) == "https":
+            resp.headers.setdefault("Strict-Transport-Security", "max-age=15552000")
+        return resp
+
     @app.websocket("/api/ws")
     async def ws_endpoint(ws: WebSocket):
         if not ws_token_ok(ws):

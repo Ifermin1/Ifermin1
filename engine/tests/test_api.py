@@ -1043,3 +1043,41 @@ async def test_profit_goal_halts_and_flattens_when_cumulative_net_gain_reaches_t
     assert r.status_code == 200 and r.json()["trading_halted"] is False
     assert next(l for l in container.store.get_risk_limits() if l.account_id == "Sim102").profit_goal == 6000
     await client.delete("/api/risk/limits/Sim102")
+
+
+async def test_bruteforce_throttle_locks_ip_and_security_headers(client: AsyncClient, container):
+    from tradepilot.api import auth
+    auth.reset_throttle()
+    try:
+        bad = {"Authorization": "Bearer nope", "X-Forwarded-For": "203.0.113.9"}
+        for _ in range(auth.MAX_FAILS - 1):
+            assert (await client.get("/api/accounts", headers=bad)).status_code == 401
+        r = await client.get("/api/accounts", headers=bad)
+        assert r.status_code == 429
+        # bloqueada incluso con el token correcto; otra IP sigue entrando; queda auditado
+        assert (await client.get("/api/accounts", headers={"X-Forwarded-For": "203.0.113.9"})).status_code == 429
+        assert (await client.get("/api/accounts", headers={"X-Forwarded-For": "198.51.100.1"})).status_code == 200
+        r = await client.get("/api/audit?limit=5&event_type=AUTH_LOCKED", headers={"X-Forwarded-For": "198.51.100.1"})
+        assert r.status_code == 200 and len(r.json()) == 1 and "203.0.113.9" in r.json()[0]["message"]
+        assert r.headers["x-content-type-options"] == "nosniff" and r.headers["x-frame-options"] == "DENY" and "strict-transport-security" not in r.headers
+        r = await client.get("/api/health", headers={"X-Forwarded-For": "198.51.100.1", "X-Forwarded-Proto": "https"})
+        assert r.headers["strict-transport-security"].startswith("max-age=")
+    finally:
+        auth.reset_throttle()
+
+
+async def test_health_reports_public_url_and_qr(client: AsyncClient, container, tmp_path):
+    r = await client.get("/api/health")
+    from tradepilot.api.routes import weak_token
+    assert r.json()["public_url"] is None and r.json()["token_weak"] is weak_token(container.settings.API_TOKEN)
+    assert weak_token("cambiame") and weak_token("abc") and not weak_token("k7Qp9zL2mX4vB8nR1tW6")
+    assert (await client.get("/api/public-url/qr.svg")).status_code == 404
+    f = tmp_path / "public_url.txt"; f.write_text("https://consola.ejemplo.com/\n", encoding="utf-8")
+    container.settings.PUBLIC_URL_FILE = str(f)
+    assert (await client.get("/api/health")).json()["public_url"] == "https://consola.ejemplo.com"
+    r = await client.get("/api/public-url/qr.svg")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("image/svg+xml") and b"<svg" in r.content
+    r = await client.get("/api/public-url/qr.svg?url=http://192.168.1.40:8000")
+    assert r.status_code == 200
+    assert (await client.get("/api/public-url/qr.svg?url=javascript:alert(1)")).status_code == 404
+    container.settings.PUBLIC_URL_FILE = "data/public_url.txt"

@@ -77,6 +77,32 @@ Después:
   Chrome → *Añadir a pantalla de inicio*; en iOS, compartir en Safari → *Añadir a pantalla de inicio*. Queda como app.
 - Acceso desde fuera de casa: con Tailscale (ver abajo) o un túnel, `docs/ARQUITECTURA.md` §2.
 
+### Acceder desde cualquier sitio (publicar la consola)
+
+El engine tiene que seguir en el PC de trading (habla con NinjaTrader en ese mismo PC). "Publicar" es darle una puerta
+de entrada segura desde Internet: un **túnel de Cloudflare** (gratis, HTTPS, sin abrir puertos en el router). El PC sale
+hacia Cloudflare y Cloudflare te reenvía; en tu router no se toca nada.
+
+1. **Token fuerte.** `API_TOKEN` en `engine\.env` es la contraseña de la consola. `scripts\publish.ps1` lo cambia solo si
+   es el de ejemplo (te lo muestra: guárdalo). Nunca lo compartas; si se filtra, cámbialo y reinicia el engine.
+2. **Prueba en un minuto (URL aleatoria):** en el PC del engine, `powershell -ExecutionPolicy Bypass -File
+   scripts\publish.ps1`. Descarga `cloudflared`, abre el túnel y muestra una dirección `https://xxxx.trycloudflare.com`
+   con un QR. Escanéalo con el teléfono, entra con el token e instala la app (apartado siguiente). La dirección cambia
+   cada vez que arrancas el túnel y se corta al cerrar la ventana.
+3. **Dirección fija y siempre encendida (recomendado):** necesitas un dominio administrado en Cloudflare (plan gratuito;
+   un dominio cuesta unos 10 $/año, o usa uno que ya tengas). Ejecuta `scripts\publish.ps1 -Hostname
+   consola.tudominio.com -Install`: la primera vez abre el navegador para iniciar sesión en Cloudflare y elegir el
+   dominio; crea el túnel, el registro DNS y una tarea programada "TradePilotX Tunnel" que arranca al iniciar sesión y
+   se reconecta sola. Desde entonces `https://consola.tudominio.com` funciona desde cualquier red.
+4. **En la consola**, abajo a la izquierda, **Acceso remoto** muestra la dirección pública con su QR y avisa si el
+   token es débil. Al estar publicada, el engine bloquea 5 minutos cualquier IP que falle el token 10 veces (`AUTH_LOCKED`
+   en Auditoría) y manda cabeceras de seguridad (HSTS, sin iframes).
+5. **Quitarla:** `scripts\publish.ps1 -Uninstall`.
+
+Capa extra opcional: en el panel de Cloudflare, *Zero Trust → Access* te deja poner un login (correo con código, Google…)
+delante de la dirección, además del token. Alternativa sin dominio para uso solo personal: **Tailscale** (red privada
+entre tu PC y tu teléfono; la URL es `http://100.x.y.z:8000`, sin HTTPS y sin instalación completa de la app).
+
 ### Instalar la consola en el teléfono
 
 La consola es una *web app* (PWA): no está en las tiendas, se instala desde el navegador y queda como una app más, con
@@ -85,9 +111,7 @@ icono, pantalla completa y sin barra de direcciones.
 1. **Que el teléfono llegue al engine.**
    - En casa, misma Wi-Fi que el PC de trading: la URL es `http://<IP-del-PC>:8000` (el engine la imprime al arrancar,
      p. ej. `http://192.168.1.40:8000`). El paso 2 del apartado 1 (regla del firewall) tiene que estar hecho.
-   - Desde fuera de casa (datos móviles), lo más sencillo es **Tailscale**: instálalo en el PC y en el teléfono con la
-     misma cuenta y usa la IP de Tailscale del PC (`http://100.x.y.z:8000`). Es una red privada entre tus dispositivos;
-     nada queda abierto a Internet. Alternativa con dominio y HTTPS: Cloudflare Tunnel (`docs/ARQUITECTURA.md` §2).
+   - Desde fuera de casa: publica la consola con `scripts\publish.ps1` (apartado anterior) y usa esa dirección `https://…`.
 2. **Abrir la URL en el navegador del teléfono** y entrar con el token (*URL del engine* = esa dirección; el teléfono la
    recuerda).
 3. **Instalar**:

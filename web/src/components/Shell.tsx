@@ -52,6 +52,48 @@ export function StatusStrip({ className = "" }: { className?: string }) {
 
 const BUILT = new Date(__BUILD__);
 const fmtBuild = (d: Date) => d.toLocaleString("es-ES", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
+/** Acceso remoto: la URL pública (túnel) con un QR para escanear desde el teléfono, o cómo publicarla si no la hay. */
+function RemoteAccess({ onClose }: { onClose: () => void }) {
+  const { health, session } = useStore();
+  const url = health?.public_url ?? null;
+  const base = session?.baseUrl.replace(/\/$/, "") ?? "";
+  const qr = (u: string) => `${base}/api/public-url/qr.svg?url=${encodeURIComponent(u)}&token=${encodeURIComponent(session?.token ?? "")}`;
+  const [copied, setCopied] = useState(false);
+  const copy = async (u: string) => { try { await navigator.clipboard.writeText(u); setCopied(true); window.setTimeout(() => setCopied(false), 1500); } catch { /* sin portapapeles */ } };
+  return (
+    <div className="modal-back" onClick={onClose} data-testid="remote-modal">
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="card-head"><h2><span className="card-icon"><Icon name="share" size={15} /></span>Acceso remoto</h2><button className="chip-btn" onClick={onClose}>Cerrar</button></div>
+        {url ? (
+          <>
+            <p className="small">La consola está <b>publicada</b>. Escanea el código con el teléfono, entra con el token e instálala como app (Android: Chrome → Instalar aplicación · iPhone: Safari → Compartir → Añadir a pantalla de inicio).</p>
+            <div className="remote-grid">
+              <img className="qr" src={qr(url)} alt="QR de la URL pública" />
+              <div className="remote-url">
+                <a href={url} target="_blank" rel="noreferrer" data-testid="remote-url">{url}</a>
+                <button className="small-btn" onClick={() => void copy(url)}>{copied ? "Copiado" : "Copiar enlace"}</button>
+                {health?.token_weak && <p className="error">El token es débil: cámbialo en engine\.env (scripts\publish.ps1 genera uno) antes de compartir esta dirección.</p>}
+                <p className="muted small">Quien tenga la URL y el token controla la copia. No compartas el token; si se filtra, cámbialo en engine\.env y reinicia el engine.</p>
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="small">La consola <b>no está publicada</b>: solo se llega desde esta red ({base}).</p>
+            <div className="remote-grid">
+              <img className="qr" src={qr(base)} alt="QR de la URL local" />
+              <div className="remote-url">
+                <b>En casa (misma Wi-Fi)</b><span className="muted small">escanea este código con el teléfono.</span>
+                <b>Desde cualquier sitio</b><span className="muted small">en el PC del engine ejecuta <code>scripts\publish.ps1</code> (túnel de Cloudflare, HTTPS, sin abrir puertos). Con <code>-Hostname consola.tudominio.com -Install</code> la dirección es fija y arranca sola. La guía lo explica paso a paso.</span>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** Botón "Reanudar" del aviso global de kill switch (sin cerrar posiciones). */
 function KillResume() {
   const { client, setRisk } = useStore();
@@ -76,6 +118,7 @@ export function Shell({ route, onRoute, children }: { route: Route; onRoute: (r:
   const { health, wsStatus, risk, logout, session, density, setDensity, theme, setTheme } = useStore();
   const connected = health?.bridge.connected ?? null;
   const stale = staleBuild(health?.web_build);
+  const [remote, setRemote] = useState(false);
   return (
     <div className="shell">
       <aside className="sidenav">
@@ -94,6 +137,7 @@ export function Shell({ route, onRoute, children }: { route: Route; onRoute: (r:
           </div>
           <div className="muted small">{session?.baseUrl}</div>
           <div className="muted small" title={BUILT.toISOString()}>consola del {fmtBuild(BUILT)}</div>
+          <button className="link" onClick={() => setRemote(true)} data-testid="remote-open">{health?.public_url ? "Acceso remoto · publicada" : "Acceso remoto"}</button>
           <button className="link" onClick={logout}>Salir</button>
         </div>
       </aside>
@@ -118,6 +162,10 @@ export function Shell({ route, onRoute, children }: { route: Route; onRoute: (r:
               <span><b>COPIA DETENIDA (kill switch)</b>{risk.kill_switch_at ? ` desde ${new Date(risk.kill_switch_at).toLocaleString("es-ES", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}` : ""}{risk.kill_switch_reason ? ` · ${risk.kill_switch_reason}` : ""}. Ninguna entrada se replica hasta reanudar.</span>
               <KillResume />
             </div>
+          )}
+          {remote && <RemoteAccess onClose={() => setRemote(false)} />}
+          {health?.public_url && health.token_weak && (
+            <div className="banner bad" data-testid="weak-token-banner"><b>Consola publicada con un token débil.</b> Cualquiera que adivine el token controla la copia: cámbialo en engine\.env (o ejecuta scripts\publish.ps1, que genera uno) y reinicia el engine.</div>
           )}
           {stale && (
             <div className="banner update" data-testid="stale-banner">

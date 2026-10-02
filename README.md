@@ -48,6 +48,17 @@ Avisos al teléfono (Telegram y notificaciones del navegador) e instalación pas
 
 Nota: sobre `http://` con IP (sin HTTPS) el navegador no registra el *service worker*, así que el icono en el escritorio funciona como acceso directo a pantalla completa pero no hay instalación "oficial" ni caché offline. La app funciona igual; la instalación completa llega cuando se ponga HTTPS (túnel), más adelante.
 
+## Publicar la consola (acceso desde cualquier sitio)
+
+```powershell
+scripts\publish.ps1                                              # prueba: URL aleatoria https://xxxx.trycloudflare.com + QR
+scripts\publish.ps1 -Hostname consola.tudominio.com -Install     # dirección fija con tu dominio en Cloudflare, arranca sola
+scripts\publish.ps1 -Uninstall
+```
+
+Túnel de Cloudflare: HTTPS, sin abrir puertos. El script genera un `API_TOKEN` fuerte si es el de ejemplo. Detalles en
+`docs/GUIA.md` → "Acceder desde cualquier sitio".
+
 ## Arranque en Windows con un solo comando
 
 Abre PowerShell en tu carpeta de usuario (no en `C:\WINDOWS\system32`):

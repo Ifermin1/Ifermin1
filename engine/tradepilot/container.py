@@ -43,6 +43,14 @@ class Container:
         await self.accounts.start()
         self.audit.log("ENGINE_START", f"Engine iniciado en modo {self.settings.ENGINE_MODE}")
         self.risk.warn_if_persisted()
+        from tradepilot.api.routes import public_url, weak_token
+        if weak_token(self.settings.API_TOKEN):
+            msg = "API_TOKEN es débil (corto o el de ejemplo). Cámbialo en engine/.env por uno largo y aleatorio antes de publicar la consola."
+            logger.warning(msg)
+            if public_url(self):
+                self.audit.log("WEAK_TOKEN", "La consola está PUBLICADA en Internet con un token débil: " + msg)
+        if (url := public_url(self)):
+            logger.info(f"Consola pública (túnel): {url}")
         logger.info(f"TradePilot X engine listo (modo={self.settings.ENGINE_MODE})")
         if self.settings.API_HOST in ("0.0.0.0", "::"):
             urls = console_urls(self.settings.API_PORT)
