@@ -164,6 +164,9 @@ export function Shell({ route, onRoute, children }: { route: Route; onRoute: (r:
             </div>
           )}
           {remote && <RemoteAccess onClose={() => setRemote(false)} />}
+          {health?.mode === "mock" && (
+            <div className="banner update" data-testid="mock-banner"><b>Modo simulador:</b> estas cuentas (Sim101…) son de prueba y NinjaTrader no está conectado. Para operar de verdad, en <code>engine\.env</code> pon <code>ENGINE_MODE=ninja</code> y reinicia el engine.</div>
+          )}
           {health?.public_url && health.token_weak && (
             <div className="banner bad" data-testid="weak-token-banner"><b>Consola publicada con un token débil.</b> Cualquiera que adivine el token controla la copia: cámbialo en engine\.env (o ejecuta scripts\publish.ps1, que genera uno) y reinicia el engine.</div>
           )}
