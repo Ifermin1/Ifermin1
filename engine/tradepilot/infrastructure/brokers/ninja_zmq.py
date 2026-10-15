@@ -122,9 +122,12 @@ class NinjaZmqBridge(BrokerBridge):
 
     async def ping_state(self) -> tuple[bool, str | None, int | None]:
         """Addon >= 1.8 responde "PONG|<boot>|<seq>": permite saber si publica eventos que no nos llegan."""
+        t0 = time.monotonic()
         reply = await self.request("PING", timeout_ms=2000)
         if reply is None or not reply.startswith("PONG"):
+            self.health.ping_ms = None
             return False, None, None
+        self.health.ping_ms = round((time.monotonic() - t0) * 1000, 1)
         parts = reply.split("|")
         if len(parts) < 3:
             return True, None, None
@@ -373,6 +376,35 @@ class NinjaZmqBridge(BrokerBridge):
                 logger.error(f"Error enviando orden por 5557: {exc}")
                 self._reset_order_socket()
                 return None
+
+    # ---- operativa manual (addon >= 2.7): por el socket de órdenes, con confirmación; el addon ignora ids repetidos ----
+    async def _manual_request(self, msg: str, what: str) -> str:
+        if not self._running:
+            raise RuntimeError("Puente ZMQ no iniciado")
+        reply = await self._order_request(msg)
+        if reply is None:
+            self.health.orders_retried += 1
+            logger.warning(f"NinjaTrader no confirmó {what}: reintentando")
+            reply = await self._order_request(msg)
+        if reply is None:
+            self.health.error_count += 1
+            raise RuntimeError(f"NinjaTrader no confirmó {what} en {2 * self.order_timeout_ms // 1000} s (¿addon cargado? revisa el Output de NinjaTrader)")
+        if reply.startswith("ERROR|unknown request"):
+            raise RuntimeError("el addon es anterior a v2.7: recompílalo para operar desde la consola")
+        if reply.startswith("ERROR|"):
+            self.health.error_count += 1
+            raise RuntimeError(reply[6:])
+        self.health.last_msg_out = datetime.now()
+        return reply
+
+    async def manual_order(self, order: dict) -> str:
+        return await self._manual_request("MANUAL|" + json.dumps(order), f"la orden {order.get('action')} {order.get('quantity')} {order.get('symbol')} -> {order.get('account')}")
+
+    async def cancel_order(self, account: str, order_id: str) -> str:
+        return await self._manual_request(f"CANCEL|{account}|{order_id}", f"la cancelación de {order_id} en {account}")
+
+    async def modify_order(self, account: str, order_id: str, quantity: int, limit_price: float, stop_price: float) -> str:
+        return await self._manual_request(f"MODIFY|{account}|{order_id}|{quantity}|{limit_price:g}|{stop_price:g}", f"la modificación de {order_id} en {account}")
 
     BATCH_SEP = "\x1f"    # separador de unidad: nunca aparece en el JSON ni en las respuestas del addon
 

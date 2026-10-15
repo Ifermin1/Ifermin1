@@ -24,6 +24,8 @@ class BridgeHealth(DomainModel):
     master_feed_up: bool = False     # SUB 5555
     follower_feed_up: bool = False   # PUB 5556
     sync_up: bool = False            # REQ 5557
+    ping_ms: Optional[float] = None        # ida y vuelta engine → addon (PING) de la última comprobación
+    last_order_ms: Optional[float] = None  # ida y vuelta de la última orden manual (engine → NinjaTrader → confirmación)
 
 
 class PositionSnapshot(DomainModel):

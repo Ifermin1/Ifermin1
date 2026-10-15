@@ -79,6 +79,19 @@ class BrokerBridge(ABC):
         master_filled_scaled: int | None = None,
     ) -> str | None: ...
 
+    # ---- operativa manual desde la consola (addon >= 2.7) ----
+    async def manual_order(self, order: dict) -> str:
+        """Orden manual en cualquier cuenta (también la maestra, en cuyo caso se replica como una orden más). `order` lleva
+        id (idempotente), account, symbol, action, quantity, order_type, limit_price, stop_price, sl_ticks, tp_ticks.
+        Devuelve "OK|<orderKey>" o lanza RuntimeError con el motivo."""
+        raise RuntimeError("este puente no admite órdenes manuales")
+
+    async def cancel_order(self, account: str, order_id: str) -> str:
+        raise RuntimeError("este puente no admite cancelar órdenes")
+
+    async def modify_order(self, account: str, order_id: str, quantity: int, limit_price: float, stop_price: float) -> str:
+        raise RuntimeError("este puente no admite modificar órdenes")
+
     async def send_orders(self, orders: list[dict]) -> list:
         """Varias órdenes de una vez (una por seguidora). Devuelve, en el mismo orden, la respuesta del addon o la
         excepción de cada una. Por defecto las manda una a una; el puente ZMQ las agrupa en una sola petición."""

@@ -18,6 +18,7 @@ from tradepilot.services.performance_service import PerformanceService
 from tradepilot.services.notify_service import NotifyService
 from tradepilot.services.news_service import NewsService
 from tradepilot.services.ai_service import AIService
+from tradepilot.services.trade_service import TradeService
 from tradepilot.services.sync_service import SyncService
 
 
@@ -37,6 +38,7 @@ class Container:
     performance: PerformanceService | None = None
     notify: NotifyService | None = None
     news: NewsService | None = None
+    trade: TradeService | None = None
 
     async def start(self) -> None:
         await self.bridge.start()
@@ -134,4 +136,6 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
             except Exception as exc:
                 logger.exception(f"Error en vigilancia de {name}: {exc}")
     accounts.after_sync = _after_sync
-    return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal, commissions, performance, notify, news)
+    trade = TradeService(bridge, accounts, risk, audit, cfg)
+    replication.on_manual_status = trade.on_manual_status
+    return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal, commissions, performance, notify, news, trade)

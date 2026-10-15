@@ -13,6 +13,7 @@ type Store = {
   login: (s: Session) => Promise<void>; logout: () => void;
   health: Health | null; accounts: Account[]; rules: Rule[]; audit: AuditEvent[]; risk: RiskState | null;
   prices: PriceMap; wsStatus: WsStatus; error: string | null;
+  wsRtt: number | null; wsLastAt: number;      // ida y vuelta del WebSocket (ms) y cuándo llegó el último mensaje del engine
   density: Density; setDensity: (d: Density) => void;
   theme: Theme; setTheme: (t: Theme) => void;
   refresh: () => Promise<void>; setRules: (r: Rule[]) => void; setRisk: (r: RiskState) => void;
@@ -34,6 +35,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [audit, setAudit] = useState<AuditEvent[]>([]);
   const [risk, setRisk] = useState<RiskState | null>(null);
   const [prices, setPrices] = useState<PriceMap>({});
+  const [wsRtt, setWsRtt] = useState<number | null>(null);
+  const [wsLastAt, setWsLastAt] = useState(0);
   const [wsStatus, setWsStatus] = useState<WsStatus>("closed");
   const [error, setError] = useState<string | null>(null);
   const [density, setDensityState] = useState<Density>(loadDensity);
@@ -72,10 +75,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setWsStatus("connecting");
       const ws = new WebSocket(client.wsUrl());
       wsRef.current = ws;
-      ws.onopen = () => { setWsStatus("open"); ping = window.setInterval(() => ws.readyState === 1 && ws.send("ping"), 25000); };
+      ws.onopen = () => { setWsStatus("open"); ws.send(`ping:${Date.now()}`); ping = window.setInterval(() => ws.readyState === 1 && ws.send(`ping:${Date.now()}`), 10000); };
       ws.onmessage = (ev) => {
         const { topic, data } = JSON.parse(ev.data);
-        if (topic === "accounts.snapshot") setAccounts(data);
+        setWsLastAt(Date.now());
+        if (topic === "pong") { const t = Number(data?.t); if (t) setWsRtt(Math.max(0, Date.now() - t)); }
+        else if (topic === "accounts.snapshot") setAccounts(data);
         else if (topic === "broker.health") setHealth((h) => (h ? { ...h, bridge: data } : h));
         else if (topic === "risk.state") setRisk(data);
         else if (topic === "audit.event") { setAudit((list) => [data, ...list].slice(0, 300)); void notifyShow(data); }
@@ -83,7 +88,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           priceBuf.current[root(data.symbol)] = { symbol: data.symbol, last: data.last, bid: data.bid ?? data.last, ask: data.ask ?? data.last, at: Date.now() };
         }
       };
-      ws.onclose = () => { setWsStatus("closed"); window.clearInterval(ping); if (!stopped) timer = window.setTimeout(connect, 2000); };
+      ws.onclose = () => { setWsStatus("closed"); setWsRtt(null); window.clearInterval(ping); if (!stopped) timer = window.setTimeout(connect, 1000); };
       ws.onerror = () => ws.close();
     };
     void refresh(); connect();
@@ -97,7 +102,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return () => { stopped = true; window.clearTimeout(timer); window.clearInterval(ping); window.clearInterval(poll); window.clearInterval(flush); wsRef.current?.close(); };
   }, [client, refresh]);
 
-  const value: Store = { session, client, login, logout, health, accounts, rules, audit, risk, prices, wsStatus, error,
+  const value: Store = { session, client, login, logout, health, accounts, rules, audit, risk, prices, wsStatus, error, wsRtt, wsLastAt,
                          density, setDensity, theme, setTheme, refresh, setRules, setRisk };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

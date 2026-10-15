@@ -64,6 +64,7 @@ class ReplicationService:
         self.bus = bus
         self.accounts = accounts
         self.on_restart = None                # corrutina(detalle) a llamar cuando el addon se reinicia (la inyecta el contenedor)
+        self.on_manual_status = None     # TradeService: ciclo de vida de las órdenes manuales (addon >= 2.7)
         # Libro de exposición por seguidora: copias de fills enviadas y aún no reflejadas en la posición del bróker
         # ((seguidora, id maestro, id ejecución) -> {root, signed, filled, at}) y salidas pendientes vivas copiadas
         # ((seguidora, root) -> {id maestro: (stop|limit, qty con signo)}). Con él, una salida (stop/TP) solo se copia
@@ -199,6 +200,13 @@ class ReplicationService:
             return []
         if msg_type == MSG_PRICE:
             await self.bus.publish(TOPIC_PRICE, data)
+            return []
+        if msg_type == "MANUAL_STATUS":
+            if self.on_manual_status is not None:
+                try:
+                    self.on_manual_status(data)
+                except Exception as exc:
+                    logger.error(f"MANUAL_STATUS: {exc}")
             return []
         if msg_type == MSG_POSITION:
             await self._on_position(data)

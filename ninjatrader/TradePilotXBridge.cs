@@ -53,7 +53,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 {
     public class TradePilotXBridge : AddOnBase
     {
-        private const string BridgeVersion = "2.6";
+        private const string BridgeVersion = "2.7";
 
         // ---- configuración ------------------------------------------------
         private class BridgeConfig
@@ -120,6 +120,11 @@ namespace NinjaTrader.NinjaScript.AddOns
         private readonly ConcurrentDictionary<string, Instrument> instrumentCache = new ConcurrentDictionary<string, Instrument>();
         // v2.1: copias canceladas por un FLATTEN: un fill posterior del master en esa orden no debe reabrir posición
         private readonly ConcurrentDictionary<string, bool> flattenedKeys = new ConcurrentDictionary<string, bool>();
+        // v2.7: órdenes manuales desde la consola (nombre "TPM <id>"): id -> orden, para que un reenvío del mismo id nunca duplique
+        private readonly ConcurrentDictionary<string, Order> manualOrders = new ConcurrentDictionary<string, Order>();
+        private class Bracket { public int SlTicks; public int TpTicks; public bool Done; }
+        private readonly ConcurrentDictionary<string, Bracket> manualBrackets = new ConcurrentDictionary<string, Bracket>();   // id -> stop/objetivo pendientes de crear al ejecutarse
+        private readonly ConcurrentDictionary<string, Account> manualAttached = new ConcurrentDictionary<string, Account>();    // cuentas con OnManualOrder enganchado
         // v2.4: doble salida. Cuando una copia parcialmente ejecutada se cancela para mandar el resto a mercado, NinjaTrader
         // puede reportar "Cancelled" y acto seguido llenarla igualmente (16/9 14:30: Sim102 vendió 3 con 2 comprados y quedó
         // corta). Se guarda cuánto llevaba ejecutado al reconciliar y la orden a mercado enviada; si la original ejecuta más
@@ -244,6 +249,8 @@ namespace NinjaTrader.NinjaScript.AddOns
                     try { f.OrderUpdate -= OnFollowerOrder; f.ExecutionUpdate -= OnFollowerExecution; f.PositionUpdate -= OnFollowerPosition; } catch { }
                 }
                 followers.Clear();
+                foreach (Account a in manualAttached.Values) { try { a.OrderUpdate -= OnManualOrder; } catch { } }
+                manualAttached.Clear();
                 foreach (var feed in marketFeeds.Values)
                 {
                     try { feed.Update -= OnMarketData; } catch { }
@@ -1179,6 +1186,190 @@ namespace NinjaTrader.NinjaScript.AddOns
             }
         }
 
+        // ---- v2.7: operativa manual desde la consola ------------------------------------------------------------
+        private static string ManualIdFromName(string name)
+        {
+            return name != null && name.StartsWith("TPM ") ? name.Substring(4) : "";
+        }
+
+        private static Account FindAccount(string name)
+        {
+            lock (Account.All) return Account.All.FirstOrDefault(a => a.Name == name);
+        }
+
+        private Order FindLiveOrder(Account account, string orderKey)
+        {
+            List<Order> orders;
+            lock (account.Orders) orders = account.Orders.Where(IsLive).ToList();
+            return orders.FirstOrDefault(o => OrderKey(o) == orderKey);
+        }
+
+        private void AttachManual(Account account)
+        {
+            if (manualAttached.ContainsKey(account.Name)) return;
+            if (manualAttached.TryAdd(account.Name, account))
+                account.OrderUpdate += OnManualOrder;
+        }
+
+        /// <summary>MANUAL|{"id","account","symbol","action","quantity","order_type","limit_price","stop_price","sl_ticks","tp_ticks"}.
+        /// Responde "OK|orderKey|accepted" (o "OK|orderKey|dup" si ese id ya se envió). En la maestra la orden es una orden más
+        /// de la maestra: OnMasterOrder/OnMasterExecution la publican y el engine la replica a las seguidoras.</summary>
+        private string HandleManual(string raw)
+        {
+            try
+            {
+                Dictionary<string, string> m = Json.ParseFlat(raw);
+                string id = Get(m, "id");
+                string accountName = Get(m, "account");
+                string symbol = Get(m, "symbol");
+                int qty = (int)Num(m, "quantity");
+                if (string.IsNullOrEmpty(id)) return "ERROR|falta id";
+                Order dup;
+                if (manualOrders.TryGetValue(id, out dup)) return "OK|" + OrderKey(dup) + "|dup";
+                Account account = FindAccount(accountName);
+                if (account == null) return "ERROR|cuenta desconocida: " + accountName;
+                if (qty <= 0) return "ERROR|cantidad inválida";
+                Instrument instrument = GetInstrumentCached(symbol);
+                if (instrument == null) return "ERROR|instrumento desconocido en NinjaTrader: " + symbol;
+                OrderType type = ParseType(Get(m, "order_type"));
+                OrderAction action = ParseAction(Get(m, "action"));
+                double limit = Num(m, "limit_price"), stop = Num(m, "stop_price");
+                if ((type == OrderType.Limit || type == OrderType.StopLimit) && limit <= 0) return "ERROR|precio límite obligatorio";
+                if ((type == OrderType.StopMarket || type == OrderType.StopLimit) && stop <= 0) return "ERROR|precio del stop obligatorio";
+                limit = limit > 0 ? instrument.MasterInstrument.RoundToTickSize(limit) : 0;
+                stop = stop > 0 ? instrument.MasterInstrument.RoundToTickSize(stop) : 0;
+                int sl = (int)Num(m, "sl_ticks"), tp = (int)Num(m, "tp_ticks");
+                AttachManual(account);
+                Order order = account.CreateOrder(instrument, action, type, OrderEntry.Manual, TimeInForce.Day,
+                    qty, limit, stop, string.Empty, "TPM " + id, Core.Globals.MaxDate, null);
+                if (!manualOrders.TryAdd(id, order)) { Order again; manualOrders.TryGetValue(id, out again); return "OK|" + OrderKey(again ?? order) + "|dup"; }
+                if (sl > 0 || tp > 0) manualBrackets[id] = new Bracket { SlTicks = sl, TpTicks = tp };
+                account.Submit(new[] { order });
+                Info(string.Format("MANUAL {0}: {1} {2} {3} {4}{5}{6} (id {7})", account.Name, action, qty, symbol, type,
+                    limit > 0 ? " limit=" + limit.ToString(CultureInfo.InvariantCulture) : "", stop > 0 ? " stop=" + stop.ToString(CultureInfo.InvariantCulture) : "", id));
+                return "OK|" + OrderKey(order) + "|accepted";
+            }
+            catch (Exception ex) { Error("HandleManual: " + ex.Message + " | " + raw); return "ERROR|" + ex.Message; }
+        }
+
+        /// <summary>CANCEL|cuenta|orderKey: cancela cualquier orden viva de esa cuenta (manual, copia o puesta a mano en NinjaTrader).</summary>
+        private string HandleCancel(string raw)
+        {
+            try
+            {
+                string[] f = raw.Split('|');
+                if (f.Length < 2) return "ERROR|formato: CANCEL|cuenta|orderKey";
+                Account account = FindAccount(f[0].Trim());
+                if (account == null) return "ERROR|cuenta desconocida: " + f[0];
+                Order o = FindLiveOrder(account, f[1].Trim());
+                if (o == null) return "ERROR|orden no encontrada o ya no está viva: " + f[1];
+                if ((o.Name ?? "").StartsWith("TPX ")) flattenedKeys[account.Name + "|" + MasterIdFromName(o.Name)] = true;   // una copia cancelada a mano no se reabre
+                account.Cancel(new[] { o });
+                Info("CANCEL " + account.Name + ": " + o.Name + " " + o.OrderAction + " " + o.Quantity + " " + (o.Instrument != null ? o.Instrument.FullName : ""));
+                return "OK|" + f[1].Trim() + "|cancelled";
+            }
+            catch (Exception ex) { Error("HandleCancel: " + ex.Message + " | " + raw); return "ERROR|" + ex.Message; }
+        }
+
+        /// <summary>MODIFY|cuenta|orderKey|qty|limit|stop (0 = sin cambio).</summary>
+        private string HandleModify(string raw)
+        {
+            try
+            {
+                string[] f = raw.Split('|');
+                if (f.Length < 5) return "ERROR|formato: MODIFY|cuenta|orderKey|qty|limit|stop";
+                Account account = FindAccount(f[0].Trim());
+                if (account == null) return "ERROR|cuenta desconocida: " + f[0];
+                Order o = FindLiveOrder(account, f[1].Trim());
+                if (o == null) return "ERROR|orden no encontrada o ya no está viva: " + f[1];
+                if (!IsWorking(o)) return "ERROR|la orden está en estado " + o.OrderState + ", no se puede modificar";
+                int qty; double limit, stop;
+                int.TryParse(f[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out qty);
+                double.TryParse(f[3], NumberStyles.Float, CultureInfo.InvariantCulture, out limit);
+                double.TryParse(f[4], NumberStyles.Float, CultureInfo.InvariantCulture, out stop);
+                if (limit > 0 && o.Instrument != null) limit = o.Instrument.MasterInstrument.RoundToTickSize(limit);
+                if (stop > 0 && o.Instrument != null) stop = o.Instrument.MasterInstrument.RoundToTickSize(stop);
+                o.QuantityChanged = qty > 0 ? qty : o.Quantity;
+                o.LimitPriceChanged = (o.OrderType == OrderType.Limit || o.OrderType == OrderType.StopLimit) && limit > 0 ? limit : o.LimitPrice;
+                o.StopPriceChanged = (o.OrderType == OrderType.StopMarket || o.OrderType == OrderType.StopLimit) && stop > 0 ? stop : o.StopPrice;
+                account.Change(new[] { o });
+                Info("MODIFY " + account.Name + ": " + o.Name + " qty=" + o.QuantityChanged + " limit=" + o.LimitPriceChanged + " stop=" + o.StopPriceChanged);
+                return "OK|" + f[1].Trim() + "|modified";
+            }
+            catch (Exception ex) { Error("HandleModify: " + ex.Message + " | " + raw); return "ERROR|" + ex.Message; }
+        }
+
+        /// <summary>Ciclo de vida de las órdenes manuales (TPM): se publica MANUAL_STATUS para la auditoría de la consola y, al
+        /// ejecutarse una entrada a mercado con stop/objetivo pedidos, se crean ambos como OCO (en la maestra se replican como
+        /// órdenes pendientes normales).</summary>
+        private void OnManualOrder(object sender, OrderEventArgs e)
+        {
+            try
+            {
+                Order order = e.Order;
+                if (order == null || !(order.Name ?? "").StartsWith("TPM ")) return;
+                string id = ManualIdFromName(order.Name);
+                string accountName = order.Account != null ? order.Account.Name : "";
+                string error = e.Error != Cbi.ErrorCode.NoError ? e.Error.ToString() : "";
+                string native = e.Comment ?? "";
+                if (e.OrderState == OrderState.Rejected) Error("Manual " + id + " rechazada en " + accountName + ": " + error + " " + native);
+                else if (cfg.VerboseOutput || !IsTransitState(e.OrderState)) Info("Manual " + id + " en " + accountName + ": " + e.OrderState);
+                if (e.OrderState == OrderState.Filled)
+                {
+                    Bracket b;
+                    if (manualBrackets.TryGetValue(id, out b) && !b.Done)
+                    {
+                        b.Done = true;
+                        try { SubmitBrackets(order.Account, order, id, b); }
+                        catch (Exception bx) { Error("No se pudieron crear stop/objetivo de " + id + ": " + bx.Message); }
+                    }
+                }
+                Publish(Json.Obj(
+                    "msg_type", "MANUAL_STATUS",
+                    "account", accountName,
+                    "manual_id", id,
+                    "action", ActionName(order.OrderAction),
+                    "symbol", order.Instrument != null ? order.Instrument.FullName : "",
+                    "quantity", e.Quantity,
+                    "filled", e.Filled,
+                    "avg_price", e.AverageFillPrice,
+                    "limit_price", e.LimitPrice,
+                    "stop_price", e.StopPrice,
+                    "order_type", TypeName(order.OrderType),
+                    "state", e.OrderState.ToString(),
+                    "order_id", OrderKey(order),
+                    "error", error,
+                    "native_error", native,
+                    "timestamp", e.Time.ToString("o")));
+            }
+            catch (Exception ex) { Error("OnManualOrder: " + ex.Message); }
+        }
+
+        private void SubmitBrackets(Account account, Order entry, string id, Bracket b)
+        {
+            Instrument instrument = entry.Instrument;
+            double tick = instrument.MasterInstrument.TickSize;
+            bool wasBuy = entry.OrderAction == OrderAction.Buy || entry.OrderAction == OrderAction.BuyToCover;
+            OrderAction exitAction = wasBuy ? OrderAction.Sell : OrderAction.Buy;
+            int qty = entry.Filled > 0 ? entry.Filled : entry.Quantity;
+            double fill = entry.AverageFillPrice;
+            string oco = "TPM-OCO-" + id;
+            var orders = new List<Order>();
+            if (b.SlTicks > 0)
+            {
+                double stop = instrument.MasterInstrument.RoundToTickSize(fill + (wasBuy ? -1 : 1) * b.SlTicks * tick);
+                orders.Add(account.CreateOrder(instrument, exitAction, OrderType.StopMarket, OrderEntry.Manual, TimeInForce.Day, qty, 0, stop, oco, "TPM " + id + "-SL", Core.Globals.MaxDate, null));
+            }
+            if (b.TpTicks > 0)
+            {
+                double limit = instrument.MasterInstrument.RoundToTickSize(fill + (wasBuy ? 1 : -1) * b.TpTicks * tick);
+                orders.Add(account.CreateOrder(instrument, exitAction, OrderType.Limit, OrderEntry.Manual, TimeInForce.Day, qty, limit, 0, oco, "TPM " + id + "-TP", Core.Globals.MaxDate, null));
+            }
+            if (orders.Count == 0) return;
+            account.Submit(orders);
+            Info(string.Format("Stop/objetivo de {0} en {1}: {2} órdenes ({3} ticks / {4} ticks) desde {5}", id, account.Name, orders.Count, b.SlTicks, b.TpTicks, fill.ToString(CultureInfo.InvariantCulture)));
+        }
+
         private string PositionsReply()
         {
             var parts = new List<string>();
@@ -1311,6 +1502,19 @@ namespace NinjaTrader.NinjaScript.AddOns
                 {
                     // v2.5: todas las copias de un evento en una petición (separadas por \x1f), enviadas en paralelo.
                     reply = HandleFollowerBatch(request.Substring("ORDERS|".Length));
+                }
+                else if (request.StartsWith("MANUAL|"))
+                {
+                    // v2.7: orden manual desde la consola (cualquier cuenta, también la maestra). Idempotente por id.
+                    reply = HandleManual(request.Substring("MANUAL|".Length));
+                }
+                else if (request.StartsWith("CANCEL|"))
+                {
+                    reply = HandleCancel(request.Substring("CANCEL|".Length));
+                }
+                else if (request.StartsWith("MODIFY|"))
+                {
+                    reply = HandleModify(request.Substring("MODIFY|".Length));
                 }
                 else if (request == "PING")
                 {

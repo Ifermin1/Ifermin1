@@ -57,6 +57,15 @@ export type NotifyState = { enabled: boolean; bot_token: string; chat_id: string
                             stats: { sent: number; errors: number; last_error: string | null; last_sent_at: number | null; suppressed: number } };
 export type NotifyConfig = Pick<NotifyState, "enabled" | "bot_token" | "chat_id" | "events">;
 
+/** Operativa manual (pestaña Operar). */
+export type ManualOrder = { client_id: string; account: string; symbol: string; action: "BUY" | "SELL"; quantity: number; order_type: "MARKET" | "LIMIT" | "STOPMARKET" | "STOPLIMIT";
+                            limit_price?: number; stop_price?: number; sl_ticks?: number; tp_ticks?: number; note?: string };
+export type ManualOrderResult = { client_id: string; order_id: string; status: string; detail: string; ms: number; account: string; symbol: string; action: string; quantity: number;
+                                  order_type: string; at: string; duplicate?: boolean };
+export type TradeStatus = { ready: boolean; reason: string | null; max_qty: number; mode: string; symbols: string[]; addon_version: string | null; required_addon: string; ping_ms: number | null;
+                            last_order_ms: number | null; heartbeat_age_s: number | null; master: string | null;
+                            stats: { orders: number; rejected: number; cancels: number; modifies: number; unconfirmed: number } };
+
 /** Calendario económico (ForexFactory vía el engine). */
 export type NewsEvent = { id: string; time: string; country: string; country_name: string; title: string; impact: "high" | "medium" | "low" | "holiday";
                           forecast: string | null; previous: string | null; actual: string | null };
@@ -144,6 +153,12 @@ export function makeClient(s: Session) {
     analysisParams: () => req<AnalysisParams>("/api/ui/analysis"),
     saveAnalysisParams: (p: AnalysisParams) => req<AnalysisParams>("/api/ui/analysis", { method: "PUT", body: JSON.stringify(p) }),
     news: (days = 7, countries = "", minImpact = "low") => req<NewsFeed>(`/api/news?days=${days}${countries ? `&countries=${encodeURIComponent(countries)}` : ""}&min_impact=${minImpact}`),
+    tradeStatus: () => req<TradeStatus>("/api/trade/status"),
+    tradeOrder: (o: ManualOrder) => req<ManualOrderResult>("/api/trade/order", { method: "POST", body: JSON.stringify(o) }),
+    tradeCancel: (account: string, order_id: string) => req<{ ms: number; detail: string }>("/api/trade/cancel", { method: "POST", body: JSON.stringify({ account, order_id }) }),
+    tradeModify: (account: string, order_id: string, quantity: number, limit_price: number, stop_price: number) =>
+      req<{ ms: number; detail: string }>("/api/trade/modify", { method: "POST", body: JSON.stringify({ account, order_id, quantity, limit_price, stop_price }) }),
+    tradeClose: (client_id: string, account: string, symbol: string) => req<ManualOrderResult>("/api/trade/close", { method: "POST", body: JSON.stringify({ client_id, account, symbol }) }),
     newsAlerts: () => req<NewsAlerts>("/api/news/alerts"),
     newsStats: (days = 90) => req<NewsStats>(`/api/news/stats?days=${days}`),
     newsAnalyze: (id: string, kind: "pre" | "post", force = false) => req<{ event: NewsEvent; analysis: NewsAnalysis; ai: AiStatus }>(`/api/news/analyze/${encodeURIComponent(id)}?kind=${kind}${force ? "&force=true" : ""}`, { method: "POST" }),

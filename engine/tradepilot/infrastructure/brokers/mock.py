@@ -55,6 +55,8 @@ class MockBridge(BrokerBridge):
         self._running = True
         self.health.connected = True
         self.health.master_feed_up = self.health.follower_feed_up = self.health.sync_up = True
+        if not self.health.master_account:
+            self.health.master_account = next(iter(self.accounts))
         if self.emit_events:
             self._task = asyncio.create_task(self._emit_loop())
         logger.info("MockBridge online (simulador)")
@@ -112,7 +114,8 @@ class MockBridge(BrokerBridge):
         return list(self.working_orders)
 
     async def get_positions(self) -> list[BrokerPosition] | None:
-        return [BrokerPosition(account_id=a, symbol=sym, quantity=q) for (a, sym), q in self.positions.items() if q]
+        avg = getattr(self, "avg_prices", {})
+        return [BrokerPosition(account_id=a, symbol=sym, quantity=q, avg_price=avg.get((a, sym), self._px.get(sym, 0.0))) for (a, sym), q in self.positions.items() if q]
 
     async def flatten(self, account: str) -> str:
         if account not in self.accounts:
@@ -165,6 +168,88 @@ class MockBridge(BrokerBridge):
                 asyncio.get_running_loop().create_task(self._ack_fill(target_account, action, symbol, quantity, price, master_order_id))
         logger.info(f"[mock] orden -> {target_account} {action} {quantity} {symbol}")
         return reply
+
+    # ---- operativa manual (simula el addon >= 2.7) ----
+    async def manual_order(self, order: dict) -> str:
+        """A mercado: se ejecuta al instante al último precio simulado y se publica el fill (si es la maestra, el replicador lo
+        copia como una operación más). Límite/stop: queda viva en GET_ORDERS (y si es la maestra se publica ORDER_PENDING).
+        Con sl_ticks/tp_ticks se crean el stop y el objetivo tras el fill. Ids repetidos devuelven lo mismo (idempotente)."""
+        account, symbol, oid = str(order["account"]), str(order["symbol"]), str(order["id"])
+        if account not in self.accounts:
+            raise RuntimeError(f"cuenta desconocida: {account}")
+        self.manual_done = getattr(self, "manual_done", {})
+        if oid in self.manual_done:
+            return self.manual_done[oid]
+        action = str(order["action"]).upper()
+        qty = int(order["quantity"])
+        otype = str(order.get("order_type", "MARKET")).upper()
+        is_master = account == self.health.master_account or account == next(iter(self.accounts))
+        px = self._px.get(symbol, 20000.0)
+        key = "M" + oid[:8]
+        if otype == "MARKET":
+            sign = 1 if action.startswith("BUY") else -1
+            fill = round(px + sign * tick_size(symbol), 6)
+            self.positions[(account, symbol)] = self.positions.get((account, symbol), 0) + sign * qty
+            self.avg_prices = getattr(self, "avg_prices", {})
+            self.avg_prices[(account, symbol)] = fill
+            await self.bus.publish(TOPIC_MASTER_EVENT, {"msg_type": "EXECUTION", "account": account, "action": action, "symbol": symbol, "quantity": qty,
+                                                        "price": fill, "order_type": "MARKET", "state": "Filled", "order_id": key,
+                                                        "execution_id": "E" + uuid.uuid4().hex[:8], "timestamp": datetime.now().astimezone().isoformat(timespec="microseconds")})
+            ts = tick_size(symbol)
+            for kind, ticks in (("STOPMARKET", int(order.get("sl_ticks") or 0)), ("LIMIT", int(order.get("tp_ticks") or 0))):
+                if ticks <= 0:
+                    continue
+                exit_action = "SELL" if sign > 0 else "BUY"
+                price = round(fill - sign * ticks * ts, 6) if kind == "STOPMARKET" else round(fill + sign * ticks * ts, 6)
+                wo = WorkingOrder(order_id=f"{key}-{'SL' if kind == 'STOPMARKET' else 'TP'}", action=exit_action, symbol=symbol, quantity=qty, order_type=kind,
+                                  limit_price=price if kind == "LIMIT" else 0.0, stop_price=price if kind == "STOPMARKET" else 0.0, state="Working")
+                self.working_orders.append((account, wo))
+                if is_master:
+                    await self.bus.publish(TOPIC_MASTER_EVENT, {"msg_type": "ORDER_PENDING", "account": account, "action": exit_action, "symbol": symbol, "quantity": qty,
+                                                                "order_type": kind, "state": "Working", "order_id": wo.order_id, "limit_price": wo.limit_price, "stop_price": wo.stop_price,
+                                                                "timestamp": datetime.now().astimezone().isoformat(timespec="microseconds")})
+            reply = f"OK|{key}|filled|{fill}"
+        else:
+            wo = WorkingOrder(order_id=key, action=action, symbol=symbol, quantity=qty, order_type=otype,
+                              limit_price=float(order.get("limit_price") or 0), stop_price=float(order.get("stop_price") or 0), state="Working")
+            self.working_orders.append((account, wo))
+            if is_master:
+                await self.bus.publish(TOPIC_MASTER_EVENT, {"msg_type": "ORDER_PENDING", "account": account, "action": action, "symbol": symbol, "quantity": qty,
+                                                            "order_type": otype, "state": "Working", "order_id": key, "limit_price": wo.limit_price, "stop_price": wo.stop_price,
+                                                            "timestamp": datetime.now().astimezone().isoformat(timespec="microseconds")})
+            reply = f"OK|{key}|working"
+        self.manual_done[oid] = reply
+        self.health.last_msg_out = datetime.now()
+        logger.info(f"[mock] orden manual -> {account} {action} {qty} {symbol} {otype}: {reply}")
+        return reply
+
+    def _find_working(self, account: str, order_id: str):
+        for i, (acc, wo) in enumerate(self.working_orders):
+            if acc == account and wo.order_id == order_id:
+                return i, wo
+        return None, None
+
+    async def cancel_order(self, account: str, order_id: str) -> str:
+        i, wo = self._find_working(account, order_id)
+        if wo is None:
+            raise RuntimeError(f"orden {order_id} no encontrada en {account}")
+        self.working_orders.pop(i)
+        if account == self.health.master_account or account == next(iter(self.accounts)):
+            await self.bus.publish(TOPIC_MASTER_EVENT, {"msg_type": "ORDER_CANCELLED", "account": account, "action": wo.action, "symbol": wo.symbol, "quantity": wo.quantity,
+                                                        "order_type": wo.order_type, "state": "Cancelled", "order_id": order_id, "timestamp": datetime.now().astimezone().isoformat(timespec="microseconds")})
+        return f"OK|{order_id}|cancelled"
+
+    async def modify_order(self, account: str, order_id: str, quantity: int, limit_price: float, stop_price: float) -> str:
+        i, wo = self._find_working(account, order_id)
+        if wo is None:
+            raise RuntimeError(f"orden {order_id} no encontrada en {account}")
+        new = wo.model_copy(update={"quantity": quantity or wo.quantity, "limit_price": limit_price or wo.limit_price, "stop_price": stop_price or wo.stop_price})
+        self.working_orders[i] = (account, new)
+        if account == self.health.master_account or account == next(iter(self.accounts)):
+            await self.bus.publish(TOPIC_MASTER_EVENT, {"msg_type": "ORDER_MODIFIED", "account": account, "action": new.action, "symbol": new.symbol, "quantity": new.quantity,
+                                                        "order_type": new.order_type, "state": "Working", "order_id": order_id, "limit_price": new.limit_price, "stop_price": new.stop_price,
+                                                        "timestamp": datetime.now().astimezone().isoformat(timespec="microseconds")})
+        return f"OK|{order_id}|modified"
 
     async def _ack_fill(self, account: str, action: str, symbol: str, quantity: int, ref_price: float, master_order_id: str) -> None:
         """Fill de la seguidora un instante después, como lo publicaría el addon (EXECUTION con master_order_id)."""

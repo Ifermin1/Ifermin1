@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     DRAWDOWN_EOD_TIME: str = "17:00"      # hora local (PC del engine) del cierre del día para el drawdown EOD (APEX/Topstep: 17:00 ET)
     AUDIT_ORDER_LIFECYCLE: bool = False   # auditar también los estados intermedios (Initialized, Submitted, Accepted...)
     MIN_ADDON_VERSION: str = "2.6"
+    MANUAL_ADDON_VERSION: str = "2.7"      # operar desde la consola (Operar) requiere este addon o superior
+    MANUAL_MAX_QTY: int = 20               # contratos máximos por orden manual desde la consola
+    MANUAL_CONFIRM_TIMEOUT_S: float = 8.0  # si NinjaTrader no confirma la orden manual en este tiempo se reporta como NO confirmada
     # Calendario económico y análisis con IA (Claude). Sin ANTHROPIC_API_KEY los avisos llevan un análisis por reglas.
     ANTHROPIC_API_KEY: str = ""
     AI_MODEL: str = "claude-opus-5-5"

@@ -92,6 +92,7 @@ button:disabled { opacity: .55; cursor: default; }
 .alert-card { border-color: rgba(248,113,113,.6); background: linear-gradient(90deg, rgba(248,113,113,.14), rgba(248,113,113,.04)); }
 .banner { padding: 10px 14px; border-radius: 10px; margin-bottom: 12px; }
 .banner.bad { background: rgba(248,113,113,.12); border: 1px solid var(--bad); }
+.banner.warn { background: rgba(251,191,36,.12); border: 1px solid var(--warn); }
 .banner.update { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; background: linear-gradient(90deg, rgba(56,189,248,.16), rgba(99,102,241,.08)); border: 1px solid var(--accent); }
 .banner.update button { margin-left: auto; }
 
@@ -670,3 +671,24 @@ table.acc-table tr[data-account].leader td { background: linear-gradient(90deg, 
 .remote-url a { color: var(--accent); font-weight: 600; }
 .remote-url code { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
 @media (max-width: 520px) { .remote-grid { grid-template-columns: 1fr; justify-items: center; } }
+
+/* ---- Operar ---- */
+.trade-status { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; font-size: 12px; }
+.trade-status span { display: inline-flex; align-items: center; gap: 4px; }
+.ticket { display: flex; flex-direction: column; gap: 12px; }
+.ticket label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.ticket select, .ticket input { width: 100%; }
+.ticket-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+.ticket-row > label { flex: 1 1 180px; }
+.ticket-row.brackets > label { flex: 1 1 160px; }
+.ticket .qty { display: flex; align-items: center; gap: 6px; } .ticket .qty input { width: 70px; text-align: center; font-weight: 700; font-size: 16px; }
+.ticket .px { display: flex; align-items: center; gap: 6px; } .ticket .px input { width: 120px; text-align: center; font-weight: 600; }
+.ticket-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.ticket-actions button { padding: 16px 12px; font-size: 16px; font-weight: 800; letter-spacing: .5px; border-radius: 12px; border: none; color: #04120b; }
+.ticket-actions .buy { background: var(--ok); } .ticket-actions .sell { background: var(--bad); color: #2a0a0a; }
+.ticket-actions button:disabled { opacity: .35; cursor: not-allowed; }
+.sent-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.sent { border: 1px solid var(--line); border-left: 4px solid var(--muted); border-radius: 10px; padding: 8px 10px; font-size: 13px; display: flex; flex-direction: column; gap: 4px; background: var(--panel-2); }
+.sent.accepted, .sent.filled { border-left-color: var(--ok); } .sent.unconfirmed, .sent.rejected { border-left-color: var(--bad); } .sent.sending { border-left-color: var(--accent); }
+.sent-state { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+table.trades .px { display: inline-flex; gap: 4px; align-items: center; }

@@ -318,8 +318,8 @@ Hay dos vías, y se pueden usar las dos a la vez (*Riesgo → Avisos al teléfon
 
 ## 5. Operativa diaria
 
-1. Abrir NinjaTrader y conectar la cuenta maestra y las seguidoras. Comprobar en el Output `Bridge v2.6 online`.
-2. Arrancar el engine (`run_engine.ps1`) si no está corriendo. En *Inicio*: modo `NinjaTrader · addon v2.6`, heartbeat
+1. Abrir NinjaTrader y conectar la cuenta maestra y las seguidoras. Comprobar en el Output `Bridge v2.7 online`.
+2. Arrancar el engine (`run_engine.ps1`) si no está corriendo. En *Inicio*: modo `NinjaTrader · addon v2.7`, heartbeat
    actualizándose, sin avisos rojos.
 3. En *Cuentas*: las seguidoras que deben copiar con el interruptor encendido y el badge *copiando*.
 4. Operar solo en la cuenta maestra. Todo (entrada, stop, take profit, modificaciones, cancelaciones) se copia.
@@ -328,6 +328,34 @@ Hay dos vías, y se pueden usar las dos a la vez (*Riesgo → Avisos al teléfon
    `FOLLOWER_FILL`. Las tarjetas de latencia y deslizamiento indican la calidad de la copia y el gráfico, cómo va el día.
 6. Al terminar: el cierre programado lo hace solo; si no lo usas, comprueba que todas las cuentas están planas antes del
    cierre del prop firm.
+
+### Operar desde cualquier sitio (pestaña Operar)
+
+Con la consola publicada (sección 3) puedes poner, modificar y cancelar órdenes y cerrar posiciones desde el teléfono o
+cualquier navegador, sin tocar NinjaTrader. Requiere el addon **v2.7 o superior** (recompílalo en NinjaTrader tras
+actualizar: NinjaScript Editor → F5).
+
+- **Nueva orden**: cuenta (la MAESTRA se copia a las seguidoras igual que si operaras en NinjaTrader; una seguidora, solo
+  a ella), instrumento (tal como aparece en NinjaTrader, p. ej. `NQ 12-26`), tipo (mercado, límite, stop, stop límite),
+  cantidad (máximo `MANUAL_MAX_QTY`, 20 por defecto), precio con botones ± tick y "último", y en las órdenes a mercado un
+  **stop y objetivo automáticos en ticks** que se crean como OCO en cuanto se ejecuta la entrada. *Pedir confirmación*
+  muestra un resumen antes de enviar (recomendado en el teléfono).
+- **Qué significa cada estado** en *Enviadas en esta sesión*: *enviando…* → *aceptada por NinjaTrader · N ms* (el addon la
+  ha recibido y enviado al bróker; en NinjaTrader la ves con nombre `TPM …`) → *ejecutada*. **NO CONFIRMADA** (rojo):
+  el engine o NinjaTrader no contestaron en el plazo. No repitas a ciegas: mira en NinjaTrader si entró y, si no, pulsa
+  *Reenviar (mismo id)*: cada orden lleva un identificador único y el addon ignora los repetidos, así que **nunca se
+  duplica**. *rechazada*: el motivo viene del engine (validación) o del bróker (margen, cuenta bloqueada, hora…).
+- **Posiciones**: *Cerrar* cierra solo ese instrumento con una orden a mercado contraria; *Cerrar cuenta* cancela todo y
+  cierra todas sus posiciones (lo mismo que en Riesgo). **Órdenes vivas**: *Precio* edita el nivel (± tick) y *Guardar* lo
+  manda; *Cancelar* la retira. Sirve también para los stops/objetivos de las copias y para órdenes puestas a mano.
+- **Latencias** (barra superior de Operar): *consola ↔ engine* (ida y vuelta del WebSocket; desde fuera de casa suele ser
+  50-200 ms), *engine ↔ NinjaTrader* (PING al addon, normalmente < 10 ms) y *última orden* (desde que el engine la manda
+  hasta que NinjaTrader la confirma). Verde/ámbar/rojo según el valor. El tramo lento es siempre el de Internet hasta tu
+  PC; de ahí a NinjaTrader y al bróker es el mismo camino que una orden puesta a mano en NinjaTrader.
+- **Bloqueos de seguridad**: sin conexión en vivo (WebSocket caído o más de 20 s sin datos), con el addon antiguo, con el
+  kill switch activo o con la cuenta pausada por riesgo, los botones COMPRAR/VENDER se desactivan y verás el motivo;
+  cerrar y cancelar siguen disponibles mientras haya conexión. Todo queda en Auditoría y, si lo activas en Avisos al
+  teléfono, los rechazos llegan por Telegram (`MANUAL_REJECTED`).
 
 ---
 
@@ -360,6 +388,9 @@ Hay dos vías, y se pueden usar las dos a la vez (*Riesgo → Avisos al teléfon
 | `SKIPPED` "Cierre del maestro no copiado" | La maestra cerró y la seguidora no tenía posición (ya estaba cerrada). Una salida nunca abre una posición nueva. | Nada. |
 | `NO_RULE` | Operación de la maestra sin regla que la copie. | Revisar el maestro de la regla o el filtro de símbolo. |
 | **Addon desactualizado** | El addon compilado es anterior al que exige el engine. | Paso 2 (actualizar y compilar). |
+| `MANUAL_ORDER` / `MANUAL_FILL` | Orden puesta desde la pestaña Operar: aceptada por NinjaTrader (con la latencia medida) / ejecutada por el bróker. | Nada; es el registro de lo que hiciste desde la consola. |
+| `MANUAL_REJECTED` ⛔ | Una orden desde Operar no pasó las validaciones del engine (cantidad, kill switch, cuenta pausada, addon antiguo) o el bróker la rechazó. | Lee el motivo en el mensaje; si fue "NO confirmada", comprueba en NinjaTrader antes de reenviar (el reenvío con el mismo id no duplica). |
+| `MANUAL_CANCEL` / `MANUAL_MODIFY` | Orden cancelada o modificada desde Operar. | Nada. |
 | `NEWS_SOON` 📰 | Faltan menos de 30 min para un dato económico vigilado; el aviso trae el análisis del impacto posible. | Lee el consejo: no abrir entradas justo antes, reducir tamaño o cerrar si el dato es de impacto alto. |
 | `NEWS_RESULT` 📊 | Se ha publicado el dato: real frente a previsión, análisis del resultado y reacción del precio. | Espera a que el mercado digiera el dato antes de copiar con tamaño normal; mira la pestaña Noticias para el detalle. |
 | `ENTRY_MISSED` | Una entrada límite con tolerancia no se llenó en el plazo y estaba configurada para cancelar. La seguidora no tiene esa operación. | Decidir si entrar a mano o subir la tolerancia / usar "a mercado lo que falte". |

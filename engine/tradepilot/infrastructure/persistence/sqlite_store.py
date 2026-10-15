@@ -281,6 +281,12 @@ class SQLiteStore:
             rows = self._conn.execute(sql + " ORDER BY closed_at", args).fetchall()
         return [dict(r) for r in rows]
 
+    def recent_symbols(self, day_from: str) -> list[str]:
+        """Instrumentos operados desde `day_from` (para el selector de la pestaña Operar)."""
+        with self._lock:
+            rows = self._conn.execute("SELECT symbol, COUNT(*) AS n FROM trades WHERE day >= ? GROUP BY symbol ORDER BY n DESC", (day_from,)).fetchall()
+        return [r["symbol"] for r in rows if r["symbol"]]
+
     def count_trades(self) -> int:
         with self._lock:
             return int(self._conn.execute("SELECT COUNT(*) FROM trades").fetchone()[0])

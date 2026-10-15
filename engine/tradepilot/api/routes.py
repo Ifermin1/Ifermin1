@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from tradepilot.api.auth import require_token
-from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams
+from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest
 from tradepilot.container import Container
 from tradepilot.domain.risk import RiskLimit, Schedule
 
@@ -288,6 +288,92 @@ def delete_cash(event_id: int, request: Request):
         raise HTTPException(404, "movimiento no encontrado")
     c.store.delete_cash_event(event_id)
     return None
+
+
+# ---- operativa manual (pestaña Operar) ----
+def _trade(c: Container):
+    if c.trade is None:
+        raise HTTPException(503, "operativa manual no disponible")
+    return c.trade
+
+
+@router.post("/trade/order")
+async def trade_order(body: ManualOrderRequest, request: Request):
+    """Orden manual en cualquier cuenta (en la maestra se replica a las seguidoras). Idempotente por `client_id`: reenviar la
+    misma petición devuelve el mismo resultado. 422 si no pasa las validaciones; 502 si NinjaTrader la rechaza o no confirma."""
+    c = _c(request)
+    try:
+        return await _trade(c).place(body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(502, str(exc))
+
+
+@router.post("/trade/cancel")
+async def trade_cancel(body: CancelOrderRequest, request: Request):
+    c = _c(request)
+    try:
+        return await _trade(c).cancel(body.account, body.order_id)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(502, str(exc))
+
+
+@router.post("/trade/modify")
+async def trade_modify(body: ModifyOrderRequest, request: Request):
+    c = _c(request)
+    try:
+        return await _trade(c).modify(body.account, body.order_id, body.quantity, body.limit_price, body.stop_price)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(502, str(exc))
+
+
+@router.post("/trade/close")
+async def trade_close(body: ClosePositionRequest, request: Request):
+    """Cierra solo la posición de ese instrumento con una orden a mercado contraria."""
+    c = _c(request)
+    try:
+        return await _trade(c).close_position(body.account, body.symbol, body.client_id)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(502, str(exc))
+
+
+@router.get("/trade/status")
+def trade_status(request: Request):
+    """Para la pestaña Operar: si se puede operar (addon, conexión, kill switch), límites y latencias medidas."""
+    c = _c(request)
+    t = _trade(c)
+    h = c.accounts.health()
+    reason = None
+    try:
+        t._check_addon()
+    except ValueError as exc:
+        reason = str(exc)
+    if reason is None and c.risk.kill_switch:
+        reason = "kill switch activo: solo cerrar"
+    from datetime import datetime, timedelta
+    hb = (datetime.now() - h.last_heartbeat).total_seconds() if h.last_heartbeat else None
+    symbols: list[str] = []
+    for a in c.accounts.all():
+        symbols += [p.symbol for p in a.open_positions] + [o.symbol for o in a.working_orders]
+    try:
+        symbols += c.store.recent_symbols((datetime.now() - timedelta(days=60)).strftime("%Y-%m-%d"))
+    except Exception:
+        pass
+    if c.settings.ENGINE_MODE != "ninja":
+        from tradepilot.infrastructure.brokers.mock import SYMBOLS
+        symbols += SYMBOLS
+    seen: set[str] = set()
+    symbols = [x for x in symbols if x and not (x in seen or seen.add(x))]
+    return {"ready": reason is None, "reason": reason, "max_qty": c.settings.MANUAL_MAX_QTY, "mode": c.settings.ENGINE_MODE, "symbols": symbols,
+            "addon_version": h.addon_version, "required_addon": c.settings.MANUAL_ADDON_VERSION, "ping_ms": h.ping_ms, "last_order_ms": h.last_order_ms,
+            "heartbeat_age_s": round(hb, 1) if hb is not None else None, "stats": t.stats, "master": h.master_account}
 
 
 @router.get("/news")

@@ -62,7 +62,10 @@ def create_app(container: Container | None = None) -> FastAPI:
             await ws.send_json({"topic": "broker.health", "data": container.accounts.health().model_dump(mode="json")})
             await ws.send_json({"topic": "risk.state", "data": container.risk.state().model_dump(mode="json")})
             while True:
-                await ws.receive_text()  # pings del cliente; ignoramos contenido
+                msg = await ws.receive_text()
+                if msg.startswith("ping:"):
+                    # la consola mide la ida y vuelta: devolvemos su marca de tiempo tal cual
+                    await ws.send_json({"topic": "pong", "data": {"t": msg[5:]}})
         except WebSocketDisconnect:
             pass
         finally:

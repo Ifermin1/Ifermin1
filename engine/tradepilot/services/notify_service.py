@@ -19,6 +19,8 @@ from tradepilot.infrastructure.persistence.sqlite_store import SQLiteStore
 # tipo -> (icono, título corto). Lo que no está aquí se manda con el tipo tal cual si el usuario lo activa.
 TITLES: dict[str, tuple[str, str]] = {
     "NEWS_SOON": ("📰", "Noticia a punto de salir"), "NEWS_RESULT": ("📊", "Dato publicado"),
+    "MANUAL_ORDER": ("🟢", "Orden desde la consola"), "MANUAL_FILL": ("✅", "Orden manual ejecutada"), "MANUAL_REJECTED": ("⛔", "Orden manual rechazada"),
+    "MANUAL_CANCEL": ("🚫", "Orden manual cancelada"), "MANUAL_MODIFY": ("✏️", "Orden manual modificada"),
     "DAILY_LOSS_LIMIT": ("🛑", "Límite de pérdida diaria"), "DAILY_LOSS_WARNING": ("⚠️", "Cerca del límite de pérdida"),
     "DAILY_PROFIT_TARGET": ("🎯", "Corte del día alcanzado"), "DAILY_PROFIT_WARNING": ("🟢", "Cerca del corte del día"),
     "PROFIT_GOAL": ("🏆", "Objetivo de la evaluación alcanzado"), "PROFIT_GOAL_WARNING": ("🟢", "Cerca del objetivo de la evaluación"),
@@ -35,7 +37,7 @@ TITLES: dict[str, tuple[str, str]] = {
 DEFAULT_EVENTS = ["DAILY_LOSS_LIMIT", "DAILY_LOSS_WARNING", "DAILY_PROFIT_TARGET", "DAILY_PROFIT_WARNING", "PROFIT_GOAL", "DRAWDOWN_LIMIT",
                   "DRAWDOWN_WARNING", "KILL_SWITCH_ON", "KILL_SWITCH_OFF", "KILL_SWITCH_PERSISTED", "FLATTEN", "SCHEDULED_FLATTEN", "NAKED_CLOSE",
                   "FOLLOWER_REJECTED", "ACCOUNT_LOCKED", "DESYNC", "OVERCLOSE_FIX", "ADDON_SILENT", "ADDON_DOWN", "ADDON_BACK",
-                  "ADDON_RESTART", "GAP", "ERROR", "ENTRY_MISSED", "NEWS_SOON", "NEWS_RESULT"]
+                  "ADDON_RESTART", "GAP", "ERROR", "ENTRY_MISSED", "NEWS_SOON", "NEWS_RESULT", "MANUAL_REJECTED"]
 
 
 class NotifyConfig(BaseModel):

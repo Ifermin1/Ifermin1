@@ -149,3 +149,37 @@ class AnalysisParams(BaseModel):
     short_seconds: int = Field(default=60, ge=1, le=3600) # límite de "operación corta"
     start_balance: float | None = Field(default=None, ge=0)   # saldo inicial de la cuenta; None = se deduce del primer saldo
     use_engine_commissions: bool = True                   # True: comisiones anotadas por el engine; False: contratos × commission_rt
+
+
+# ---- operativa manual (pestaña Operar) ----
+class ManualOrderRequest(BaseModel):
+    client_id: str = Field(min_length=4, max_length=48)      # lo genera la consola; repetirlo devuelve el mismo resultado (nunca duplica)
+    account: str
+    symbol: str
+    action: str                                              # BUY | SELL
+    quantity: int = Field(gt=0)
+    order_type: str = "MARKET"                               # MARKET | LIMIT | STOPMARKET | STOPLIMIT
+    limit_price: float = 0.0
+    stop_price: float = 0.0
+    sl_ticks: int = 0                                        # stop de protección automático (ticks desde el fill), solo a mercado
+    tp_ticks: int = 0                                        # objetivo automático (ticks desde el fill), solo a mercado
+    note: str = ""
+
+
+class CancelOrderRequest(BaseModel):
+    account: str
+    order_id: str
+
+
+class ModifyOrderRequest(BaseModel):
+    account: str
+    order_id: str
+    quantity: int = 0            # 0 = sin cambio
+    limit_price: float = 0.0     # 0 = sin cambio
+    stop_price: float = 0.0      # 0 = sin cambio
+
+
+class ClosePositionRequest(BaseModel):
+    client_id: str = Field(min_length=4, max_length=48)
+    account: str
+    symbol: str
