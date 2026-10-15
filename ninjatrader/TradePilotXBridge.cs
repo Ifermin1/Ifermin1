@@ -53,7 +53,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 {
     public class TradePilotXBridge : AddOnBase
     {
-        private const string BridgeVersion = "2.7";
+        private const string BridgeVersion = "2.8";
 
         // ---- configuración ------------------------------------------------
         private class BridgeConfig
@@ -1239,9 +1239,10 @@ namespace NinjaTrader.NinjaScript.AddOns
                 limit = limit > 0 ? instrument.MasterInstrument.RoundToTickSize(limit) : 0;
                 stop = stop > 0 ? instrument.MasterInstrument.RoundToTickSize(stop) : 0;
                 int sl = (int)Num(m, "sl_ticks"), tp = (int)Num(m, "tp_ticks");
+                string oco = Get(m, "oco");   // v2.8: Proteger crea stop y objetivo enlazados (una ejecuta, la otra se cancela)
                 AttachManual(account);
                 Order order = account.CreateOrder(instrument, action, type, OrderEntry.Manual, TimeInForce.Day,
-                    qty, limit, stop, string.Empty, "TPM " + id, Core.Globals.MaxDate, null);
+                    qty, limit, stop, oco ?? string.Empty, "TPM " + id, Core.Globals.MaxDate, null);
                 if (!manualOrders.TryAdd(id, order)) { Order again; manualOrders.TryGetValue(id, out again); return "OK|" + OrderKey(again ?? order) + "|dup"; }
                 if (sl > 0 || tp > 0) manualBrackets[id] = new Bracket { SlTicks = sl, TpTicks = tp };
                 account.Submit(new[] { order });

@@ -62,6 +62,10 @@ export type ManualOrder = { client_id: string; account: string; symbol: string; 
                             limit_price?: number; stop_price?: number; sl_ticks?: number; tp_ticks?: number; note?: string };
 export type ManualOrderResult = { client_id: string; order_id: string; status: string; detail: string; ms: number; account: string; symbol: string; action: string; quantity: number;
                                   order_type: string; at: string; duplicate?: boolean };
+export type ProtectRequest = { client_id: string; account: string; symbol: string; breakeven?: boolean; be_offset_ticks?: number; sl_price?: number; tp_price?: number; last_price?: number; force?: boolean };
+export type ProtectResult = { account: string; symbol: string; quantity: number; avg_price: number; ms: number;
+                              sl: { action: "created" | "modified" | "unchanged"; order_id: string; price: number; from?: number } | null;
+                              tp: { action: "created" | "modified" | "unchanged"; order_id: string; price: number; from?: number } | null };
 export type TradeStatus = { ready: boolean; reason: string | null; max_qty: number; mode: string; symbols: string[]; addon_version: string | null; required_addon: string; ping_ms: number | null;
                             last_order_ms: number | null; heartbeat_age_s: number | null; master: string | null;
                             stats: { orders: number; rejected: number; cancels: number; modifies: number; unconfirmed: number } };
@@ -158,6 +162,7 @@ export function makeClient(s: Session) {
     tradeCancel: (account: string, order_id: string) => req<{ ms: number; detail: string }>("/api/trade/cancel", { method: "POST", body: JSON.stringify({ account, order_id }) }),
     tradeModify: (account: string, order_id: string, quantity: number, limit_price: number, stop_price: number) =>
       req<{ ms: number; detail: string }>("/api/trade/modify", { method: "POST", body: JSON.stringify({ account, order_id, quantity, limit_price, stop_price }) }),
+    tradeProtect: (r: ProtectRequest) => req<ProtectResult>("/api/trade/protect", { method: "POST", body: JSON.stringify(r) }),
     tradeClose: (client_id: string, account: string, symbol: string) => req<ManualOrderResult>("/api/trade/close", { method: "POST", body: JSON.stringify({ client_id, account, symbol }) }),
     newsAlerts: () => req<NewsAlerts>("/api/news/alerts"),
     newsStats: (days = 90) => req<NewsStats>(`/api/news/stats?days=${days}`),

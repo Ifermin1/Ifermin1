@@ -88,3 +88,45 @@ async def test_manual_status_from_addon_is_audited(container):
 def test_zmq_parse_manual_helpers():
     from tradepilot.infrastructure.brokers.ninja_zmq import NinjaZmqBridge
     assert NinjaZmqBridge.parse_orders("Sim101|abc|c-1|BUY|NQ 12-26|1|0|LIMIT|20000|0|Working")[0][1].order_id == "abc"
+
+
+async def test_protect_breakeven_quick_exits_and_orphan_sweep(client: AsyncClient, container):
+    await client.put("/api/accounts/Sim102/link", json={"master_account": "Sim101", "multiplier": 1})
+    r = await client.post("/api/trade/order", json={"client_id": "c-prot-1", "account": "Sim101", "symbol": "NQ 12-26", "action": "BUY", "quantity": 2, "order_type": "MARKET"})
+    assert r.status_code == 200
+    await container.accounts.sync_once()
+    pv = (await client.get("/api/trade/protect?account=Sim101&symbol=NQ%2012-26")).json()
+    assert pv["quantity"] == 2 and pv["stops"] == [] and pv["targets"] == [] and pv["point_value"] == 20 and pv["tick"] == 0.25
+    avg = pv["avg_price"]
+    # stop que se dispararía al instante: rechazado salvo force
+    r = await client.post("/api/trade/protect", json={"client_id": "prot-1", "account": "Sim101", "symbol": "NQ 12-26", "sl_price": avg + 10, "last_price": avg + 2})
+    assert r.status_code == 422 and "al instante" in r.text
+    # stop y objetivo rápidos: se crean los dos enlazados en OCO
+    r = await client.post("/api/trade/protect", json={"client_id": "prot-2", "account": "Sim101", "symbol": "NQ 12-26", "sl_price": avg - 10, "tp_price": avg + 20, "last_price": avg + 2})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["sl"]["action"] == "created" and d["tp"]["action"] == "created" and d["sl"]["price"] == avg - 10 and d["tp"]["price"] == avg + 20
+    assert set(container.bridge.oco_groups.values()) == {"TPM-OCO-prot-2"}
+    await _settle(client)
+    copies = [o for o in container.bridge.sent_orders if o["account"] == "Sim102" and o["msg_type"] == "ORDER_PENDING"]
+    assert {o["order_type"] for o in copies} == {"STOPMARKET", "LIMIT"}                 # la seguidora copia las dos salidas
+    await container.accounts.sync_once()
+    # breakeven + 1 tick: modifica el stop existente (y la seguidora recibe ORDER_MODIFIED)
+    r = await client.post("/api/trade/protect", json={"client_id": "prot-3", "account": "Sim101", "symbol": "NQ 12-26", "breakeven": True, "be_offset_ticks": 1, "last_price": avg + 5})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["sl"]["action"] == "modified" and d["sl"]["price"] == avg + 0.25 and d["tp"] is None
+    await _settle(client)
+    assert any(o["account"] == "Sim102" and o["msg_type"] == "ORDER_MODIFIED" and o["stop_price"] == avg + 0.25 for o in container.bridge.sent_orders)
+    await container.accounts.sync_once()
+    pv = (await client.get("/api/trade/protect?account=Sim101&symbol=NQ%2012-26")).json()
+    assert pv["stops"][0]["stop_price"] == avg + 0.25 and pv["targets"][0]["limit_price"] == avg + 20
+    # la posición se cierra por fuera: las salidas creadas por Proteger se cancelan solas
+    container.bridge.positions[("Sim101", "NQ 12-26")] = 0
+    await container.accounts.sync_once()
+    await container.trade.sweep_orphans()
+    await container.accounts.sync_once()
+    assert next(a for a in container.accounts.all() if a.account_id == "Sim101").working_orders == []
+    types = [a.event_type for a in container.audit.recent(40)]
+    assert "MANUAL_PROTECT" in types and types.count("MANUAL_CANCEL") >= 2
+    assert container.trade.stats["orphans"] == 2

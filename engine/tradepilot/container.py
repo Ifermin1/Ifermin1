@@ -128,14 +128,15 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
             performance.seed_demo(list(getattr(bridge, "accounts", {}).keys()) or ["Sim101", "Sim102"], end_balances=getattr(bridge, "accounts", None))
         except Exception as exc:
             logger.warning(f"No se pudo generar el histórico de demostración: {exc}")
+    trade = TradeService(bridge, accounts, risk, audit, cfg)
+    replication.on_manual_status = trade.on_manual_status
+
     async def _after_sync() -> None:
         # independientes: un fallo en una vigilancia no debe apagar la otra
-        for name, fn in (("sincronización", sync.check), ("riesgo", risk.check)):
+        for name, fn in (("sincronización", sync.check), ("riesgo", risk.check), ("salidas huérfanas", trade.sweep_orphans)):
             try:
                 await fn()
             except Exception as exc:
                 logger.exception(f"Error en vigilancia de {name}: {exc}")
     accounts.after_sync = _after_sync
-    trade = TradeService(bridge, accounts, risk, audit, cfg)
-    replication.on_manual_status = trade.on_manual_status
     return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal, commissions, performance, notify, news, trade)

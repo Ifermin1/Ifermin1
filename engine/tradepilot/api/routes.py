@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from tradepilot.api.auth import require_token
-from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest
+from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest, ProtectRequest
 from tradepilot.container import Container
 from tradepilot.domain.risk import RiskLimit, Schedule
 
@@ -342,6 +342,28 @@ async def trade_close(body: ClosePositionRequest, request: Request):
         raise HTTPException(422, str(exc))
     except RuntimeError as exc:
         raise HTTPException(502, str(exc))
+
+
+@router.post("/trade/protect")
+async def trade_protect(body: ProtectRequest, request: Request):
+    """Stop a breakeven, o stop/objetivo a un precio: modifica las salidas vivas de la posición o las crea (en OCO si son nuevas las dos)."""
+    c = _c(request)
+    try:
+        return await _trade(c).protect(body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(502, str(exc))
+
+
+@router.get("/trade/protect")
+def trade_protect_preview(account: str, symbol: str, request: Request):
+    """Posición y sus salidas vivas (stops y objetivos) para el panel Proteger."""
+    c = _c(request)
+    try:
+        return _trade(c).protect_preview(account, symbol)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
 
 
 @router.get("/trade/status")

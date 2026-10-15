@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../lib/store";
-import type { ManualOrder, ManualOrderResult, TradeStatus } from "../lib/api";
+import type { ManualOrder, ManualOrderResult, TradeStatus, WorkingOrder } from "../lib/api";
 import { Card, Empty } from "../components/ui";
 import { Icon } from "../components/Icons";
-import { money, root, signedMoney, tickSize, pointValue } from "../lib/format";
+import { root, signedMoney, tickSize, pointValue } from "../lib/format";
+import { QuickAmount, ProtectPanel, ticksToText } from "../components/TradeHelpers";
 
 /* Operar: poner, modificar y cancelar órdenes y cerrar posiciones desde cualquier sitio.
  * Pensado para que un retraso nunca cueste dinero: cada orden lleva un id único (reenviarla nunca duplica), solo se marca
@@ -135,6 +136,12 @@ export function Trade() {
   };
 
   const positions = accounts.filter((a) => a.enabled).flatMap((a) => a.open_positions.filter((p) => p.quantity).map((p) => ({ ...p, account: a.account_id })));
+  const [protect, setProtect] = useState<string | null>(null);
+  const exitOrders = (acc: string, sym: string, q: number): { stops: WorkingOrder[]; targets: WorkingOrder[] } => {
+    const exitAction = q > 0 ? "SELL" : "BUY";
+    const own = (accounts.find((a) => a.account_id === acc)?.working_orders ?? []).filter((o) => o.symbol.toLowerCase() === sym.toLowerCase() && o.action.toUpperCase().startsWith(exitAction) && !/filled|cancelled|rejected/i.test(o.state));
+    return { stops: own.filter((o) => /^STOP/.test(o.order_type.toUpperCase())), targets: own.filter((o) => o.order_type.toUpperCase() === "LIMIT") };
+  };
   const orders = accounts.filter((a) => a.enabled).flatMap((a) => a.working_orders.map((o) => ({ ...o, account: a.account_id })));
   const livePnl = (sym: string, q: number, avg: number, fallback: number) => { const px = prices[root(sym)]?.last; const pv = pointValue(sym); return px && pv ? (px - avg) * q * pv : fallback; };
   const lat = (v: number | null | undefined) => (v === null || v === undefined ? "—" : `${Math.round(v)} ms`);
@@ -179,10 +186,10 @@ export function Trade() {
             </div>
             {(type === "LIMIT" || type === "STOPLIMIT") && <div className="ticket-row"><label>Precio límite<div className="px"><button className="chip-btn" onClick={() => bump(limit, -1, setLimit)}>−</button><input inputMode="decimal" value={limit} onChange={(e) => setLimit(e.target.value)} placeholder={last ? fmtPx(last, symbol) : ""} data-testid="t-limit" /><button className="chip-btn" onClick={() => bump(limit, 1, setLimit)}>+</button>{last && <button className="chip-btn" onClick={() => setLimit(fmtPx(last, symbol))}>último</button>}</div></label></div>}
             {(type === "STOPMARKET" || type === "STOPLIMIT") && <div className="ticket-row"><label>Precio del stop<div className="px"><button className="chip-btn" onClick={() => bump(stop, -1, setStop)}>−</button><input inputMode="decimal" value={stop} onChange={(e) => setStop(e.target.value)} placeholder={last ? fmtPx(last, symbol) : ""} data-testid="t-stop" /><button className="chip-btn" onClick={() => bump(stop, 1, setStop)}>+</button>{last && <button className="chip-btn" onClick={() => setStop(fmtPx(last, symbol))}>último</button>}</div></label></div>}
-            {type === "MARKET" && <div className="ticket-row brackets">
-              <label>Stop automático (ticks)<input inputMode="numeric" value={sl} onChange={(e) => setSl(e.target.value)} placeholder="0 = sin stop" data-testid="t-sl" /></label>
-              <label>Objetivo automático (ticks)<input inputMode="numeric" value={tp} onChange={(e) => setTp(e.target.value)} placeholder="0 = sin objetivo" data-testid="t-tp" /></label>
-              <span className="muted small">{sl || tp ? `1 tick = ${tick} puntos${pointValue(symbol) ? ` = ${money(tick * (pointValue(symbol) ?? 0))} por contrato` : ""}; se crean al ejecutarse la entrada (OCO)` : "se crean como OCO al ejecutarse la entrada"}</span>
+            {type === "MARKET" && <div className="brackets" data-testid="t-brackets">
+              <QuickAmount label="Stop automático" symbol={symbol} ticks={Number(sl) || 0} onChange={(t) => setSl(t ? String(t) : "")} testId="t-sl" tone="bad" />
+              <QuickAmount label="Objetivo automático" symbol={symbol} ticks={Number(tp) || 0} onChange={(t) => setTp(t ? String(t) : "")} testId="t-tp" tone="ok" riskTicks={Number(sl) || 0} />
+              <span className="muted small">{Number(sl) || Number(tp) ? `Por contrato: ${Number(sl) ? `riesgo ${ticksToText(Number(sl), symbol)}` : ""}${Number(sl) && Number(tp) ? " · " : ""}${Number(tp) ? `objetivo ${ticksToText(Number(tp), symbol)}` : ""}${Number(sl) && Number(tp) ? ` · ratio 1:${(Number(tp) / Number(sl)).toFixed(1)}` : ""} · ×${qty} contratos. Se crean como OCO al ejecutarse la entrada.` : "elige un importe rápido o escribe uno: se crean como OCO en cuanto se ejecute la entrada"}</span>
             </div>}
             <div className="muted small">{last ? `último ${symbol}: ${fmtPx(last, symbol)}` : "sin precio en vivo de este instrumento"}{account === master ? ` · la orden va a la MAESTRA y se replica a ${followersOf(account)} seguidoras` : account ? " · solo esta cuenta (las seguidoras no la copian)" : ""}</div>
             <div className="ticket-actions">
@@ -217,15 +224,21 @@ export function Trade() {
           {positions.length === 0 ? <Empty>Sin posiciones abiertas.</Empty> : (
             <div className="table-wrap"><table className="trades" data-testid="positions">
               <thead><tr><th>Cuenta</th><th>Instrumento</th><th className="num">Posición</th><th className="num">Precio medio</th><th className="num">P&L</th><th></th></tr></thead>
-              <tbody>{positions.map((p) => { const pnl = livePnl(p.symbol, p.quantity, p.avg_price, p.unrealized_pnl); return (
-                <tr key={p.account + p.symbol}>
+              <tbody>{positions.map((p) => { const pnl = livePnl(p.symbol, p.quantity, p.avg_price, p.unrealized_pnl); const key = p.account + "|" + p.symbol; const exits = exitOrders(p.account, p.symbol, p.quantity); return (
+                <Fragment key={key}>
+                <tr className={protect === key ? "sel" : ""} data-testid={`pos-${p.account}-${root(p.symbol)}`}>
                   <td>{p.account}{p.account === master && <span className="muted small"> · maestra</span>}</td><td>{p.symbol}</td>
-                  <td className={`num ${p.quantity > 0 ? "ok" : "bad"}`}>{p.quantity > 0 ? "Largo" : "Corto"} {Math.abs(p.quantity)}</td><td className="num">{fmtPx(p.avg_price, p.symbol)}</td>
+                  <td className={`num ${p.quantity > 0 ? "ok" : "bad"}`}>{p.quantity > 0 ? "Largo" : "Corto"} {Math.abs(p.quantity)}</td><td className="num">{fmtPx(p.avg_price, p.symbol)}<br /><span className="muted small">{exits.stops.length ? `stop ${fmtPx(exits.stops[0].stop_price, p.symbol)}` : "sin stop"} · {exits.targets.length ? `obj. ${fmtPx(exits.targets[0].limit_price, p.symbol)}` : "sin objetivo"}</span></td>
                   <td className={`num ${pnl > 0 ? "ok" : pnl < 0 ? "bad" : ""}`}>{signedMoney(pnl)}</td>
-                  <td className="num"><button className="chip-btn danger" disabled={!canClose || busy !== null} onClick={() => closePos(p.account, p.symbol, p.quantity)} data-testid={`close-${p.account}-${root(p.symbol)}`}>Cerrar</button> <button className="chip-btn" disabled={busy !== null} onClick={() => void flattenAcc(p.account)}>Cerrar cuenta</button></td>
-                </tr>); })}</tbody>
+                  <td className="num nowrap"><button className={`chip-btn ${protect === key ? "active" : ""}`} disabled={!canClose} onClick={() => setProtect(protect === key ? null : key)} data-testid={`protect-${p.account}-${root(p.symbol)}`}><Icon name="shield" size={12} /> Proteger</button> <button className="chip-btn danger" disabled={!canClose || busy !== null} onClick={() => closePos(p.account, p.symbol, p.quantity)} data-testid={`close-${p.account}-${root(p.symbol)}`}>Cerrar</button> <button className="chip-btn" disabled={busy !== null} onClick={() => void flattenAcc(p.account)}>Cerrar cuenta</button></td>
+                </tr>
+                </Fragment>); })}</tbody>
             </table></div>
           )}
+          {(() => { const sel = positions.find((p) => p.account + "|" + p.symbol === protect); if (!sel) return null; const exits = exitOrders(sel.account, sel.symbol, sel.quantity); return (
+            <ProtectPanel key={protect} client={client} account={sel.account} symbol={sel.symbol} quantity={sel.quantity} avg={sel.avg_price} last={prices[root(sel.symbol)]?.last ?? null} stops={exits.stops} targets={exits.targets}
+                          isMaster={sel.account === master} followers={followersOf(sel.account)} copying={!!master && sel.account !== master && rules.some((r) => r.enabled && r.follower_account.toLowerCase() === sel.account.toLowerCase())}
+                          disabled={!canClose || busy !== null} onDone={(m) => setMsg(m)} onClose={() => setProtect(null)} />); })()}
         </Card>
         <Card title={`Órdenes vivas · ${orders.length}`} icon="clock" right={<span className="muted small">stops, objetivos y entradas pendientes de todas las cuentas</span>}>
           {orders.length === 0 ? <Empty>Sin órdenes pendientes.</Empty> : (

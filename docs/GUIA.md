@@ -318,8 +318,8 @@ Hay dos vías, y se pueden usar las dos a la vez (*Riesgo → Avisos al teléfon
 
 ## 5. Operativa diaria
 
-1. Abrir NinjaTrader y conectar la cuenta maestra y las seguidoras. Comprobar en el Output `Bridge v2.7 online`.
-2. Arrancar el engine (`run_engine.ps1`) si no está corriendo. En *Inicio*: modo `NinjaTrader · addon v2.7`, heartbeat
+1. Abrir NinjaTrader y conectar la cuenta maestra y las seguidoras. Comprobar en el Output `Bridge v2.8 online`.
+2. Arrancar el engine (`run_engine.ps1`) si no está corriendo. En *Inicio*: modo `NinjaTrader · addon v2.8`, heartbeat
    actualizándose, sin avisos rojos.
 3. En *Cuentas*: las seguidoras que deben copiar con el interruptor encendido y el badge *copiando*.
 4. Operar solo en la cuenta maestra. Todo (entrada, stop, take profit, modificaciones, cancelaciones) se copia.
@@ -332,14 +332,28 @@ Hay dos vías, y se pueden usar las dos a la vez (*Riesgo → Avisos al teléfon
 ### Operar desde cualquier sitio (pestaña Operar)
 
 Con la consola publicada (sección 3) puedes poner, modificar y cancelar órdenes y cerrar posiciones desde el teléfono o
-cualquier navegador, sin tocar NinjaTrader. Requiere el addon **v2.7 o superior** (recompílalo en NinjaTrader tras
+cualquier navegador, sin tocar NinjaTrader. Requiere el addon **v2.7 o superior** (v2.8 para que el stop y el objetivo de
+*Proteger* queden enlazados en OCO; recompílalo en NinjaTrader tras
 actualizar: NinjaScript Editor → F5).
 
 - **Nueva orden**: cuenta (la MAESTRA se copia a las seguidoras igual que si operaras en NinjaTrader; una seguidora, solo
   a ella), instrumento (tal como aparece en NinjaTrader, p. ej. `NQ 12-26`), tipo (mercado, límite, stop, stop límite),
   cantidad (máximo `MANUAL_MAX_QTY`, 20 por defecto), precio con botones ± tick y "último", y en las órdenes a mercado un
-  **stop y objetivo automáticos en ticks** que se crean como OCO en cuanto se ejecuta la entrada. *Pedir confirmación*
-  muestra un resumen antes de enviar (recomendado en el teléfono).
+  **stop y objetivo automáticos** que se crean como OCO en cuanto se ejecuta la entrada. Se eligen con los **importes
+  rápidos**: botones de 100 en 100 hasta 1000 $ por contrato (o en puntos/ticks, cambiando la unidad), un valor libre, y
+  para el objetivo los botones *1R, 1.5R, 2R, 3R* (múltiplos del riesgo del stop). Debajo se ve siempre la equivalencia
+  (ticks = puntos = dólares) y el ratio. *Pedir confirmación* muestra un resumen antes de enviar (recomendado en el teléfono).
+- **Proteger una posición** (botón *Proteger* en cada fila de *Posiciones*): muestra la entrada, el último precio, el
+  stop y el objetivo actuales con su valor en dólares, y dos acciones:
+  - **Stop a breakeven**: mueve el stop al precio de entrada (o entrada +1/+2/+4 ticks a favor, para cubrir comisiones).
+    Si no hay stop lo crea. Si el precio está por debajo de la entrada (en un largo) avisa de que se cerraría al instante y
+    pide confirmación.
+  - **Stop / Objetivo rápidos**: los mismos botones de 100 en 100 $ (o puntos/ticks, o 1R-3R) medidos desde el precio de
+    entrada, con vista previa del precio resultante, los dólares totales de la posición y el ratio. *Aplicar* mueve los
+    que existan o crea los que falten (los dos nuevos a la vez van enlazados en OCO con addon ≥ 2.8).
+  En la **maestra** las copias de las seguidoras siguen el cambio (el addon publica la modificación y el engine la
+  replica). Si una salida creada por Proteger se queda sin posición (p. ej. cerraste a mano), el engine la cancela sola en
+  la siguiente sincronización para que no se convierta en una entrada nueva.
 - **Qué significa cada estado** en *Enviadas en esta sesión*: *enviando…* → *aceptada por NinjaTrader · N ms* (el addon la
   ha recibido y enviado al bróker; en NinjaTrader la ves con nombre `TPM …`) → *ejecutada*. **NO CONFIRMADA** (rojo):
   el engine o NinjaTrader no contestaron en el plazo. No repitas a ciegas: mira en NinjaTrader si entró y, si no, pulsa
@@ -390,7 +404,8 @@ actualizar: NinjaScript Editor → F5).
 | **Addon desactualizado** | El addon compilado es anterior al que exige el engine. | Paso 2 (actualizar y compilar). |
 | `MANUAL_ORDER` / `MANUAL_FILL` | Orden puesta desde la pestaña Operar: aceptada por NinjaTrader (con la latencia medida) / ejecutada por el bróker. | Nada; es el registro de lo que hiciste desde la consola. |
 | `MANUAL_REJECTED` ⛔ | Una orden desde Operar no pasó las validaciones del engine (cantidad, kill switch, cuenta pausada, addon antiguo) o el bróker la rechazó. | Lee el motivo en el mensaje; si fue "NO confirmada", comprueba en NinjaTrader antes de reenviar (el reenvío con el mismo id no duplica). |
-| `MANUAL_CANCEL` / `MANUAL_MODIFY` | Orden cancelada o modificada desde Operar. | Nada. |
+| `MANUAL_CANCEL` / `MANUAL_MODIFY` | Orden cancelada o modificada desde Operar (también "salida huérfana": un stop u objetivo creado por Proteger cuya posición ya no existe). | Nada. |
+| `MANUAL_PROTECT` | Breakeven o stop/objetivo aplicados desde Proteger, con los precios y los dólares por contrato. | Nada. |
 | `NEWS_SOON` 📰 | Faltan menos de 30 min para un dato económico vigilado; el aviso trae el análisis del impacto posible. | Lee el consejo: no abrir entradas justo antes, reducir tamaño o cerrar si el dato es de impacto alto. |
 | `NEWS_RESULT` 📊 | Se ha publicado el dato: real frente a previsión, análisis del resultado y reacción del precio. | Espera a que el mercado digiera el dato antes de copiar con tamaño normal; mira la pestaña Noticias para el detalle. |
 | `ENTRY_MISSED` | Una entrada límite con tolerancia no se llenó en el plazo y estaba configurada para cancelar. La seguidora no tiene esa operación. | Decidir si entrar a mano o subir la tolerancia / usar "a mercado lo que falte". |

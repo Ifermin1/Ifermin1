@@ -16,7 +16,7 @@ from datetime import datetime
 
 from loguru import logger
 
-from tradepilot.domain.symbols import tick_size
+from tradepilot.domain.symbols import point_value, tick_size
 
 ACTIONS = ("BUY", "SELL")
 TYPES = ("MARKET", "LIMIT", "STOPMARKET", "STOPLIMIT")
@@ -38,7 +38,8 @@ class TradeService:
         self.settings = settings
         self._done: OrderedDict[str, dict] = OrderedDict()     # client_id -> respuesta (idempotencia)
         self._inflight: set[str] = set()
-        self.stats = {"orders": 0, "rejected": 0, "cancels": 0, "modifies": 0, "unconfirmed": 0}
+        self.stats = {"orders": 0, "rejected": 0, "cancels": 0, "modifies": 0, "unconfirmed": 0, "protects": 0, "orphans": 0}
+        self._exits: dict[tuple[str, str], str] = {}     # (cuenta, orderKey) -> símbolo: salidas creadas por Proteger, para cancelarlas si la posición ya cerró
 
     # ---- comprobaciones ----
     def _check_addon(self) -> None:
@@ -98,9 +99,12 @@ class TradeService:
         cid = str(req.get("client_id", "")).strip()
         if not cid or len(cid) > 48 or not all(ch.isalnum() or ch in "-_" for ch in cid):
             raise ValueError("client_id inválido")
-        return {"id": cid, "account": account, "symbol": symbol, "action": action, "quantity": qty, "order_type": otype,
-                "limit_price": limit if otype in ("LIMIT", "STOPLIMIT") else 0.0, "stop_price": stop if otype in ("STOPMARKET", "STOPLIMIT") else 0.0,
-                "sl_ticks": sl, "tp_ticks": tp, "tick": tick_size(symbol), "note": str(req.get("note") or "")[:80]}
+        out = {"id": cid, "account": account, "symbol": symbol, "action": action, "quantity": qty, "order_type": otype,
+               "limit_price": limit if otype in ("LIMIT", "STOPLIMIT") else 0.0, "stop_price": stop if otype in ("STOPMARKET", "STOPLIMIT") else 0.0,
+               "sl_ticks": sl, "tp_ticks": tp, "tick": tick_size(symbol), "note": str(req.get("note") or "")[:80]}
+        if req.get("oco"):
+            out["oco"] = str(req["oco"])[:48]        # addon >= 2.8: las dos salidas de Proteger se enlazan (una ejecuta, la otra se cancela)
+        return out
 
     # ---- acciones ----
     def _remember(self, cid: str, result: dict) -> dict:
@@ -193,6 +197,129 @@ class TradeService:
             raise ValueError(f"{snap.account_id} no tiene posición en {symbol}")
         return await self.place({"client_id": client_id, "account": snap.account_id, "symbol": pos.symbol, "action": "SELL" if pos.quantity > 0 else "BUY",
                                  "quantity": abs(pos.quantity), "order_type": "MARKET", "closing": True, "note": "cierre de posición desde la consola"})
+
+    # ---- proteger una posición: stop a breakeven, stop y objetivo rápidos ----
+    @staticmethod
+    def _exit_orders(snap, symbol: str, qty: int) -> tuple[list, list]:
+        """Órdenes vivas que cierran esa posición: stops (StopMarket/StopLimit) y objetivos (Limit) del lado contrario."""
+        exit_action = "SELL" if qty > 0 else "BUY"
+        own = [o for o in snap.working_orders if o.symbol.lower() == symbol.lower() and o.action.upper().startswith(exit_action) and o.state.lower() not in ("filled", "cancelled", "rejected")]
+        return [o for o in own if o.order_type.upper() in ("STOPMARKET", "STOPLIMIT")], [o for o in own if o.order_type.upper() == "LIMIT"]
+
+    def protect_preview(self, account: str, symbol: str) -> dict:
+        snap = self.accounts.find(account)
+        if snap is None:
+            raise ValueError(f"cuenta desconocida: {account}")
+        pos = next((p for p in snap.open_positions if p.symbol.lower() == symbol.lower() and p.quantity), None)
+        if pos is None:
+            raise ValueError(f"{snap.account_id} no tiene posición en {symbol}")
+        stops, tps = self._exit_orders(snap, pos.symbol, pos.quantity)
+        return {"account": snap.account_id, "symbol": pos.symbol, "quantity": pos.quantity, "avg_price": pos.avg_price, "tick": tick_size(pos.symbol), "point_value": point_value(pos.symbol),
+                "stops": [o.model_dump() for o in stops], "targets": [o.model_dump() for o in tps]}
+
+    async def protect(self, req: dict) -> dict:
+        """Mueve (o crea) el stop y/o el objetivo de una posición. `breakeven` pone el stop en el precio medio ± `be_offset_ticks`;
+        si no, `sl_price` / `tp_price` (0 = no tocar). Con `last_price` el engine comprueba que el stop no se dispare al instante
+        (salvo `force`). Si existen órdenes de salida se modifican (en la maestra, las copias siguen); si no, se crean, y si
+        se crean las dos a la vez van enlazadas en OCO (addon >= 2.8)."""
+        self._check_addon()
+        acc = self._check_account(str(req.get("account", "")), closing=True)
+        snap = self.accounts.find(acc)
+        symbol = str(req.get("symbol", ""))
+        pos = next((p for p in snap.open_positions if p.symbol.lower() == symbol.lower() and p.quantity), None)
+        if pos is None:
+            raise ValueError(f"{acc} no tiene posición en {symbol}")
+        qty, long = abs(pos.quantity), pos.quantity > 0
+        tick = tick_size(pos.symbol)
+        rnd = lambda x: round(round(x / tick) * tick, 8)  # noqa: E731
+        sl_price = float(req.get("sl_price") or 0)
+        if req.get("breakeven"):
+            off = int(req.get("be_offset_ticks") or 0)
+            sl_price = rnd(pos.avg_price + (off if long else -off) * tick)
+        tp_price = float(req.get("tp_price") or 0)
+        if sl_price <= 0 and tp_price <= 0:
+            raise ValueError("indica stop, objetivo o breakeven")
+        last = float(req.get("last_price") or 0)
+        if sl_price > 0 and last > 0 and not req.get("force") and ((long and sl_price >= last) or (not long and sl_price <= last)):
+            raise ValueError(f"el stop en {sl_price:g} se dispararía al instante (último {last:g}); si quieres cerrar, usa Cerrar o confirma con force")
+        if tp_price > 0 and last > 0 and not req.get("force") and ((long and tp_price <= last) or (not long and tp_price >= last)):
+            raise ValueError(f"el objetivo en {tp_price:g} se ejecutaría al instante (último {last:g})")
+        if sl_price > 0 and tp_price > 0 and ((long and sl_price >= tp_price) or (not long and sl_price <= tp_price)):
+            raise ValueError("el stop y el objetivo están del mismo lado")
+        stops, tps = self._exit_orders(snap, pos.symbol, pos.quantity)
+        exit_action = "SELL" if long else "BUY"
+        cid = str(req.get("client_id") or "")
+        both_new = sl_price > 0 and tp_price > 0 and not stops and not tps
+        oco = f"TPM-OCO-{cid}" if both_new and cid else ""
+        t0 = time.monotonic()
+        out: dict = {"account": acc, "symbol": pos.symbol, "quantity": pos.quantity, "avg_price": pos.avg_price, "sl": None, "tp": None}
+        for kind, price, existing in (("sl", rnd(sl_price) if sl_price > 0 else 0, stops), ("tp", rnd(tp_price) if tp_price > 0 else 0, tps)):
+            if price <= 0:
+                continue
+            if existing:
+                o = existing[0]
+                cur = o.stop_price if kind == "sl" else o.limit_price
+                if abs(cur - price) < tick / 2 and o.quantity == qty:
+                    out[kind] = {"action": "unchanged", "order_id": o.order_id, "price": price}
+                    continue
+                reply = await self.bridge.modify_order(acc, o.order_id, qty, 0.0 if kind == "sl" else price, price if kind == "sl" else 0.0)
+                self.stats["modifies"] += 1
+                out[kind] = {"action": "modified", "order_id": o.order_id, "price": price, "from": cur, "detail": reply}
+                for extra in existing[1:]:   # más de un stop/objetivo para la misma posición: se igualan también
+                    try:
+                        await self.bridge.modify_order(acc, extra.order_id, extra.quantity, 0.0 if kind == "sl" else price, price if kind == "sl" else 0.0)
+                    except Exception as exc:
+                        logger.warning(f"Proteger {acc} {pos.symbol}: no se pudo mover {extra.order_id}: {exc}")
+            else:
+                order = self.validate({"client_id": f"{cid}-{kind}" if cid else f"p{int(time.time() * 1000)}-{kind}", "account": acc, "symbol": pos.symbol, "action": exit_action,
+                                       "quantity": qty, "order_type": "STOPMARKET" if kind == "sl" else "LIMIT", "stop_price": price if kind == "sl" else 0,
+                                       "limit_price": price if kind == "tp" else 0, "closing": True, "oco": oco, "note": "proteger"})
+                reply = await self.bridge.manual_order(order)
+                parts = reply.split("|")
+                oid = parts[1] if len(parts) > 1 else ""
+                if oid:
+                    self._exits[(acc, oid)] = pos.symbol
+                self.stats["orders"] += 1
+                out[kind] = {"action": "created", "order_id": oid, "price": price, "detail": reply}
+        ms = round((time.monotonic() - t0) * 1000)
+        out["ms"] = ms
+        self.bridge.health.last_order_ms = ms
+        self.stats["protects"] += 1
+        pv = point_value(pos.symbol)
+        txt = []
+        if out["sl"]:
+            txt.append(f"stop {out['sl']['action']} en {out['sl']['price']:g}" + (" (breakeven)" if req.get("breakeven") else "") + f" = {((out['sl']['price'] - pos.avg_price) * (1 if long else -1) * pv):+.0f} $/contrato")
+        if out["tp"]:
+            txt.append(f"objetivo {out['tp']['action']} en {out['tp']['price']:g} = {((out['tp']['price'] - pos.avg_price) * (1 if long else -1) * pv):+.0f} $/contrato")
+        master = (self.bridge.health.master_account or "").lower() == acc.lower()
+        self.audit.log("MANUAL_PROTECT", f"{acc}: {'largo' if long else 'corto'} {qty} {pos.symbol} @ {pos.avg_price:g}: " + "; ".join(txt) + f" ({ms} ms)"
+                       + (" · es la maestra: las copias siguen" if master else ""), target=acc, details={"request": req, "result": out})
+        return out
+
+    async def sweep_orphans(self) -> None:
+        """Tras cada sincronización: una salida creada por Proteger cuya posición ya no existe se cancela (si el addon no la
+        enlazó en OCO). Así un objetivo no se convierte en una entrada nueva cuando el stop ya cerró la posición."""
+        if not self._exits:
+            return
+        for (acc, oid), symbol in list(self._exits.items()):
+            snap = self.accounts.find(acc)
+            if snap is None:
+                self._exits.pop((acc, oid), None)
+                continue
+            alive = next((o for o in snap.working_orders if o.order_id == oid), None)
+            if alive is None:
+                self._exits.pop((acc, oid), None)
+                continue
+            if any(p.symbol.lower() == symbol.lower() and p.quantity for p in snap.open_positions):
+                continue
+            self._exits.pop((acc, oid), None)
+            try:
+                await self.bridge.cancel_order(acc, oid)
+                self.stats["orphans"] += 1
+                self.audit.log("MANUAL_CANCEL", f"{acc}: {alive.action} {alive.quantity} {symbol} {alive.order_type} cancelada: la posición ya está cerrada (salida huérfana)",
+                               target=acc, details={"order_id": oid})
+            except Exception as exc:
+                logger.warning(f"No se pudo cancelar la salida huérfana {oid} de {acc}: {exc}")
 
     def on_manual_status(self, data: dict) -> None:
         """MANUAL_STATUS del addon (v2.7): ciclo de vida de una orden manual en cualquier cuenta (aceptada, ejecutada, rechazada)."""

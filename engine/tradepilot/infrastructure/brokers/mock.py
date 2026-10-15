@@ -213,6 +213,9 @@ class MockBridge(BrokerBridge):
             wo = WorkingOrder(order_id=key, action=action, symbol=symbol, quantity=qty, order_type=otype,
                               limit_price=float(order.get("limit_price") or 0), stop_price=float(order.get("stop_price") or 0), state="Working")
             self.working_orders.append((account, wo))
+            if order.get("oco"):
+                self.oco_groups = getattr(self, "oco_groups", {})
+                self.oco_groups[key] = str(order["oco"])
             if is_master:
                 await self.bus.publish(TOPIC_MASTER_EVENT, {"msg_type": "ORDER_PENDING", "account": account, "action": action, "symbol": symbol, "quantity": qty,
                                                             "order_type": otype, "state": "Working", "order_id": key, "limit_price": wo.limit_price, "stop_price": wo.stop_price,

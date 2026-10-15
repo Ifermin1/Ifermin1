@@ -183,3 +183,15 @@ class ClosePositionRequest(BaseModel):
     client_id: str = Field(min_length=4, max_length=48)
     account: str
     symbol: str
+
+
+class ProtectRequest(BaseModel):
+    client_id: str = Field(min_length=4, max_length=40)
+    account: str
+    symbol: str
+    breakeven: bool = False
+    be_offset_ticks: int = Field(default=0, ge=-50, le=50)   # breakeven + N ticks a favor (cubre comisiones)
+    sl_price: float = 0.0                                    # 0 = no tocar
+    tp_price: float = 0.0
+    last_price: float = 0.0                                  # para comprobar que no se dispare al instante
+    force: bool = False
