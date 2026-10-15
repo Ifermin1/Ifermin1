@@ -142,7 +142,7 @@ export function Analysis() {
         </div>
       </Card>
       {error && <div className="banner bad">No se pudo cargar el análisis: {error}</div>}
-      {tab === "stats" && <StatsTab rows={rows} days={days} params={params} mode={mode} label={label} />}
+      {tab === "stats" && <StatsTab rows={rows} days={days} params={params} mode={mode} label={label} account={account} accounts={accountOptions} master={master} onAccount={setAccount} loading={!data} />}
       {tab === "duration" && <DurationTab rows={rows} risk={risk} params={params} mode={mode} label={label} />}
       {tab === "records" && <RecordsTab cash={cash} accounts={accountOptions} account={account} label={label} onChange={reload} />}
       {tab === "balance" && <BalanceTab days={days} rows={rows} cash={cash} params={params} account={account} label={label} />}
@@ -632,8 +632,16 @@ function CriteriaTab({ params, onSave, data, rows, account, label }: { params: A
 
 /* ================================ Estadísticas ================================ */
 const num = (x: number | null, d = 2, suffix = "") => (x === null ? "—" : x === Infinity ? "∞" : `${x.toLocaleString("es-ES", { minimumFractionDigits: d, maximumFractionDigits: d })}${suffix}`);
-function StatsTab({ rows, days, params, mode, label }: { rows: Row[]; days: AnalysisDay[]; params: AnalysisParams; mode: Mode; label: (id: string) => string }) {
+/** Etiqueta corta para ejes y chips: el alias si lo hay; si no, los últimos dígitos de un id largo (APEX11292400000**1291** → …1291). */
+const shortLabel = (label: (id: string) => string) => (id: string) => { const l = label(id); return l !== id || l.length <= 10 ? l : `…${l.slice(-4)}`; };
+
+function StatsTab({ rows, days, params, mode, label, account, accounts, master, onAccount, loading }: { rows: Row[]; days: AnalysisDay[]; params: AnalysisParams; mode: Mode; label: (id: string) => string;
+                    account: string; accounts: string[]; master: string | null; onAccount: (id: string) => void; loading: boolean }) {
   const trades: TradeLike[] = useMemo(() => rows.map((r) => ({ ...r.t, commissions: r.fee })), [rows]);
+  const idx = accounts.indexOf(account);
+  const step = (d: number) => { if (!accounts.length) return; onAccount(account ? accounts[(idx + d + accounts.length) % accounts.length] : accounts[d > 0 ? 0 : accounts.length - 1]); };
+  const short = shortLabel(label);
+  const pick = (k: string) => { onAccount(k === account ? "" : k); window.scrollTo({ top: 0, behavior: "smooth" }); };
   const value = (t: TradeLike) => (mode === "gross" ? t.pnl : Math.round((t.pnl - t.commissions) * 100) / 100);
   const ts = useMemo(() => tradeStats(trades, value, params.be_tolerance), [trades, mode, params.be_tolerance]);   // eslint-disable-line react-hooks/exhaustive-deps
   const dayNet = useMemo(() => {
@@ -650,6 +658,19 @@ function StatsTab({ rows, days, params, mode, label }: { rows: Row[]; days: Anal
   const tone = (x: number) => (x > 0 ? "ok" : x < 0 ? "bad" : "muted");
   return (
     <>
+      <Card className="stats-picker-card">
+        <div className="stats-picker" data-testid="stats-picker">
+          <span className="muted small">Estadísticas de</span>
+          <button className="chip-btn" onClick={() => step(-1)} aria-label="Cuenta anterior" disabled={!accounts.length}>‹</button>
+          <select value={account} onChange={(e) => onAccount(e.target.value)} data-testid="stats-account">
+            <option value="">Todas las cuentas</option>
+            {accounts.map((id) => <option key={id} value={id}>{label(id)}{id === master ? " · maestra" : ""}</option>)}
+          </select>
+          <button className="chip-btn" onClick={() => step(1)} aria-label="Cuenta siguiente" disabled={!accounts.length}>›</button>
+          {account && <button className="chip-btn" onClick={() => onAccount("")}>Ver todas</button>}
+          <span className="muted small">{loading ? "calculando…" : account ? `${ts.n} operaciones de ${label(account)}${account === master ? " (maestra)" : ""} en el periodo` : `${ts.n} operaciones de ${accounts.length} cuentas · pulsa una cuenta en "Por cuenta" para ver solo la suya`}</span>
+        </div>
+      </Card>
       <div className="kpis an-kpis stats-kpis" data-testid="stats-kpis">
         <Kpi label={`Resultado ${modeLabel}`} icon="wallet" value={dollars(mode === "gross" ? ts.gross : ts.net)} tone={tone(mode === "gross" ? ts.gross : ts.net)} sub={`${ts.n} operaciones · ${ds.n} jornadas`} />
         <Kpi label="Aciertos" icon="target" value={ts.winRate === null ? "—" : `${Math.round(ts.winRate * 100)} %`} ring={ts.winRate === null ? null : ts.winRate * 100} tone={ts.winRate === null ? "muted" : ts.winRate >= 0.5 ? "ok" : "warn"} sub={`${ts.wins} ganadoras · ${ts.losses} perdedoras · ${ts.be} BE`} />
@@ -691,21 +712,22 @@ function StatsTab({ rows, days, params, mode, label }: { rows: Row[]; days: Anal
           <SignedBars data={[...bySymbol(trades, value), ...bySide(trades, value)]} height={160} testId="symbol-chart" />
           <BucketTable data={[...bySymbol(trades, value), ...bySide(trades, value)]} />
         </Card>
-        <Card title="Por cuenta" icon="users">
-          <SignedBars data={byAccount(trades, value).map((b) => ({ ...b, label: label(b.key) }))} height={160} testId="account-chart" />
-          <BucketTable data={byAccount(trades, value).map((b) => ({ ...b, label: label(b.key) }))} />
+        <Card title="Por cuenta" icon="users" right={<span className="muted small">{account ? "solo la cuenta elegida" : "pulsa una cuenta para ver sus estadísticas"}</span>}>
+          <SignedBars data={byAccount(trades, value).map((b) => ({ ...b, label: short(b.key) }))} height={160} testId="account-chart" onSelect={pick} selected={account || null} />
+          <BucketTable data={byAccount(trades, value).map((b) => ({ ...b, label: label(b.key) }))} onSelect={pick} selected={account || null} />
+          {account && <button className="chip-btn" style={{ marginTop: 8 }} onClick={() => onAccount("")}>Ver todas las cuentas</button>}
         </Card>
       </div>
       <p className="muted small">Definiciones: factor de beneficio = suma de ganancias ÷ suma de pérdidas. Esperanza = resultado medio por operación; en R, dividido por la pérdida media. Kelly = aciertos − (1 − aciertos) ÷ ratio ganancia/pérdida (fracción teórica de riesgo; úsalo como referencia, no como regla). Sharpe y Sortino = media diaria ÷ desviación (total o solo de los días negativos) × √252. Calmar = resultado anualizado ÷ drawdown máximo. Drawdown máximo = mayor caída de la curva acumulada desde su máximo en el periodo.</p>
     </>
   );
 }
-function BucketTable({ data }: { data: { key: string; label: string; n: number; net: number; winRate: number | null }[] }) {
+function BucketTable({ data, onSelect, selected }: { data: { key: string; label: string; n: number; net: number; winRate: number | null }[]; onSelect?: (key: string) => void; selected?: string | null }) {
   if (!data.length) return null;
   return (
-    <div className="table-wrap"><table className="trades an-table bucket-table">
+    <div className="table-wrap"><table className={`trades an-table bucket-table ${onSelect ? "clickable" : ""}`}>
       <thead><tr><th>Grupo</th><th className="num">Operaciones</th><th className="num">Aciertos</th><th className="num">Resultado</th><th className="num">Media</th></tr></thead>
-      <tbody>{data.map((b) => <tr key={b.key}><td>{b.label}</td><td className="num">{b.n}</td><td className="num">{b.winRate === null ? "—" : `${Math.round(b.winRate * 100)} %`}</td><td className={`num ${b.net > 0 ? "ok" : b.net < 0 ? "bad" : ""}`}>{dollars(b.net)}</td><td className="num">{b.n ? dollars(b.net / b.n) : "—"}</td></tr>)}</tbody>
+      <tbody>{data.map((b) => <tr key={b.key} className={selected === b.key ? "sel" : ""} onClick={onSelect ? () => onSelect(b.key) : undefined} data-testid={onSelect ? `bucket-${b.key}` : undefined}><td>{b.label}</td><td className="num">{b.n}</td><td className="num">{b.winRate === null ? "—" : `${Math.round(b.winRate * 100)} %`}</td><td className={`num ${b.net > 0 ? "ok" : b.net < 0 ? "bad" : ""}`}>{dollars(b.net)}</td><td className="num">{b.n ? dollars(b.net / b.n) : "—"}</td></tr>)}</tbody>
     </table></div>
   );
 }

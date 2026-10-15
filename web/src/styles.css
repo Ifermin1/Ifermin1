@@ -605,6 +605,11 @@ table.an-table tr.total td { border-top: 2px solid var(--line-2); }
 .chart-tip { position: absolute; pointer-events: none; background: var(--panel-3); border: 1px solid var(--line-2); border-radius: 10px; padding: 7px 10px; font-size: 12px; display: flex; flex-direction: column; gap: 2px; box-shadow: 0 10px 30px rgba(0,0,0,.35); z-index: 2; min-width: 150px; }
 .spark .zero { stroke: var(--line-2); } .spark path { fill: none; stroke-width: 1.8; } .spark path.ok { stroke: var(--ok); } .spark path.bad { stroke: var(--bad); }
 .bucket-table { margin-top: 8px; }
+.bucket-table.clickable tbody tr { cursor: pointer; } .bucket-table.clickable tbody tr:hover td { background: var(--hl); }
+.bucket-table tr.sel td { background: var(--hl); font-weight: 600; } .bucket-table tr.sel td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.chart .bar.sel { stroke: var(--accent); stroke-width: 2; }
+.stats-picker { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.stats-picker select { width: auto; min-width: 220px; padding: 8px 10px; font-weight: 600; }
 .stats-kpis.kpis { grid-template-columns: repeat(2, 1fr); }
 @media (min-width: 900px) { .stats-kpis.kpis { grid-template-columns: repeat(4, 1fr); } }
 /* avisos agrupados en Inicio */

@@ -23,7 +23,7 @@ export function Tip({ x, y, w, children }: { x: number; y: number; w: number; ch
 }
 
 /** Barras con signo por categoría (hora, día de la semana, símbolo, cuenta): neto por barra y aciertos en el pop-up. */
-export function SignedBars({ data, height = 180, label = "neto", testId, showN = true }: { data: Bucket[]; height?: number; label?: string; testId?: string; showN?: boolean }) {
+export function SignedBars({ data, height = 180, label = "neto", testId, showN = true, onSelect, selected }: { data: Bucket[]; height?: number; label?: string; testId?: string; showN?: boolean; onSelect?: (key: string) => void; selected?: string | null }) {
   const [box, W] = useWidth<HTMLDivElement>();
   const [hov, setHov] = useState<number | null>(null);
   const M = { l: 48, r: 8, t: 10, b: 24 }, H = height, iw = W - M.l - M.r, ih = H - M.t - M.b;
@@ -42,8 +42,8 @@ export function SignedBars({ data, height = 180, label = "neto", testId, showN =
         <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="chart" role="img" aria-label={`${label} por categoría`}>
           {niceTicks(lo, hi).map((v) => <g key={v}><line x1={M.l} x2={W - M.r} y1={y(v)} y2={y(v)} className={v === 0 ? "zero" : "grid"} /><text x={M.l - 6} y={y(v) + 4} textAnchor="end" className="tick">{Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(v % 1000 ? 1 : 0)}k` : v}</text></g>)}
           {data.map((d, i) => (
-            <g key={d.key} onPointerEnter={() => setHov(i)} onPointerLeave={() => setHov(null)}>
-              <rect x={x(i) - bw / 2} y={Math.min(y(0), y(d.net))} width={bw} height={Math.max(1, Math.abs(y(d.net) - y(0)))} rx={3} className={`bar ${d.net > 0 ? "pos" : d.net < 0 ? "neg" : "flat"} ${hov === i ? "hov" : ""}`} />
+            <g key={d.key} onPointerEnter={() => setHov(i)} onPointerLeave={() => setHov(null)} onClick={onSelect ? () => onSelect(d.key) : undefined} style={onSelect ? { cursor: "pointer" } : undefined}>
+              <rect x={x(i) - bw / 2} y={Math.min(y(0), y(d.net))} width={bw} height={Math.max(1, Math.abs(y(d.net) - y(0)))} rx={3} className={`bar ${d.net > 0 ? "pos" : d.net < 0 ? "neg" : "flat"} ${hov === i ? "hov" : ""} ${selected === d.key ? "sel" : ""}`} />
               <rect x={x(i) - (iw / Math.max(1, data.length)) / 2} y={M.t} width={iw / Math.max(1, data.length)} height={ih} fill="transparent" />
               {i % step === 0 && <text x={x(i)} y={H - 7} textAnchor="middle" className="tick">{d.label}</text>}
             </g>
