@@ -40,6 +40,13 @@ class Settings(BaseSettings):
     DRAWDOWN_EOD_TIME: str = "17:00"      # hora local (PC del engine) del cierre del día para el drawdown EOD (APEX/Topstep: 17:00 ET)
     AUDIT_ORDER_LIFECYCLE: bool = False   # auditar también los estados intermedios (Initialized, Submitted, Accepted...)
     MIN_ADDON_VERSION: str = "2.6"
+    # Calendario económico y análisis con IA (Claude). Sin ANTHROPIC_API_KEY los avisos llevan un análisis por reglas.
+    ANTHROPIC_API_KEY: str = ""
+    AI_MODEL: str = "claude-opus-5-5"
+    NEWS_REFRESH_SECONDS: int = 300       # cada cuánto se vuelve a descargar el calendario (y se detectan los datos publicados)
+    NEWS_ALERT_MINUTES: int = 30          # aviso (Inicio + Telegram) cuando falta menos de esto para una noticia
+    NEWS_COUNTRIES: str = "USD"           # países vigilados (USD,EUR,...); "" = todos
+    NEWS_MIN_IMPACT: str = "low"          # impacto mínimo vigilado: low | medium | high
     MOCK_DEMO_HISTORY: bool = True          # simulador: genera un mes de operaciones inventadas para el calendario (no en :memory:)
 
 

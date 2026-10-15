@@ -299,6 +299,41 @@ async def news(request: Request, days: int = 7, countries: str | None = None, mi
     return await c.news.get(days, [x for x in (countries or "").split(",") if x], min_impact)
 
 
+@router.get("/news/alerts")
+async def news_alerts(request: Request):
+    """Para Inicio: noticias vigiladas a punto de salir (con análisis previo), la siguiente y los últimos datos publicados."""
+    c = _c(request)
+    if c.news is None:
+        raise HTTPException(503, "calendario económico no disponible")
+    await c.news.refresh()
+    return c.news.alerts()
+
+
+@router.get("/news/stats")
+async def news_stats(request: Request, days: int = 90):
+    """Métricas: operaciones dentro de ±15 min de una noticia frente al resto, reacción media del precio y sorpresas."""
+    c = _c(request)
+    if c.news is None:
+        raise HTTPException(503, "calendario económico no disponible")
+    return c.news.stats(days)
+
+
+@router.post("/news/analyze/{event_id}")
+async def news_analyze(event_id: str, request: Request, kind: str = "pre", force: bool = False):
+    """Genera (o regenera con `force`) el análisis de un evento: `kind` = pre (impacto posible) | post (resultado)."""
+    c = _c(request)
+    if c.news is None:
+        raise HTTPException(503, "calendario económico no disponible")
+    if kind not in ("pre", "post"):
+        raise HTTPException(422, "kind debe ser pre o post")
+    e = c.news.find(event_id)
+    if e is None:
+        raise HTTPException(404, "evento no encontrado")
+    if kind == "post" and not e.get("actual"):
+        raise HTTPException(409, "el dato aún no se ha publicado")
+    return {"event": e, "analysis": await c.news.ensure_analysis(e, kind, force=force), "ai": c.news.ai.status()}
+
+
 @router.get("/stats/month")
 def stats_month(request: Request, month: str | None = None, account: str | None = None):
     """Calendario: días (P&L del bróker o suma de operaciones, comisiones, operaciones, aciertos) y operaciones del mes.

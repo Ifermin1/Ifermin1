@@ -175,7 +175,28 @@ Hay dos vías, y se pueden usar las dos a la vez (*Riesgo → Avisos al teléfon
   La pestaña **Noticias** (arriba, junto a *Rendimiento*) es el **calendario económico**: la semana en siete columnas con
   cada dato (hora local, impacto alto/medio/bajo, previsión, anterior y real), filtro de país e impacto, y el próximo
   evento de alto impacto con cuenta atrás; en *Inicio* aparece lo que queda hoy de impacto medio o alto. Los datos
-  vienen de ForexFactory a través del engine (el PC del engine necesita Internet); se actualizan cada 30 minutos.
+  vienen de ForexFactory a través del engine (el PC del engine necesita Internet) y se vuelven a descargar **cada 5
+  minutos** (`NEWS_REFRESH_SECONDS`), así el dato real aparece pocos minutos después de publicarse. Si ForexFactory no
+  tiene aún la semana siguiente no es un error: se muestra lo último descargado.
+  - **Avisos de noticias en Inicio y Telegram**: cuando faltan menos de 30 minutos (`NEWS_ALERT_MINUTES`) para un dato
+    vigilado (por defecto todos los de EE. UU.: `NEWS_COUNTRIES`, `NEWS_MIN_IMPACT`) sale un aviso 📰 en la tarjeta
+    *Avisos* con la hora, la cuenta atrás, previsión/anterior y un **análisis del impacto posible** (sesgo, movimiento
+    esperado y qué hacer con las cuentas); también se envía por Telegram (`NEWS_SOON`). Cuando se publica el dato llega
+    un segundo aviso 📊 (`NEWS_RESULT`) con el **análisis del resultado**: real frente a previsión, cómo lo leerá el
+    mercado y la **reacción del precio** medida con los ticks del addon (precio justo antes y 5/15/30 min después del
+    instrumento que opera la maestra).
+  - **Análisis con IA**: los análisis los hace Claude (modelo `AI_MODEL`, por defecto `claude-opus-5-5`) si pones tu
+    clave en `engine\.env` como `ANTHROPIC_API_KEY=sk-ant-…` y reinicias el engine. Sin clave el engine usa un análisis
+    por reglas (impacto, previsión y reacción) y la consola lo marca como *reglas* en vez de *IA*. Cada evento se analiza
+    una sola vez (se guarda); en el detalle del evento puedes pedir *volver a analizar*. La clave solo vive en el PC del
+    engine; cada análisis cuesta unos céntimos.
+  - **Detalle de un evento**: pulsa cualquier dato del calendario (o el "Próximo de alto impacto") para ver sus dos
+    análisis y la reacción del precio. El icono ✦ marca los que ya tienen análisis.
+  - **Métricas de noticias** (tarjeta debajo del calendario, 30/90/180/365 días): tus operaciones dentro de ±15 min de
+    un dato de impacto medio/alto frente al resto (operaciones, neto, acierto, media, factor de beneficio, y por dato),
+    la **reacción media del precio** por impacto (5/15/30 min, rango, máximo) y los datos que más mueven, y las
+    **sorpresas** (cuántas veces cada dato sale por encima/por debajo de la previsión y el desvío medio). Se van
+    acumulando con cada dato publicado que descarga el engine, así que las primeras semanas habrá pocos.
   El selector *Cuenta* filtra una sola cuenta. El P&L
   del día es el que reporta el bróker (NinjaTrader); las operaciones se reconstruyen con los fills que ve el engine
   (maestra, seguidoras y manuales), así que solo hay operaciones desde que el engine está en marcha. La sesión que abre a
@@ -339,6 +360,8 @@ Hay dos vías, y se pueden usar las dos a la vez (*Riesgo → Avisos al teléfon
 | `SKIPPED` "Cierre del maestro no copiado" | La maestra cerró y la seguidora no tenía posición (ya estaba cerrada). Una salida nunca abre una posición nueva. | Nada. |
 | `NO_RULE` | Operación de la maestra sin regla que la copie. | Revisar el maestro de la regla o el filtro de símbolo. |
 | **Addon desactualizado** | El addon compilado es anterior al que exige el engine. | Paso 2 (actualizar y compilar). |
+| `NEWS_SOON` 📰 | Faltan menos de 30 min para un dato económico vigilado; el aviso trae el análisis del impacto posible. | Lee el consejo: no abrir entradas justo antes, reducir tamaño o cerrar si el dato es de impacto alto. |
+| `NEWS_RESULT` 📊 | Se ha publicado el dato: real frente a previsión, análisis del resultado y reacción del precio. | Espera a que el mercado digiera el dato antes de copiar con tamaño normal; mira la pestaña Noticias para el detalle. |
 | `ENTRY_MISSED` | Una entrada límite con tolerancia no se llenó en el plazo y estaba configurada para cancelar. La seguidora no tiene esa operación. | Decidir si entrar a mano o subir la tolerancia / usar "a mercado lo que falte". |
 | `SKIPPED` "cierre de emergencia de la maestra" | Durante 20 s tras cerrar la maestra por emergencia, sus fills no se copian. | Nada; es la protección contra salidas dobles. |
 | `ENTRY_MODE_SET` | Alguien pulsó *Entrar al precio del maestro* o *Entrar a mercado* en *Inicio*: cambió el modo de entrada de todas las seguidoras. | Nada. Comprueba en *Cuentas → ⚙* si quieres afinar tolerancia o espera por cuenta. |

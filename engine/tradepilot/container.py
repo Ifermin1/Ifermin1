@@ -17,6 +17,7 @@ from tradepilot.services.commission_service import CommissionService
 from tradepilot.services.performance_service import PerformanceService
 from tradepilot.services.notify_service import NotifyService
 from tradepilot.services.news_service import NewsService
+from tradepilot.services.ai_service import AIService
 from tradepilot.services.sync_service import SyncService
 
 
@@ -41,7 +42,11 @@ class Container:
         await self.bridge.start()
         await self.replication.start()
         await self.accounts.start()
+        if self.news is not None:
+            await self.news.start()
         self.audit.log("ENGINE_START", f"Engine iniciado en modo {self.settings.ENGINE_MODE}")
+        if self.news is not None and not self.news.ai.enabled:
+            logger.info("Calendario: sin ANTHROPIC_API_KEY, los avisos de noticias llevan un análisis por reglas (pon la clave en engine/.env para usar la IA)")
         self.risk.warn_if_persisted()
         from tradepilot.api.routes import public_url, weak_token
         if weak_token(self.settings.API_TOKEN):
@@ -61,6 +66,8 @@ class Container:
             logger.warning("API_TOKEN sigue siendo el valor por defecto; cámbialo en engine/.env antes de exponer el engine")
 
     async def stop(self) -> None:
+        if self.news is not None:
+            await self.news.stop()
         await self.accounts.stop()
         await self.bridge.stop()
         self.journal.close()
@@ -107,7 +114,8 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
     replication.commissions = commissions
     risk.commissions = commissions
     notify = NotifyService(store, bus)
-    news = NewsService()
+    news = NewsService(ttl_s=max(60, cfg.NEWS_REFRESH_SECONDS), store=store, ai=AIService(cfg.ANTHROPIC_API_KEY, cfg.AI_MODEL), audit=audit, bus=bus,
+                       alert_minutes=cfg.NEWS_ALERT_MINUTES, countries=cfg.NEWS_COUNTRIES, min_impact=cfg.NEWS_MIN_IMPACT)
     if cfg.ENGINE_MODE != "ninja" and cfg.MOCK_DEMO_HISTORY:
         news.seed_demo()
     performance = PerformanceService(store, commissions, cfg.DRAWDOWN_EOD_TIME)

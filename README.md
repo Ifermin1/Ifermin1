@@ -98,6 +98,7 @@ Todo esto requiere el addon **v2.6** (el 2.5 y anteriores mandaban órdenes extr
 
 - **Inicio** es la sala de control: barra de estado con el P&L del día y el botón DETENER, gráfico de P&L por cuenta (muestras cada 15 s), y un panel por cuenta en juego con su posición, sus **stops y take profits vivos** (con distancia al mercado) y su último fill o rechazo.
 - **Vista compacta** (botón ▥) para ver más en el teléfono; en móvil la barra de estado queda fija sobre las pestañas.
+- **Calendario económico con IA**: pestaña *Noticias* (ForexFactory, se actualiza cada 5 min). Avisos en Inicio y Telegram 30 min antes de cada dato de EE. UU. con un análisis del impacto posible, y al publicarse el dato otro con el resultado y la reacción del precio (ticks del addon). Los hace Claude si pones `ANTHROPIC_API_KEY` en `engine\.env` (sin clave, análisis por reglas). Métricas: cómo te va operando en la noticia frente al resto, cuánto mueve cada dato y cuánto sorprende frente a la previsión.
 - **Auditoría** con búsqueda, filtro por cuenta y por familia (copia, bloqueos, errores, riesgo, sistema); *Copiar* y *.txt* exportan lo filtrado.
 
 ## Problemas comunes

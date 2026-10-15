@@ -73,6 +73,18 @@ class SQLiteStore:
                     id INTEGER PRIMARY KEY AUTOINCREMENT, account_id TEXT, day TEXT, kind TEXT, amount REAL, paid REAL,
                     status TEXT, note TEXT, created_at TEXT
                 );
+                CREATE TABLE IF NOT EXISTS news_events (
+                    id TEXT PRIMARY KEY, time TEXT, country TEXT, title TEXT, impact TEXT, forecast TEXT, previous TEXT,
+                    actual TEXT, actual_at TEXT, updated_at TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_news_time ON news_events(time);
+                CREATE TABLE IF NOT EXISTS news_analysis (
+                    event_id TEXT, kind TEXT, source TEXT, model TEXT, data TEXT, created_at TEXT, PRIMARY KEY (event_id, kind)
+                );
+                CREATE TABLE IF NOT EXISTS news_reaction (
+                    event_id TEXT, symbol TEXT, px_before REAL, px_5m REAL, px_15m REAL, px_30m REAL, high REAL, low REAL,
+                    updated_at TEXT, PRIMARY KEY (event_id, symbol)
+                );
                 """
             )
             # migraciones ligeras
@@ -371,6 +383,69 @@ class SQLiteStore:
     def prune_pnl_samples(self, before_iso: str) -> None:
         with self._lock, self._conn:
             self._conn.execute("DELETE FROM pnl_samples WHERE ts < ?", (before_iso,))
+
+    # ---- calendario económico: histórico de eventos, análisis y reacción del precio ----
+    def upsert_news_events(self, events: list[dict], now_iso: str) -> list[str]:
+        """Guarda/actualiza los eventos y devuelve los ids cuyo dato real (`actual`) acaba de aparecer."""
+        fresh: list[str] = []
+        with self._lock, self._conn:
+            for e in events:
+                row = self._conn.execute("SELECT actual FROM news_events WHERE id = ?", (e["id"],)).fetchone()
+                had = row["actual"] if row else None
+                actual_at = now_iso if e.get("actual") and not had else None
+                if e.get("actual") and not had:
+                    fresh.append(e["id"])
+                if row is None:
+                    self._conn.execute("INSERT INTO news_events VALUES (?,?,?,?,?,?,?,?,?,?)",
+                                       (e["id"], e["time"], e["country"], e["title"], e["impact"], e.get("forecast"), e.get("previous"),
+                                        e.get("actual"), actual_at, now_iso))
+                else:
+                    self._conn.execute("UPDATE news_events SET time=?, country=?, title=?, impact=?, forecast=?, previous=?, actual=?, "
+                                       "actual_at=COALESCE(actual_at, ?), updated_at=? WHERE id=?",
+                                       (e["time"], e["country"], e["title"], e["impact"], e.get("forecast"), e.get("previous"),
+                                        e.get("actual") or had, actual_at, now_iso, e["id"]))
+        return fresh
+
+    def get_news_events(self, from_iso: str, to_iso: str) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute("SELECT * FROM news_events WHERE time >= ? AND time <= ? ORDER BY time", (from_iso, to_iso)).fetchall()
+        return [dict(r) for r in rows]
+
+    def save_news_analysis(self, event_id: str, kind: str, source: str, model: str, data: dict, now_iso: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("INSERT OR REPLACE INTO news_analysis VALUES (?,?,?,?,?,?)",
+                               (event_id, kind, source, model, json.dumps(data, ensure_ascii=False), now_iso))
+
+    def get_news_analyses(self, event_ids: list[str] | None = None) -> list[dict]:
+        with self._lock:
+            if event_ids is None:
+                rows = self._conn.execute("SELECT * FROM news_analysis").fetchall()
+            else:
+                rows = []
+                ids = list(event_ids)
+                for k in range(0, len(ids), 500):
+                    chunk = ids[k:k + 500]
+                    rows += self._conn.execute(f"SELECT * FROM news_analysis WHERE event_id IN ({','.join('?' * len(chunk))})", chunk).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d["data"] = json.loads(d["data"] or "{}")
+            except ValueError:
+                d["data"] = {}
+            out.append(d)
+        return out
+
+    def upsert_news_reaction(self, event_id: str, symbol: str, r: dict, now_iso: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("INSERT OR REPLACE INTO news_reaction VALUES (?,?,?,?,?,?,?,?,?)",
+                               (event_id, symbol, r.get("px_before"), r.get("px_5m"), r.get("px_15m"), r.get("px_30m"), r.get("high"), r.get("low"), now_iso))
+
+    def get_news_reactions(self, from_iso: str, to_iso: str) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute("SELECT r.*, e.time, e.impact, e.title, e.country, e.forecast, e.actual FROM news_reaction r JOIN news_events e ON e.id = r.event_id "
+                                      "WHERE e.time >= ? AND e.time <= ? ORDER BY e.time", (from_iso, to_iso)).fetchall()
+        return [dict(r) for r in rows]
 
     def get_kv(self, key: str, default: str | None = None) -> str | None:
         with self._lock:

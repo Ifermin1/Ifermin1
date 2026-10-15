@@ -5,7 +5,7 @@ import { Card, Empty, Kpi } from "../components/ui";
 import { AccountPanel } from "../components/AccountPanel";
 import { PnlChart } from "../components/PnlChart";
 import { ExecutionQuality } from "../components/ExecutionQuality";
-import { NewsToday } from "../components/NewsPanel";
+import { NewsToday, analysisLine, useNewsAlerts } from "../components/NewsPanel";
 import { RecentStats } from "../components/RecentStats";
 import type { Route } from "../components/Shell";
 
@@ -31,8 +31,10 @@ export function Dashboard({ onRoute }: { onRoute?: (r: Route) => void } = {}) {
   const compact = density === "compact";
 
   // ---- avisos: una sola tarjeta con todo lo que requiere atención, agrupado y con las cuentas como chips ----
-  type Alert = { id: string; tone: "bad" | "warn" | "ok"; title: string; text: string; accounts?: string[]; go?: Route };
+  type Alert = { id: string; tone: "bad" | "warn" | "ok" | "info"; title: string; text: string; accounts?: string[]; go?: Route; sub?: string; news?: boolean };
   const alerts: Alert[] = [];
+  const newsAlerts = useNewsAlerts(client);
+  const goNews = () => { onRoute?.("performance"); window.location.hash = "performance/news"; };
   const halted = (why: string) => (risk?.limits ?? []).filter((l) => l.trading_halted && l.halted_reason === why).map((l) => l.account_id);
   if (risk?.kill_switch) alerts.push({ id: "kill", tone: "bad", title: `COPIA DETENIDA (kill switch)${risk.kill_switch_at ? ` desde ${new Date(risk.kill_switch_at).toLocaleString("es-ES", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}` : ""}`,
     text: `${risk.kill_switch_reason ? `${risk.kill_switch_reason}. ` : ""}Ninguna entrada se replica: cada operación de la maestra queda como BLOCKED y las seguidoras se desincronizan. Pulsa Reanudar en la barra de estado.` });
@@ -47,6 +49,21 @@ export function Dashboard({ onRoute }: { onRoute?: (r: Route) => void } = {}) {
   if (hot.length) alerts.push({ id: "hot", tone: "warn", title: "Drawdown al límite", text: "Cerca del suelo del prop firm: reduce o cierra antes de que el engine lo haga por ti.", accounts: hot.map((a) => `${a.alias || a.account_id} (${a.drawdown.pct!.toFixed(0)} %, quedan ${Math.round(a.drawdown.room ?? 0)} $)`), go: "accounts" });
   if (halted("daily_profit").length) alerts.push({ id: "cut", tone: "ok", title: "Corte del día hecho", text: "Ganancia asegurada: posición cerrada y sin copiar hasta mañana.", accounts: halted("daily_profit"), go: "risk" });
   if (halted("profit_goal").length) alerts.push({ id: "goal", tone: "ok", title: "Objetivo de la evaluación alcanzado", text: "Evaluación superada: cuenta cerrada y pausada. Para seguir operándola sube o quita el objetivo en Riesgo.", accounts: halted("profit_goal"), go: "risk" });
+  const IMP: Record<string, string> = { high: "alto", medium: "medio", low: "bajo" };
+  for (const u of newsAlerts?.upcoming ?? []) {
+    const e = u.event;
+    alerts.push({ id: `news-${e.id}`, tone: e.impact === "high" ? "bad" : e.impact === "medium" ? "warn" : "info", news: true,
+      title: `📰 ${e.title} · ${new Date(e.time).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit", hour12: false })} · ${u.minutes < 1 ? "ahora" : `en ${u.minutes} min`} · impacto ${IMP[e.impact] ?? e.impact}`,
+      sub: [e.forecast ? `previsión ${e.forecast}` : "", e.previous ? `anterior ${e.previous}` : "", u.analysis ? (u.analysis.source === "ia" ? `análisis IA · ${u.analysis.model}` : "análisis por reglas (sin ANTHROPIC_API_KEY)") : "preparando el análisis…"].filter(Boolean).join(" · "),
+      text: analysisLine(u.analysis) || "Noticia vigilada a punto de salir." });
+  }
+  for (const r of newsAlerts?.results ?? []) {
+    const e = r.event;
+    alerts.push({ id: `newsr-${e.id}`, tone: "info", news: true,
+      title: `📊 ${e.title}: real ${e.actual}${e.forecast ? ` (previsión ${e.forecast})` : ""}${r.surprise ? ` · ${r.surprise.tag === "mayor" ? "por encima" : r.surprise.tag === "menor" ? "por debajo" : "en línea"}` : ""} · hace ${-r.minutes} min`,
+      sub: [r.reaction ? `${r.reaction.symbol} ${r.reaction.px_before} → ${r.reaction.px_15m ?? r.reaction.px_5m ?? "…"}` : "sin ticks de precio", r.analysis ? (r.analysis.source === "ia" ? `análisis IA · ${r.analysis.model}` : "análisis por reglas") : "analizando…"].join(" · "),
+      text: analysisLine(r.analysis) || "Dato publicado; el análisis del resultado llega en unos segundos." });
+  }
   const [showAll, setShowAll] = useState<Record<string, boolean>>({});
 
   return (
@@ -60,10 +77,12 @@ export function Dashboard({ onRoute }: { onRoute?: (r: Route) => void } = {}) {
                 <li key={al.id} className={`alert ${al.tone}`} data-testid={`alert-${al.id}`}>
                   <div className="alert-main">
                     <b>{al.title}{list.length ? ` · ${list.length} ${list.length === 1 ? "cuenta" : "cuentas"}` : ""}</b>
-                    <span className="muted">{al.text}</span>
+                    {al.sub && <span className="muted small">{al.sub}</span>}
+                    <span className={al.news ? "" : "muted"}>{al.text}</span>
                     {list.length > 0 && <div className="chips">{shown.map((x) => <span key={x} className="chip">{x}</span>)}{list.length > 6 && <button className="link tiny" onClick={() => setShowAll({ ...showAll, [al.id]: !open })}>{open ? "ver menos" : `+${list.length - 6} más`}</button>}</div>}
                   </div>
                   {al.go && <button className="ghost small-btn" onClick={() => onRoute?.(al.go!)}>{al.go === "risk" ? "Ir a Riesgo" : "Ir a Cuentas"}</button>}
+                  {al.news && <button className="ghost small-btn" onClick={goNews}>Ver calendario</button>}
                 </li>
               );
             })}
@@ -113,7 +132,7 @@ export function Dashboard({ onRoute }: { onRoute?: (r: Route) => void } = {}) {
           <Card title="Últimos 30 días" icon="gauge" right={<span className="muted small">neto · mismas definiciones que Análisis</span>}>
             {client ? <RecentStats client={client} lastFillId={audit.find((a) => a.event_type === "FOLLOWER_FILL" || a.event_type === "ACCOUNT_FILL")?.id ?? null} onMore={() => onRoute?.("analysis")} /> : null}
           </Card>
-          <Card title="Noticias de hoy" icon="news" right={<span className="muted small">EE. UU. · impacto medio y alto</span>}>
+          <Card title="Noticias de hoy" icon="news" right={<span className="muted small">EE. UU. · impacto medio y alto{newsAlerts?.next ? ` · siguiente vigilada: ${newsAlerts.next.event.title} en ${newsAlerts.next.minutes < 60 ? `${newsAlerts.next.minutes} min` : `${Math.round(newsAlerts.next.minutes / 60)} h`}` : ""}</span>}>
             {client ? <NewsToday client={client} /> : null}
           </Card>
         </div>

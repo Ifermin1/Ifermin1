@@ -5,7 +5,7 @@ import { money, moneyShort, signedMoney } from "../lib/format";
 import { Card, Empty, Kpi } from "../components/ui";
 import { Icon } from "../components/Icons";
 import { ShareModal, type ShareData } from "../components/ShareCard";
-import { NewsPanel } from "../components/NewsPanel";
+import { NewsPanel, NewsStats } from "../components/NewsPanel";
 import { useThrottled } from "../lib/hooks";
 
 /* Calendario de rendimiento: un mes de un vistazo (P&L neto por día, operaciones, aciertos), indicadores del mes,
@@ -151,6 +151,9 @@ export function Performance() {
       <div className="grid" data-testid="performance">
         <Card title="Calendario económico" icon="news" right={<div className="view-tabs" data-testid="view-tabs"><button onClick={() => setView("perf")}>Rendimiento</button><button className="active">Noticias</button></div>}>
           <NewsPanel client={client} />
+        </Card>
+        <Card title="Métricas de noticias" icon="gauge" right={<span className="muted small">cómo te va en la noticia · cuánto mueve cada dato · sorpresas</span>}>
+          <NewsStats client={client} />
         </Card>
       </div>
     );

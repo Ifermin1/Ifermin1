@@ -60,7 +60,23 @@ export type NotifyConfig = Pick<NotifyState, "enabled" | "bot_token" | "chat_id"
 /** Calendario económico (ForexFactory vía el engine). */
 export type NewsEvent = { id: string; time: string; country: string; country_name: string; title: string; impact: "high" | "medium" | "low" | "holiday";
                           forecast: string | null; previous: string | null; actual: string | null };
-export type NewsFeed = { events: NewsEvent[]; fetched_at: number | null; error: string | null; countries: string[]; source: string };
+export type NewsAnalysis = { source: "ia" | "regla"; model: string; created_at: string;
+                             data: { summary?: string; bias?: string; move?: string; advice?: string; surprise?: string; confidence?: number } };
+export type NewsReaction = { symbol: string; px_before: number; px_5m: number | null; px_15m: number | null; px_30m: number | null; high: number | null; low: number | null };
+export type NewsSurprise = { actual: number; forecast: number; diff: number; rel: number | null; tag: "mayor" | "menor" | "en línea" };
+export type AiStatus = { enabled: boolean; model: string; last_error: string | null; calls: number };
+export type NewsFeed = { events: (NewsEvent & { watched: boolean })[]; fetched_at: number | null; error: string | null; countries: string[]; source: string; refresh_s: number;
+                         analyses: Record<string, { pre?: NewsAnalysis; post?: NewsAnalysis }>; reactions: Record<string, NewsReaction[]>; ai: AiStatus;
+                         watch: { countries: string[]; min_impact: string; alert_minutes: number } };
+export type NewsAlerts = { upcoming: { event: NewsEvent; minutes: number; analysis: NewsAnalysis | null }[]; next: { event: NewsEvent; minutes: number } | null;
+                           results: { event: NewsEvent; minutes: number; analysis: NewsAnalysis | null; reaction: NewsReaction | null; surprise: NewsSurprise | null }[];
+                           ai: AiStatus; window_min: number; countries: string[]; min_impact: string };
+export type NewsBucket = { n: number; net: number; wins: number; win_rate: number | null; avg: number | null; pf: number | null; gross_profit: number; gross_loss: number };
+export type NewsStats = { days: number; window_min: number; n_events: number; n_trades: number; trades: { near_high: NewsBucket; near_medium: NewsBucket; outside: NewsBucket };
+                          by_title: (NewsBucket & { title: string })[];
+                          reactions: Record<string, { n: number; avg_5m: number | null; avg_15m: number | null; avg_30m: number | null; avg_range: number | null; max_15m: number | null }>;
+                          movers: { title: string; n: number; avg_15m: number | null }[]; follows_surprise: { agree: number; disagree: number };
+                          surprises: { total: { n: number; mayor: number; menor: number; "en línea": number }; by_title: { title: string; n: number; beat: number; miss: number; inline: number; avg_abs_rel: number | null }[] } };
 
 /** Análisis (pestaña Análisis): operaciones y filas por día de un periodo, movimientos de caja y parámetros. */
 export type AnalysisDay = { day: string; trades: number; pnl_trades: number; pnl_broker: number | null; commissions: number; contracts: number;
@@ -128,6 +144,9 @@ export function makeClient(s: Session) {
     analysisParams: () => req<AnalysisParams>("/api/ui/analysis"),
     saveAnalysisParams: (p: AnalysisParams) => req<AnalysisParams>("/api/ui/analysis", { method: "PUT", body: JSON.stringify(p) }),
     news: (days = 7, countries = "", minImpact = "low") => req<NewsFeed>(`/api/news?days=${days}${countries ? `&countries=${encodeURIComponent(countries)}` : ""}&min_impact=${minImpact}`),
+    newsAlerts: () => req<NewsAlerts>("/api/news/alerts"),
+    newsStats: (days = 90) => req<NewsStats>(`/api/news/stats?days=${days}`),
+    newsAnalyze: (id: string, kind: "pre" | "post", force = false) => req<{ event: NewsEvent; analysis: NewsAnalysis; ai: AiStatus }>(`/api/news/analyze/${encodeURIComponent(id)}?kind=${kind}${force ? "&force=true" : ""}`, { method: "POST" }),
     /** Calendario: `month` = AAAA-MM; `account` vacío = todas. */
     month: (month: string, account = "") => req<MonthStats>(`/api/stats/month?month=${month}${account ? `&account=${encodeURIComponent(account)}` : ""}`),
     /** Mismo modo de entrada para todas las seguidoras de la maestra actual. */
