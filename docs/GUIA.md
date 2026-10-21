@@ -351,6 +351,12 @@ actualizar: NinjaScript Editor → F5).
   - **Stop / Objetivo rápidos**: los mismos botones de 100 en 100 $ (o puntos/ticks, o 1R-3R) medidos desde el precio de
     entrada, con vista previa del precio resultante, los dólares totales de la posición y el ratio. *Aplicar* mueve los
     que existan o crea los que falten (los dos nuevos a la vez van enlazados en OCO con addon ≥ 2.8).
+- **Mover stop y objetivo con ▲ ▼** (sin abrir nada): en cada fila de *Posiciones* el stop y el objetivo llevan sus
+  botones ▼ ▲, y también cada fila de *Órdenes vivas*. El **paso** (1, 2 o 4 ticks; 1, 2, 5, 10 o 25 puntos) se elige en
+  la cabecera de *Posiciones* y se recuerda. Varios toques seguidos se agrupan y se envía una sola modificación 0,4 s
+  después del último; el precio aparece en azul mientras viaja y la confirmación con su latencia sale debajo del ticket.
+  **Con el teclado**: pulsa una fila de *Órdenes vivas* para seleccionarla y usa `+` / `−` (o ▲ / ▼) para moverla,
+  `◀` / `▶` para cambiar el paso y `Esc` para soltarla.
   En la **maestra** las copias de las seguidoras siguen el cambio (el addon publica la modificación y el engine la
   replica). Si una salida creada por Proteger se queda sin posición (p. ej. cerraste a mano), el engine la cancela sola en
   la siguiente sincronización para que no se convierta en una entrada nueva.

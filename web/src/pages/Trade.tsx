@@ -4,7 +4,7 @@ import type { ManualOrder, ManualOrderResult, TradeStatus, WorkingOrder } from "
 import { Card, Empty } from "../components/ui";
 import { Icon } from "../components/Icons";
 import { root, signedMoney, tickSize, pointValue } from "../lib/format";
-import { QuickAmount, ProtectPanel, ticksToText } from "../components/TradeHelpers";
+import { QuickAmount, ProtectPanel, ticksToText, StepPicker, Nudger, useNudge, loadStep, saveStep, stepLabel, STEPS, type Nudgeable, type Step } from "../components/TradeHelpers";
 
 /* Operar: poner, modificar y cancelar órdenes y cerrar posiciones desde cualquier sitio.
  * Pensado para que un retraso nunca cueste dinero: cada orden lleva un id único (reenviarla nunca duplica), solo se marca
@@ -40,6 +40,9 @@ export function Trade() {
   const [msg, setMsg] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
   const [edit, setEdit] = useState<Record<string, string>>({});
+  const [step, setStepState] = useState<Step>(loadStep);
+  const setStep = (st: Step) => { setStepState(st); saveStep(st); };
+  const [selOrder, setSelOrder] = useState<string | null>(null);     // orden seleccionada para mover con el teclado
   const timers = useRef<Record<string, number>>({});
 
   useEffect(() => { const t = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(t); }, []);
@@ -143,6 +146,24 @@ export function Trade() {
     return { stops: own.filter((o) => /^STOP/.test(o.order_type.toUpperCase())), targets: own.filter((o) => o.order_type.toUpperCase() === "LIMIT") };
   };
   const orders = accounts.filter((a) => a.enabled).flatMap((a) => a.working_orders.map((o) => ({ ...o, account: a.account_id })));
+  const { nudge, shown } = useNudge(client!, step, (m) => setMsg(m));
+  const asNudge = (o: { account: string; order_id: string; symbol: string; order_type: string; quantity: number; stop_price: number; limit_price: number }): Nudgeable =>
+    ({ account: o.account, order_id: o.order_id, symbol: o.symbol, order_type: o.order_type, quantity: o.quantity, price: /^STOP/.test(o.order_type.toUpperCase()) ? o.stop_price : o.limit_price || o.stop_price });
+  // teclado: con una orden seleccionada, + / ▲ sube y − / ▼ baja un paso; ◀ ▶ cambian el paso; Esc quita la selección
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && /INPUT|SELECT|TEXTAREA/.test(t.tagName)) return;
+      if (e.key === "Escape") { setSelOrder(null); return; }
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight") { const i = STEPS.findIndex((x) => x.unit === step.unit && x.value === step.value); setStep(STEPS[(i + (e.key === "ArrowRight" ? 1 : STEPS.length - 1)) % STEPS.length]); e.preventDefault(); return; }
+      const dir = e.key === "+" || e.key === "ArrowUp" ? 1 : e.key === "-" || e.key === "ArrowDown" ? -1 : 0;
+      if (!dir || !selOrder || !canClose) return;
+      const o = orders.find((x) => x.order_id === selOrder);
+      if (o) { nudge(asNudge(o), dir); e.preventDefault(); }
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  });
   const livePnl = (sym: string, q: number, avg: number, fallback: number) => { const px = prices[root(sym)]?.last; const pv = pointValue(sym); return px && pv ? (px - avg) * q * pv : fallback; };
   const lat = (v: number | null | undefined) => (v === null || v === undefined ? "—" : `${Math.round(v)} ms`);
   const latTone = (v: number | null | undefined, warn: number, bad: number) => (v === null || v === undefined ? "muted" : v < warn ? "ok" : v < bad ? "warn" : "bad");
@@ -220,15 +241,19 @@ export function Trade() {
       </div>
 
       <div className="an-two">
-        <Card title={`Posiciones · ${positions.length}`} icon="layers" right={<span className="muted small">cerrar solo un instrumento, o toda la cuenta</span>}>
+        <Card title={`Posiciones · ${positions.length}`} icon="layers" right={<StepPicker step={step} onChange={setStep} />}>
           {positions.length === 0 ? <Empty>Sin posiciones abiertas.</Empty> : (
             <div className="table-wrap"><table className="trades" data-testid="positions">
-              <thead><tr><th>Cuenta</th><th>Instrumento</th><th className="num">Posición</th><th className="num">Precio medio</th><th className="num">P&L</th><th></th></tr></thead>
+              <thead><tr><th>Cuenta</th><th>Instrumento</th><th className="num">Posición</th><th className="num">Entrada</th><th>Stop · objetivo <span className="muted small">(▲▼ {stepLabel(step)})</span></th><th className="num">P&L</th><th></th></tr></thead>
               <tbody>{positions.map((p) => { const pnl = livePnl(p.symbol, p.quantity, p.avg_price, p.unrealized_pnl); const key = p.account + "|" + p.symbol; const exits = exitOrders(p.account, p.symbol, p.quantity); return (
                 <Fragment key={key}>
                 <tr className={protect === key ? "sel" : ""} data-testid={`pos-${p.account}-${root(p.symbol)}`}>
                   <td>{p.account}{p.account === master && <span className="muted small"> · maestra</span>}</td><td>{p.symbol}</td>
-                  <td className={`num ${p.quantity > 0 ? "ok" : "bad"}`}>{p.quantity > 0 ? "Largo" : "Corto"} {Math.abs(p.quantity)}</td><td className="num">{fmtPx(p.avg_price, p.symbol)}<br /><span className="muted small">{exits.stops.length ? `stop ${fmtPx(exits.stops[0].stop_price, p.symbol)}` : "sin stop"} · {exits.targets.length ? `obj. ${fmtPx(exits.targets[0].limit_price, p.symbol)}` : "sin objetivo"}</span></td>
+                  <td className={`num ${p.quantity > 0 ? "ok" : "bad"}`}>{p.quantity > 0 ? "Largo" : "Corto"} {Math.abs(p.quantity)}</td><td className="num">{fmtPx(p.avg_price, p.symbol)}</td>
+                  <td className="nowrap"><div className="nudge-cell">
+                    <Nudger label="stop" o={exits.stops[0] ? asNudge({ ...exits.stops[0], account: p.account }) : null} nudge={nudge} shown={shown} disabled={!canClose} step={step} testId={`nudge-sl-${p.account}-${root(p.symbol)}`} />
+                    <Nudger label="obj." o={exits.targets[0] ? asNudge({ ...exits.targets[0], account: p.account }) : null} nudge={nudge} shown={shown} disabled={!canClose} step={step} testId={`nudge-tp-${p.account}-${root(p.symbol)}`} />
+                  </div></td>
                   <td className={`num ${pnl > 0 ? "ok" : pnl < 0 ? "bad" : ""}`}>{signedMoney(pnl)}</td>
                   <td className="num nowrap"><button className={`chip-btn ${protect === key ? "active" : ""}`} disabled={!canClose} onClick={() => setProtect(protect === key ? null : key)} data-testid={`protect-${p.account}-${root(p.symbol)}`}><Icon name="shield" size={12} /> Proteger</button> <button className="chip-btn danger" disabled={!canClose || busy !== null} onClick={() => closePos(p.account, p.symbol, p.quantity)} data-testid={`close-${p.account}-${root(p.symbol)}`}>Cerrar</button> <button className="chip-btn" disabled={busy !== null} onClick={() => void flattenAcc(p.account)}>Cerrar cuenta</button></td>
                 </tr>
@@ -240,16 +265,16 @@ export function Trade() {
                           isMaster={sel.account === master} followers={followersOf(sel.account)} copying={!!master && sel.account !== master && rules.some((r) => r.enabled && r.follower_account.toLowerCase() === sel.account.toLowerCase())}
                           disabled={!canClose || busy !== null} onDone={(m) => setMsg(m)} onClose={() => setProtect(null)} />); })()}
         </Card>
-        <Card title={`Órdenes vivas · ${orders.length}`} icon="clock" right={<span className="muted small">stops, objetivos y entradas pendientes de todas las cuentas</span>}>
+        <Card title={`Órdenes vivas · ${orders.length}`} icon="clock" right={<span className="muted small">▲▼ mueven {stepLabel(step)} · pulsa una fila y usa + / − o las flechas{selOrder ? " · seleccionada" : ""}</span>}>
           {orders.length === 0 ? <Empty>Sin órdenes pendientes.</Empty> : (
             <div className="table-wrap"><table className="trades" data-testid="orders">
               <thead><tr><th>Cuenta</th><th>Orden</th><th className="num">Cant.</th><th className="num">Precio</th><th>Estado</th><th></th></tr></thead>
               <tbody>{orders.map((o) => { const price = o.order_type === "STOPMARKET" ? o.stop_price : o.limit_price || o.stop_price; const ed = edit[o.order_id]; return (
-                <tr key={o.account + o.order_id}>
+                <tr key={o.account + o.order_id} className={selOrder === o.order_id ? "sel" : ""} onClick={() => setSelOrder(o.order_id)} data-testid={`row-${o.order_id}`}>
                   <td>{o.account}{o.master_order_id ? <span className="muted small"> · copia</span> : ""}</td>
                   <td><b className={o.action.startsWith("BUY") ? "ok" : "bad"}>{o.action.startsWith("BUY") ? "Compra" : "Venta"}</b> {o.symbol} <span className="muted small">{TYPES.find((t) => t[0] === o.order_type)?.[1] ?? o.order_type}</span></td>
                   <td className="num">{o.filled ? `${o.filled}/` : ""}{o.quantity}</td>
-                  <td className="num">{ed !== undefined ? <span className="px"><button className="chip-btn" onClick={() => setEdit({ ...edit, [o.order_id]: fmtPx((Number(ed) || price) - tickSize(o.symbol), o.symbol) })}>−</button><input inputMode="decimal" value={ed} onChange={(e) => setEdit({ ...edit, [o.order_id]: e.target.value })} style={{ width: 90 }} /><button className="chip-btn" onClick={() => setEdit({ ...edit, [o.order_id]: fmtPx((Number(ed) || price) + tickSize(o.symbol), o.symbol) })}>+</button></span> : fmtPx(price, o.symbol)}</td>
+                  <td className="num">{ed !== undefined ? <span className="px"><button className="chip-btn" onClick={() => setEdit({ ...edit, [o.order_id]: fmtPx((Number(ed) || price) - tickSize(o.symbol), o.symbol) })}>−</button><input inputMode="decimal" value={ed} onChange={(e) => setEdit({ ...edit, [o.order_id]: e.target.value })} style={{ width: 90 }} /><button className="chip-btn" onClick={() => setEdit({ ...edit, [o.order_id]: fmtPx((Number(ed) || price) + tickSize(o.symbol), o.symbol) })}>+</button></span> : <Nudger o={asNudge(o)} nudge={nudge} shown={shown} disabled={!canClose} step={step} testId={`nudge-${o.order_id}`} />}</td>
                   <td><span className="muted small">{o.state}</span></td>
                   <td className="num nowrap">
                     {ed !== undefined ? <><button className="chip-btn" disabled={busy !== null} onClick={() => void modify(o.account, o.order_id, o.order_type, Number(ed))} data-testid={`save-${o.order_id}`}>Guardar</button> <button className="chip-btn" onClick={() => setEdit((e) => { const n = { ...e }; delete n[o.order_id]; return n; })}>✕</button></>

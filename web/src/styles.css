@@ -708,3 +708,11 @@ table.trades .px { display: inline-flex; gap: 4px; align-items: center; }
 .protect-preview { display: flex; gap: 12px; flex-wrap: wrap; font-size: 13px; font-weight: 600; }
 .chip-btn.be, .chip-btn.apply { align-self: flex-start; padding: 10px 14px; font-weight: 700; border-color: var(--accent); }
 table.trades tr.sel td { background: var(--hl); }
+.step-picker { display: inline-flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.step-picker .chip-btn { padding: 4px 8px; font-size: 11px; }
+.nudger { display: inline-flex; gap: 4px; align-items: center; }
+.nudger .chip-btn { padding: 4px 9px; font-size: 12px; line-height: 1; }
+.nudger b { min-width: 64px; text-align: center; font-variant-numeric: tabular-nums; }
+.nudger.moving b { color: var(--accent); }
+.nudge-cell { display: flex; flex-direction: column; gap: 4px; }
+table.trades tbody tr.sel td { background: var(--hl); box-shadow: inset 0 0 0 1px var(--accent); }

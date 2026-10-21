@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Client, WorkingOrder } from "../lib/api";
 import { money, pointValue, tickSize } from "../lib/format";
 import { Icon } from "./Icons";
@@ -126,5 +126,70 @@ export function ProtectPanel({ client, account, symbol, quantity, avg, last, sto
       {err && <div className="bad small">{err}</div>}
       <div className="muted small">Si existen stop u objetivo se mueven (y en la maestra las copias los siguen); si no existen se crean. Cuando se crean los dos a la vez van enlazados (OCO, addon ≥ 2.8); si la posición se cierra por otro camino, el engine cancela la salida que sobre.</div>
     </div>
+  );
+}
+
+/* ---- Mover stops y objetivos con ▲ ▼ o con el teclado (+ / −, flechas), en pasos de ticks o puntos ---- */
+export type Step = { unit: "ticks" | "pts"; value: number };
+const STEP_KEY = "tpx.trade.step";
+export const STEPS: Step[] = [{ unit: "ticks", value: 1 }, { unit: "ticks", value: 2 }, { unit: "ticks", value: 4 }, { unit: "pts", value: 1 }, { unit: "pts", value: 2 }, { unit: "pts", value: 5 }, { unit: "pts", value: 10 }, { unit: "pts", value: 25 }];
+export const stepLabel = (s: Step) => `${s.value} ${s.unit === "ticks" ? (s.value === 1 ? "tick" : "ticks") : (s.value === 1 ? "pt" : "pts")}`;
+export const stepPts = (s: Step, symbol: string) => (s.unit === "pts" ? s.value : s.value * tickSize(symbol));
+export const loadStep = (): Step => { try { const s = JSON.parse(localStorage.getItem(STEP_KEY) || ""); return STEPS.find((x) => x.unit === s.unit && x.value === s.value) ?? STEPS[2]; } catch { return STEPS[2]; } };
+export const saveStep = (s: Step) => { try { localStorage.setItem(STEP_KEY, JSON.stringify(s)); } catch { /* privado */ } };
+
+export function StepPicker({ step, onChange }: { step: Step; onChange: (s: Step) => void }) {
+  return (
+    <span className="step-picker" data-testid="step-picker">
+      <span className="muted small">paso</span>
+      {STEPS.map((s) => <button key={stepLabel(s)} className={`chip-btn ${s.unit === step.unit && s.value === step.value ? "active" : ""}`} onClick={() => onChange(s)}>{stepLabel(s)}</button>)}
+    </span>
+  );
+}
+
+export type Nudgeable = { account: string; order_id: string; symbol: string; order_type: string; price: number; quantity: number };
+type Pending = { price: number; timer: number; sent?: number };
+
+/** Mueve el precio de una orden con ▲/▼: el cambio se muestra al instante y se envía 400 ms después del último toque
+ *  (varios toques seguidos = una sola modificación). Devuelve el precio que se está mostrando/enviando. */
+export function useNudge(client: Client, step: Step, onMsg: (m: string) => void) {
+  const [pending, setPending] = useState<Record<string, Pending>>({});
+  const ref = useRef<Record<string, Pending>>({});
+  const flush = (o: Nudgeable, price: number) => {
+    const isStop = /^STOP/.test(o.order_type.toUpperCase());
+    client.tradeModify(o.account, o.order_id, 0, isStop ? 0 : price, isStop ? price : 0)
+      .then((r) => { onMsg(`${o.symbol}: ${isStop ? "stop" : "objetivo"} movido a ${fmtPx(price, o.symbol)} · ${r.ms} ms`); const cur = ref.current[o.order_id]; if (cur && cur.price === price) { cur.sent = Date.now(); setPending({ ...ref.current }); } })
+      .catch((ex) => { delete ref.current[o.order_id]; setPending({ ...ref.current }); onMsg(`No se pudo mover ${o.symbol}: ${(ex instanceof Error ? ex.message : String(ex)).replace(/^\d+:\s*/, "")}`); });
+  };
+  const nudge = (o: Nudgeable, dir: 1 | -1) => {
+    const tick = tickSize(o.symbol);
+    const base = ref.current[o.order_id]?.price ?? o.price;
+    const price = Math.round((base + dir * stepPts(step, o.symbol)) / tick) * tick;
+    const cur = ref.current[o.order_id];
+    if (cur) window.clearTimeout(cur.timer);
+    ref.current[o.order_id] = { price, timer: window.setTimeout(() => flush(o, price), 400) };
+    setPending({ ...ref.current });
+  };
+  /** Precio a mostrar: el pendiente mientras el bróker no lo refleje (o hasta 4 s tras confirmarse). */
+  const shown = (o: Nudgeable): { price: number; moving: boolean } => {
+    const p = pending[o.order_id];
+    if (!p) return { price: o.price, moving: false };
+    if (Math.abs(p.price - o.price) < tickSize(o.symbol) / 2 || (p.sent && Date.now() - p.sent > 4000)) { delete ref.current[o.order_id]; return { price: o.price, moving: false }; }
+    return { price: p.price, moving: !p.sent };
+  };
+  return { nudge, shown };
+}
+
+export function Nudger({ o, nudge, shown, disabled, step, testId, label }: { o: Nudgeable | null; nudge: (o: Nudgeable, dir: 1 | -1) => void; shown: (o: Nudgeable) => { price: number; moving: boolean }; disabled: boolean; step: Step; testId?: string; label?: string }) {
+  if (!o) return <span className="muted small">{label ? `${label}: —` : "—"}</span>;
+  const s = shown(o);
+  return (
+    <span className={`nudger ${s.moving ? "moving" : ""}`} data-testid={testId}>
+      {label && <span className="muted small">{label}</span>}
+      <button className="chip-btn" disabled={disabled} onClick={() => nudge(o, -1)} title={`bajar ${stepLabel(step)}`} aria-label="bajar">▼</button>
+      <b>{fmtPx(s.price, o.symbol)}</b>
+      <button className="chip-btn" disabled={disabled} onClick={() => nudge(o, 1)} title={`subir ${stepLabel(step)}`} aria-label="subir">▲</button>
+      {s.moving && <span className="muted tiny">enviando…</span>}
+    </span>
   );
 }
