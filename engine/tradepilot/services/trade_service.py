@@ -39,7 +39,8 @@ class TradeService:
         self._done: OrderedDict[str, dict] = OrderedDict()     # client_id -> respuesta (idempotencia)
         self._inflight: set[str] = set()
         self.stats = {"orders": 0, "rejected": 0, "cancels": 0, "modifies": 0, "unconfirmed": 0, "protects": 0, "orphans": 0}
-        self._exits: dict[tuple[str, str], str] = {}     # (cuenta, orderKey) -> símbolo: salidas creadas por Proteger, para cancelarlas si la posición ya cerró
+        self._exits: dict[tuple[str, str], str] = {}
+        self._cancelled_by_us: OrderedDict[str, float] = OrderedDict()   # orderKey -> cuándo: para no auditar dos veces la cancelación     # (cuenta, orderKey) -> símbolo: salidas creadas por Proteger, para cancelarlas si la posición ya cerró
 
     # ---- comprobaciones ----
     def _check_addon(self) -> None:
@@ -145,7 +146,7 @@ class TradeService:
         result = {"client_id": cid, "order_id": parts[1] if len(parts) > 1 else "", "status": parts[2] if len(parts) > 2 else "accepted",
                   "detail": reply, "ms": ms, "account": order["account"], "symbol": order["symbol"], "action": order["action"], "quantity": order["quantity"],
                   "order_type": order["order_type"], "at": datetime.now().astimezone().isoformat(timespec="milliseconds")}
-        price = f" @ {order['limit_price']:g}" if order["limit_price"] else (f" stop {order['stop_price']:g}" if order["stop_price"] else "")
+        price = f" @ {order['limit_price']:.10g}" if order["limit_price"] else (f" stop {order['stop_price']:.10g}" if order["stop_price"] else "")
         brackets = (f" · SL {order['sl_ticks']} ticks" if order["sl_ticks"] else "") + (f" · TP {order['tp_ticks']} ticks" if order["tp_ticks"] else "")
         master = (self.bridge.health.master_account or "").lower() == order["account"].lower()
         self.audit.log("MANUAL_ORDER", f"{order['account']}: {order['action']} {order['quantity']} {order['symbol']} {order['order_type']}{price}{brackets} "
@@ -164,6 +165,7 @@ class TradeService:
             raise RuntimeError(str(exc))
         ms = round((time.monotonic() - t0) * 1000)
         self.stats["cancels"] += 1
+        self._note_cancel(order_id)
         self.audit.log("MANUAL_CANCEL", f"{acc}: orden {order_id} cancelada desde la consola ({ms} ms)", target=acc, details={"order_id": order_id, "reply": reply, "ms": ms})
         return {"account": acc, "order_id": order_id, "detail": reply, "ms": ms}
 
@@ -241,9 +243,9 @@ class TradeService:
             raise ValueError("indica stop, objetivo o breakeven")
         last = float(req.get("last_price") or 0)
         if sl_price > 0 and last > 0 and not req.get("force") and ((long and sl_price >= last) or (not long and sl_price <= last)):
-            raise ValueError(f"el stop en {sl_price:g} se dispararía al instante (último {last:g}); si quieres cerrar, usa Cerrar o confirma con force")
+            raise ValueError(f"el stop en {sl_price:.10g} se dispararía al instante (último {last:.10g}); si quieres cerrar, usa Cerrar o confirma con force")
         if tp_price > 0 and last > 0 and not req.get("force") and ((long and tp_price <= last) or (not long and tp_price >= last)):
-            raise ValueError(f"el objetivo en {tp_price:g} se ejecutaría al instante (último {last:g})")
+            raise ValueError(f"el objetivo en {tp_price:.10g} se ejecutaría al instante (último {last:.10g})")
         if sl_price > 0 and tp_price > 0 and ((long and sl_price >= tp_price) or (not long and sl_price <= tp_price)):
             raise ValueError("el stop y el objetivo están del mismo lado")
         stops, tps = self._exit_orders(snap, pos.symbol, pos.quantity)
@@ -286,13 +288,14 @@ class TradeService:
         self.bridge.health.last_order_ms = ms
         self.stats["protects"] += 1
         pv = point_value(pos.symbol)
+        ES = {"created": "creado", "modified": "movido", "unchanged": "sin cambio"}
         txt = []
         if out["sl"]:
-            txt.append(f"stop {out['sl']['action']} en {out['sl']['price']:g}" + (" (breakeven)" if req.get("breakeven") else "") + f" = {((out['sl']['price'] - pos.avg_price) * (1 if long else -1) * pv):+.0f} $/contrato")
+            txt.append(f"stop {ES[out['sl']['action']]} en {out['sl']['price']:.10g}" + (" (breakeven)" if req.get("breakeven") else "") + f" = {((out['sl']['price'] - pos.avg_price) * (1 if long else -1) * pv):+.0f} $/contrato")
         if out["tp"]:
-            txt.append(f"objetivo {out['tp']['action']} en {out['tp']['price']:g} = {((out['tp']['price'] - pos.avg_price) * (1 if long else -1) * pv):+.0f} $/contrato")
+            txt.append(f"objetivo {ES[out['tp']['action']]} en {out['tp']['price']:.10g} = {((out['tp']['price'] - pos.avg_price) * (1 if long else -1) * pv):+.0f} $/contrato")
         master = (self.bridge.health.master_account or "").lower() == acc.lower()
-        self.audit.log("MANUAL_PROTECT", f"{acc}: {'largo' if long else 'corto'} {qty} {pos.symbol} @ {pos.avg_price:g}: " + "; ".join(txt) + f" ({ms} ms)"
+        self.audit.log("MANUAL_PROTECT", f"{acc}: {'largo' if long else 'corto'} {qty} {pos.symbol} @ {pos.avg_price:.10g}: " + "; ".join(txt) + f" ({ms} ms)"
                        + (" · es la maestra: las copias siguen" if master else ""), target=acc, details={"request": req, "result": out})
         return out
 
@@ -315,11 +318,17 @@ class TradeService:
             self._exits.pop((acc, oid), None)
             try:
                 await self.bridge.cancel_order(acc, oid)
+                self._note_cancel(oid)
                 self.stats["orphans"] += 1
                 self.audit.log("MANUAL_CANCEL", f"{acc}: {alive.action} {alive.quantity} {symbol} {alive.order_type} cancelada: la posición ya está cerrada (salida huérfana)",
                                target=acc, details={"order_id": oid})
             except Exception as exc:
                 logger.warning(f"No se pudo cancelar la salida huérfana {oid} de {acc}: {exc}")
+
+    def _note_cancel(self, order_id: str) -> None:
+        self._cancelled_by_us[order_id] = time.monotonic()
+        while len(self._cancelled_by_us) > 200:
+            self._cancelled_by_us.popitem(last=False)
 
     def on_manual_status(self, data: dict) -> None:
         """MANUAL_STATUS del addon (v2.7): ciclo de vida de una orden manual en cualquier cuenta (aceptada, ejecutada, rechazada)."""
@@ -334,6 +343,8 @@ class TradeService:
         elif state.lower() == "filled":
             self.audit.log("MANUAL_FILL", f"{acc}: {what} ejecutada @ {data.get('avg_price')}", target=acc, details=data)
         elif state.lower() == "cancelled":
-            self.audit.log("MANUAL_CANCEL", f"{acc}: {what} cancelada", target=acc, details=data)
+            if str(data.get("order_id") or "") in self._cancelled_by_us:
+                return    # ya auditada al pedirla desde la consola (o al cancelar una salida huérfana)
+            self.audit.log("MANUAL_CANCEL", f"{acc}: {what} cancelada (OCO, NinjaTrader o a mano)", target=acc, details=data)
         else:
             logger.debug(f"MANUAL_STATUS {acc} {what}: {state}")
