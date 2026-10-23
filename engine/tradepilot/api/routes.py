@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from tradepilot.api.auth import require_token
-from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest, ProtectRequest
+from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest, ProtectRequest, TrailRequest
 from tradepilot.container import Container
 from tradepilot.domain.risk import RiskLimit, Schedule
 
@@ -366,6 +366,42 @@ def trade_protect_preview(account: str, symbol: str, request: Request):
         raise HTTPException(422, str(exc))
 
 
+@router.post("/trade/trail")
+async def trade_trail(body: TrailRequest, request: Request):
+    """Activa (o reconfigura) el trailing stop de una posición: fixed (distancia fija), adaptive (k × ATR y volumen) o ai (Claude)."""
+    c = _c(request)
+    if c.trail is None:
+        raise HTTPException(503, "trailing no disponible")
+    try:
+        return await c.trail.start_trail(body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(502, str(exc))
+
+
+@router.delete("/trade/trail")
+async def trade_trail_stop(account: str, symbol: str, request: Request):
+    c = _c(request)
+    if c.trail is None:
+        raise HTTPException(503, "trailing no disponible")
+    t = await c.trail.stop_trail(account, symbol)
+    if t is None:
+        raise HTTPException(404, "esa posición no tiene trailing")
+    return t
+
+
+@router.get("/trade/trails")
+def trade_trails(request: Request):
+    """Trailings activos con su estado (stop actual, mejor precio, distancia en vigor, razón de la IA) y el mercado que ven."""
+    c = _c(request)
+    if c.trail is None:
+        raise HTTPException(503, "trailing no disponible")
+    trails = c.trail.list()
+    return {"trails": trails, "stats": c.trail.stats, "ai_interval_s": c.trail.ai_interval_s, "ai": c.news.ai.status() if c.news else None,
+            "market": {t["symbol"]: c.market.snapshot(t["symbol"]) for t in trails} if c.market else {}}
+
+
 @router.get("/trade/status")
 def trade_status(request: Request):
     """Para la pestaña Operar: si se puede operar (addon, conexión, kill switch), límites y latencias medidas."""
@@ -395,7 +431,8 @@ def trade_status(request: Request):
     symbols = [x for x in symbols if x and not (x in seen or seen.add(x))]
     return {"ready": reason is None, "reason": reason, "max_qty": c.settings.MANUAL_MAX_QTY, "mode": c.settings.ENGINE_MODE, "symbols": symbols,
             "addon_version": h.addon_version, "required_addon": c.settings.MANUAL_ADDON_VERSION, "ping_ms": h.ping_ms, "last_order_ms": h.last_order_ms,
-            "heartbeat_age_s": round(hb, 1) if hb is not None else None, "stats": t.stats, "master": h.master_account}
+            "heartbeat_age_s": round(hb, 1) if hb is not None else None, "stats": t.stats, "master": h.master_account,
+            "trails": len(c.trail.trails) if c.trail else 0, "ai_enabled": bool(c.news and c.news.ai.enabled)}
 
 
 @router.get("/news")

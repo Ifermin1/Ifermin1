@@ -318,8 +318,8 @@ Hay dos vías, y se pueden usar las dos a la vez (*Riesgo → Avisos al teléfon
 
 ## 5. Operativa diaria
 
-1. Abrir NinjaTrader y conectar la cuenta maestra y las seguidoras. Comprobar en el Output `Bridge v2.8 online`.
-2. Arrancar el engine (`run_engine.ps1`) si no está corriendo. En *Inicio*: modo `NinjaTrader · addon v2.8`, heartbeat
+1. Abrir NinjaTrader y conectar la cuenta maestra y las seguidoras. Comprobar en el Output `Bridge v2.9 online`.
+2. Arrancar el engine (`run_engine.ps1`) si no está corriendo. En *Inicio*: modo `NinjaTrader · addon v2.9`, heartbeat
    actualizándose, sin avisos rojos.
 3. En *Cuentas*: las seguidoras que deben copiar con el interruptor encendido y el badge *copiando*.
 4. Operar solo en la cuenta maestra. Todo (entrada, stop, take profit, modificaciones, cancelaciones) se copia.
@@ -351,6 +351,23 @@ actualizar: NinjaScript Editor → F5).
   - **Stop / Objetivo rápidos**: los mismos botones de 100 en 100 $ (o puntos/ticks, o 1R-3R) medidos desde el precio de
     entrada, con vista previa del precio resultante, los dólares totales de la posición y el ratio. *Aplicar* mueve los
     que existan o crea los que falten (los dos nuevos a la vez van enlazados en OCO con addon ≥ 2.8).
+- **Trailing stop** (dentro de *Proteger*): el stop sigue al precio solo, en tres modos:
+  - **Fijo**: a una distancia fija en ticks del mejor precio alcanzado; solo se mueve a favor.
+  - **Adaptativo**: la distancia es *k × ATR* de las velas de 1 minuto que el engine construye con los ticks del addon,
+    acotada entre un mínimo y un máximo; cuando el volumen del último minuto supera 1,5 veces la media (impulso) se
+    acerca un 25 %. Hasta tener velas suficientes (unos 3 minutos) usa la distancia fija. El volumen real por tick lo
+    manda el addon ≥ 2.9; con uno anterior se cuenta un contrato por tick (sirve igual como medida relativa).
+  - **IA**: cada minuto (`AI_TRAIL_INTERVAL_S`) Claude ve las últimas 30 velas, el ATR, el volumen, los máximos y mínimos
+    recientes, la entrada y el stop actual, y propone un stop con su razón (se muestra en el panel). El engine lo acota:
+    nunca más lejos que el adaptativo, nunca más cerca de `min` ticks del precio y nunca en contra; entre consultas
+    aplica el adaptativo. Necesita `ANTHROPIC_API_KEY`; `AI_TRAIL_MODEL` permite usar un modelo más rápido y barato
+    (p. ej. `claude-sonnet-5-5`) solo para esto.
+  Opciones comunes: *empezar a partir de* (no actúa hasta llevar ese beneficio), *asegurar breakeven a* (al llevar ese
+  beneficio el stop no vuelve a bajar de la entrada + 1 tick) y *paso mínimo* (cuánto debe mejorar para mandar una
+  modificación, para no saturar al bróker). Cada movimiento queda en Auditoría (`TRAIL_MOVE`, con la razón y los
+  dólares asegurados) y en la maestra las copias lo siguen. Si la posición desaparece, termina solo (`TRAIL_END`); con
+  *Detener* el stop se queda donde esté. El trailing sobrevive a un reinicio del engine. La fila de la posición muestra
+  la insignia *trailing* con el modo y la distancia en vigor.
 - **Mover stop y objetivo con ▲ ▼** (sin abrir nada): en cada fila de *Posiciones* el stop y el objetivo llevan sus
   botones ▼ ▲, y también cada fila de *Órdenes vivas*. El **paso** (1, 2 o 4 ticks; 1, 2, 5, 10 o 25 puntos) se elige en
   la cabecera de *Posiciones* y se recuerda. Varios toques seguidos se agrupan y se envía una sola modificación 0,4 s
@@ -415,6 +432,7 @@ actualizar: NinjaScript Editor → F5).
 | `MANUAL_REJECTED` ⛔ | Una orden desde Operar no pasó las validaciones del engine (cantidad, kill switch, cuenta pausada, addon antiguo) o el bróker la rechazó. | Lee el motivo en el mensaje; si fue "NO confirmada", comprueba en NinjaTrader antes de reenviar (el reenvío con el mismo id no duplica). |
 | `MANUAL_CANCEL` / `MANUAL_MODIFY` | Orden cancelada o modificada desde Operar (también "salida huérfana": un stop u objetivo creado por Proteger cuya posición ya no existe). | Nada. |
 | `MANUAL_PROTECT` | Breakeven o stop/objetivo aplicados desde Proteger, con los precios y los dólares por contrato. | Nada. |
+| `TRAIL_START` / `TRAIL_MOVE` / `TRAIL_END` | Trailing stop activado, stop movido (con la razón: distancia fija, k × ATR, volumen, IA, breakeven) o terminado. | Nada; si ves muchos `TRAIL_MOVE` seguidos sube el *paso mínimo*. |
 | `NEWS_SOON` 📰 | Faltan menos de 30 min para un dato económico vigilado; el aviso trae el análisis del impacto posible. | Lee el consejo: no abrir entradas justo antes, reducir tamaño o cerrar si el dato es de impacto alto. |
 | `NEWS_RESULT` 📊 | Se ha publicado el dato: real frente a previsión, análisis del resultado y reacción del precio. | Espera a que el mercado digiera el dato antes de copiar con tamaño normal; mira la pestaña Noticias para el detalle. |
 | `ENTRY_MISSED` | Una entrada límite con tolerancia no se llenó en el plazo y estaba configurada para cancelar. La seguidora no tiene esa operación. | Decidir si entrar a mano o subir la tolerancia / usar "a mercado lo que falte". |

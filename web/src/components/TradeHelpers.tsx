@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Client, WorkingOrder } from "../lib/api";
+import type { Client, Trail, TrailMode, WorkingOrder } from "../lib/api";
 import { money, pointValue, tickSize } from "../lib/format";
 import { Icon } from "./Icons";
 
@@ -56,9 +56,10 @@ export function QuickAmount({ label, symbol, ticks, onChange, testId, tone, risk
 }
 
 /** Panel Proteger de una posición: stop a breakeven, stop/objetivo rápidos desde el precio medio y vista previa. */
-export function ProtectPanel({ client, account, symbol, quantity, avg, last, stops, targets, isMaster, followers, copying, disabled, onDone, onClose, onSwitchToMaster }: {
+export function ProtectPanel({ client, account, symbol, quantity, avg, last, stops, targets, isMaster, followers, copying, disabled, onDone, onClose, onSwitchToMaster, trail, aiEnabled, market }: {
   client: Client; account: string; symbol: string; quantity: number; avg: number; last: number | null; stops: WorkingOrder[]; targets: WorkingOrder[];
-  isMaster: boolean; followers: number; copying: boolean; disabled: boolean; onDone: (msg: string) => void; onClose?: () => void; onSwitchToMaster?: () => void }) {
+  isMaster: boolean; followers: number; copying: boolean; disabled: boolean; onDone: (msg: string) => void; onClose?: () => void; onSwitchToMaster?: () => void;
+  trail?: Trail | null; aiEnabled?: boolean; market?: { atr_ticks: number | null; volume_ratio: number | null; bars: number } | null }) {
   const long = quantity > 0, n = Math.abs(quantity), tick = tickSize(symbol), pv = pointValue(symbol);
   const [slTicks, setSlTicks] = useState(0);
   const [tpTicks, setTpTicks] = useState(0);
@@ -124,6 +125,7 @@ export function ProtectPanel({ client, account, symbol, quantity, avg, last, sto
           </button>
         </div>
       </div>
+      <TrailBox client={client} account={account} symbol={symbol} quantity={quantity} trail={trail ?? null} aiEnabled={!!aiEnabled} market={market} disabled={disabled} onDone={onDone} />
       {copying && <div className="warn small">Ojo: esta cuenta es una copia. Si mueves aquí el stop, el próximo cambio en la maestra lo sobrescribe, y si salta aquí antes que en la maestra la cuenta queda desincronizada. Lo normal es proteger la maestra y dejar que las copias la sigan.</div>}
       {err && <div className="bad small">{err}</div>}
       <div className="muted small">Si existen stop u objetivo se mueven (y en la maestra las copias los siguen); si no existen se crean. Cuando se crean los dos a la vez van enlazados (OCO, addon ≥ 2.8); si la posición se cierra por otro camino, el engine cancela la salida que sobre.</div>
@@ -193,5 +195,64 @@ export function Nudger({ o, nudge, shown, disabled, step, testId, label }: { o: 
       <button className="chip-btn" disabled={disabled} onClick={() => nudge(o, 1)} title={`subir ${stepLabel(step)}`} aria-label="subir">▲</button>
       {s.moving && <span className="muted tiny">enviando…</span>}
     </span>
+  );
+}
+
+
+/* ---- Trailing stop: fijo, adaptativo (ATR y volumen) o IA ---- */
+const MODE_LABEL: Record<TrailMode, string> = { fixed: "Fijo", adaptive: "Adaptativo", ai: "IA" };
+export const trailText = (t: Trail) => `${MODE_LABEL[t.mode]}${t.mode === "fixed" ? ` ${t.distance_ticks} ticks` : t.distance_now ? ` ${Math.round(t.distance_now)} ticks ahora` : ""}${t.active ? "" : " · esperando"}`;
+
+export function TrailBox({ client, account, symbol, quantity, trail, aiEnabled, market, disabled, onDone }: {
+  client: Client; account: string; symbol: string; quantity: number; trail: Trail | null; aiEnabled: boolean;
+  market?: { atr_ticks: number | null; volume_ratio: number | null; bars: number } | null; disabled: boolean; onDone: (m: string) => void }) {
+  const [mode, setMode] = useState<TrailMode>(trail?.mode ?? "fixed");
+  const [dist, setDist] = useState(trail?.distance_ticks ?? 40);
+  const [atrK, setAtrK] = useState(trail?.atr_k ?? 1.5);
+  const [activate, setActivate] = useState(trail?.activate_ticks ?? 0);
+  const [lockBe, setLockBe] = useState(trail?.lock_be_ticks ?? 0);
+  const [step, setStep] = useState(trail?.step_ticks ?? 2);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const tu = tickUsd(symbol), n = Math.abs(quantity);
+  const usd = (ticks: number) => (tu ? ` = ${money(ticks * tu * n)}` : "");
+  const run = async (fn: () => Promise<unknown>, ok: string) => { setBusy(true); setErr(null); try { await fn(); onDone(ok); } catch (ex) { setErr((ex instanceof Error ? ex.message : String(ex)).replace(/^\d+:\s*/, "")); } finally { setBusy(false); } };
+  const start = () => run(() => client.trailStart({ account, symbol, mode, distance_ticks: dist, atr_k: atrK, activate_ticks: activate, lock_be_ticks: lockBe, step_ticks: step, min_ticks: Math.max(2, Math.round(dist / 5)), max_ticks: Math.max(dist * 4, 40) }),
+    `Trailing ${MODE_LABEL[mode].toLowerCase()} activado en ${symbol}.`);
+  const stop = () => run(() => client.trailStop(account, symbol), `Trailing detenido en ${symbol}; el stop se queda donde está.`);
+  return (
+    <div className="protect-box trail-box" data-testid="trail-box">
+      <div className="quick-head"><b><Icon name="trendUp" size={14} /> Trailing stop</b>
+        <div className="view-tabs tiny-tabs" data-testid="trail-mode">{(["fixed", "adaptive", "ai"] as TrailMode[]).map((m) => <button key={m} className={mode === m ? "active" : ""} onClick={() => setMode(m)} disabled={m === "ai" && !aiEnabled} title={m === "ai" && !aiEnabled ? "necesita ANTHROPIC_API_KEY en engine\\.env" : ""}>{MODE_LABEL[m]}</button>)}</div>
+        {trail && <span className={`badge ${trail.active ? "ok" : "warn"}`}>{trail.active ? "activo" : "esperando"} · {trail.moves} mov.</span>}
+      </div>
+      <p className="muted small" style={{ margin: 0 }}>
+        {mode === "fixed" && "El stop sigue al mejor precio a una distancia fija y solo se mueve a favor."}
+        {mode === "adaptive" && "La distancia es k × ATR de 1 minuto (acotada) y se acerca un 25 % cuando el volumen del último minuto supera 1,5× la media. Sin velas suficientes usa la distancia fija."}
+        {mode === "ai" && "Cada minuto Claude propone el stop con las velas, el ATR, el volumen y la estructura; el engine lo acota (nunca más lejos que el adaptativo, nunca en contra) y entre consultas aplica el adaptativo."}
+      </p>
+      {market && <div className="muted small">mercado ahora: ATR {market.atr_ticks !== null ? `${Math.round(market.atr_ticks)} ticks` : "— (faltan velas)"} · volumen {market.volume_ratio !== null ? `×${market.volume_ratio.toFixed(1)}` : "—"} · {market.bars} velas de 1 min</div>}
+      <div className="chips">
+        <span className="muted small">{mode === "fixed" ? "distancia" : "distancia base (sin ATR)"}</span>
+        {[20, 40, 60, 80, 100, 160, 200].map((v) => <button key={v} className={`chip-btn ${dist === v ? "active" : ""}`} onClick={() => setDist(v)}>{v} t</button>)}
+        <input inputMode="numeric" className="quick-input" value={dist} onChange={(e) => setDist(Math.max(1, Number(e.target.value) || 0))} aria-label="distancia en ticks" />
+        <span className="muted small">{ticksToText(dist, symbol)}</span>
+      </div>
+      {mode !== "fixed" && <div className="chips"><span className="muted small">k × ATR</span>{[1, 1.5, 2, 2.5, 3].map((k) => <button key={k} className={`chip-btn ${atrK === k ? "active" : ""}`} onClick={() => setAtrK(k)}>{k}</button>)}
+        <span className="muted small">{market?.atr_ticks ? `≈ ${Math.round(market.atr_ticks * atrK)} ticks ahora${usd(Math.round(market.atr_ticks * atrK))}` : ""}</span></div>}
+      <div className="chips"><span className="muted small">empezar a partir de</span>{[0, 20, 40, 80].map((v) => <button key={v} className={`chip-btn ${activate === v ? "active" : ""}`} onClick={() => setActivate(v)}>{v === 0 ? "ya" : `+${v} t`}</button>)}
+        <span className="muted small">asegurar breakeven a</span>{[0, 40, 80, 120].map((v) => <button key={v} className={`chip-btn ${lockBe === v ? "active" : ""}`} onClick={() => setLockBe(v)}>{v === 0 ? "no" : `+${v} t`}</button>)}
+        <span className="muted small">paso mín.</span>{[1, 2, 4, 8].map((v) => <button key={v} className={`chip-btn ${step === v ? "active" : ""}`} onClick={() => setStep(v)}>{v} t</button>)}</div>
+      {trail && <div className="trail-state small" data-testid="trail-state">
+        <b>{trailText(trail)}</b> · stop {trail.stop_price !== null ? fmtPx(trail.stop_price, symbol) : "—"} · mejor {trail.best !== null ? fmtPx(trail.best, symbol) : "—"}
+        {trail.mode === "ai" && (trail.ai_reason ? <span> · IA: {trail.ai_reason}{trail.ai_stop !== null ? ` (${fmtPx(trail.ai_stop, symbol)})` : ""}</span> : trail.ai_error ? <span className="bad"> · IA: {trail.ai_error}</span> : <span> · esperando la primera consulta a la IA</span>)}
+        {trail.note && <div className="muted">{trail.note}</div>}
+      </div>}
+      <div className="chips">
+        <button className="chip-btn apply" disabled={disabled || busy} onClick={() => void start()} data-testid="trail-start">{busy ? "enviando…" : trail ? "Aplicar cambios" : "Activar trailing"}</button>
+        {trail && <button className="chip-btn danger" disabled={disabled || busy} onClick={() => void stop()} data-testid="trail-stop">Detener (el stop se queda)</button>}
+      </div>
+      {err && <div className="bad small">{err}</div>}
+    </div>
   );
 }

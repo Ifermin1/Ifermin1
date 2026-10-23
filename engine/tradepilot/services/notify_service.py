@@ -21,6 +21,7 @@ TITLES: dict[str, tuple[str, str]] = {
     "NEWS_SOON": ("📰", "Noticia a punto de salir"), "NEWS_RESULT": ("📊", "Dato publicado"),
     "MANUAL_ORDER": ("🟢", "Orden desde la consola"), "MANUAL_FILL": ("✅", "Orden manual ejecutada"), "MANUAL_REJECTED": ("⛔", "Orden manual rechazada"),
     "MANUAL_CANCEL": ("🚫", "Orden manual cancelada"), "MANUAL_MODIFY": ("✏️", "Orden manual modificada"),
+    "TRAIL_START": ("🎯", "Trailing stop activado"), "TRAIL_MOVE": ("↗️", "Trailing: stop movido"), "TRAIL_END": ("🏁", "Trailing terminado"),
     "DAILY_LOSS_LIMIT": ("🛑", "Límite de pérdida diaria"), "DAILY_LOSS_WARNING": ("⚠️", "Cerca del límite de pérdida"),
     "DAILY_PROFIT_TARGET": ("🎯", "Corte del día alcanzado"), "DAILY_PROFIT_WARNING": ("🟢", "Cerca del corte del día"),
     "PROFIT_GOAL": ("🏆", "Objetivo de la evaluación alcanzado"), "PROFIT_GOAL_WARNING": ("🟢", "Cerca del objetivo de la evaluación"),

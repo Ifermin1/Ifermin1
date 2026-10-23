@@ -110,7 +110,7 @@ class AIService:
     def status(self) -> dict:
         return {"enabled": self.enabled, "model": self.model, "last_error": self.last_error, "calls": self.calls}
 
-    async def ask(self, system: str, prompt: str) -> dict:
+    async def ask(self, system: str, prompt: str, model: str | None = None, max_tokens: int | None = None) -> dict:
         """Una llamada a Claude; devuelve el JSON parseado (+ "model"). Lanza RuntimeError con un mensaje legible si falla."""
         if not self.enabled:
             raise RuntimeError("sin ANTHROPIC_API_KEY en engine/.env")
@@ -119,7 +119,7 @@ class AIService:
             self._client = anthropic.AsyncAnthropic(api_key=self.api_key, max_retries=2)
         try:
             self.calls += 1
-            r = await self._client.messages.create(model=self.model, max_tokens=self.max_tokens, system=system,
+            r = await self._client.messages.create(model=model or self.model, max_tokens=max_tokens or self.max_tokens, system=system,
                                                    thinking={"type": "adaptive"}, messages=[{"role": "user", "content": prompt}],
                                                    timeout=self.timeout_s)
         except anthropic.AuthenticationError:

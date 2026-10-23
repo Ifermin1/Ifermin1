@@ -66,8 +66,16 @@ export type ProtectRequest = { client_id: string; account: string; symbol: strin
 export type ProtectResult = { account: string; symbol: string; quantity: number; avg_price: number; ms: number;
                               sl: { action: "created" | "modified" | "unchanged"; order_id: string; price: number; from?: number } | null;
                               tp: { action: "created" | "modified" | "unchanged"; order_id: string; price: number; from?: number } | null };
+export type TrailMode = "fixed" | "adaptive" | "ai";
+export type TrailRequest = { account: string; symbol: string; mode: TrailMode; distance_ticks?: number; step_ticks?: number; activate_ticks?: number; lock_be_ticks?: number;
+                             atr_k?: number; min_ticks?: number; max_ticks?: number };
+export type Trail = { account: string; symbol: string; mode: TrailMode; distance_ticks: number; step_ticks: number; activate_ticks: number; lock_be_ticks: number; atr_k: number;
+                      min_ticks: number; max_ticks: number; best: number | null; stop_price: number | null; stop_order_id: string | null; started_at: string; moves: number;
+                      active: boolean; distance_now: number | null; ai_reason: string; ai_confidence: number | null; ai_error: string | null; ai_stop: number | null; note: string };
+export type Trails = { trails: Trail[]; stats: { moves: number; ai_calls: number; ended: number }; ai_interval_s: number; ai: AiStatus | null;
+                       market: Record<string, { symbol: string; last: number | null; age_s: number | null; atr_ticks: number | null; volume_ratio: number | null; bars: number }> };
 export type TradeStatus = { ready: boolean; reason: string | null; max_qty: number; mode: string; symbols: string[]; addon_version: string | null; required_addon: string; ping_ms: number | null;
-                            last_order_ms: number | null; heartbeat_age_s: number | null; master: string | null;
+                            last_order_ms: number | null; heartbeat_age_s: number | null; master: string | null; trails: number; ai_enabled: boolean;
                             stats: { orders: number; rejected: number; cancels: number; modifies: number; unconfirmed: number } };
 
 /** Calendario económico (ForexFactory vía el engine). */
@@ -162,6 +170,9 @@ export function makeClient(s: Session) {
     tradeCancel: (account: string, order_id: string) => req<{ ms: number; detail: string }>("/api/trade/cancel", { method: "POST", body: JSON.stringify({ account, order_id }) }),
     tradeModify: (account: string, order_id: string, quantity: number, limit_price: number, stop_price: number) =>
       req<{ ms: number; detail: string }>("/api/trade/modify", { method: "POST", body: JSON.stringify({ account, order_id, quantity, limit_price, stop_price }) }),
+    trailStart: (r: TrailRequest) => req<Trail>("/api/trade/trail", { method: "POST", body: JSON.stringify(r) }),
+    trailStop: (account: string, symbol: string) => req<Trail>(`/api/trade/trail?account=${encodeURIComponent(account)}&symbol=${encodeURIComponent(symbol)}`, { method: "DELETE" }),
+    trails: () => req<Trails>("/api/trade/trails"),
     tradeProtect: (r: ProtectRequest) => req<ProtectResult>("/api/trade/protect", { method: "POST", body: JSON.stringify(r) }),
     tradeClose: (client_id: string, account: string, symbol: string) => req<ManualOrderResult>("/api/trade/close", { method: "POST", body: JSON.stringify({ client_id, account, symbol }) }),
     newsAlerts: () => req<NewsAlerts>("/api/news/alerts"),

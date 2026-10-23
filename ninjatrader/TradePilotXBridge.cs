@@ -53,7 +53,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 {
     public class TradePilotXBridge : AddOnBase
     {
-        private const string BridgeVersion = "2.8";
+        private const string BridgeVersion = "2.9";
 
         // ---- configuración ------------------------------------------------
         private class BridgeConfig
@@ -100,7 +100,7 @@ namespace NinjaTrader.NinjaScript.AddOns
         // ---- estado -------------------------------------------------------
         private Account master;
         private readonly ConcurrentDictionary<string, MarketData> marketFeeds = new ConcurrentDictionary<string, MarketData>();
-        private readonly ConcurrentDictionary<string, double[]> latestPrices = new ConcurrentDictionary<string, double[]>(); // symbol -> [last,bid,ask]
+        private readonly ConcurrentDictionary<string, double[]> latestPrices = new ConcurrentDictionary<string, double[]>(); // symbol -> [last,bid,ask,volumen acumulado desde el último PRICE]
         private readonly ConcurrentDictionary<string, bool> dirtyPrices = new ConcurrentDictionary<string, bool>();
         private readonly ConcurrentDictionary<string, DateTime> feedSubscribedAt = new ConcurrentDictionary<string, DateTime>();
         private readonly ConcurrentDictionary<string, bool> feedWarned = new ConcurrentDictionary<string, bool>();
@@ -494,10 +494,10 @@ namespace NinjaTrader.NinjaScript.AddOns
                 return;
             MarketData feed = sender as MarketData;
             string symbol = e.Instrument.FullName;
-            double[] cur = latestPrices.GetOrAdd(symbol, _ => new double[3]);
+            double[] cur = latestPrices.GetOrAdd(symbol, _ => new double[4]);
             lock (cur)
             {
-                if (e.MarketDataType == MarketDataType.Last) cur[0] = e.Price;
+                if (e.MarketDataType == MarketDataType.Last) { cur[0] = e.Price; cur[3] += e.Volume; }   // v2.9: volumen para el trailing adaptativo
                 if (feed != null)
                 {
                     if (feed.Bid != null && feed.Bid.Price > 0) cur[1] = feed.Bid.Price;
@@ -528,12 +528,13 @@ namespace NinjaTrader.NinjaScript.AddOns
                 dirtyPrices.TryRemove(symbol, out dummy);
                 double[] cur;
                 if (!latestPrices.TryGetValue(symbol, out cur)) continue;
-                double last, bid, ask;
-                lock (cur) { last = cur[0]; bid = cur[1]; ask = cur[2]; }
+                double last, bid, ask, vol;
+                lock (cur) { last = cur[0]; bid = cur[1]; ask = cur[2]; vol = cur.Length > 3 ? cur[3] : 0; if (cur.Length > 3) cur[3] = 0; }
                 if (last <= 0) continue;
                 Publish(Json.Obj(
                     "msg_type", "PRICE", "symbol", symbol, "last", last,
                     "bid", bid > 0 ? (object)bid : null, "ask", ask > 0 ? (object)ask : null,
+                    "vol", vol,
                     "timestamp", Now()));
             }
         }

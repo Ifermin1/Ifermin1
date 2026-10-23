@@ -19,6 +19,8 @@ from tradepilot.services.notify_service import NotifyService
 from tradepilot.services.news_service import NewsService
 from tradepilot.services.ai_service import AIService
 from tradepilot.services.trade_service import TradeService
+from tradepilot.services.market_service import MarketService
+from tradepilot.services.trail_service import TrailService
 from tradepilot.services.sync_service import SyncService
 
 
@@ -39,6 +41,8 @@ class Container:
     notify: NotifyService | None = None
     news: NewsService | None = None
     trade: TradeService | None = None
+    market: MarketService | None = None
+    trail: TrailService | None = None
 
     async def start(self) -> None:
         await self.bridge.start()
@@ -46,6 +50,8 @@ class Container:
         await self.accounts.start()
         if self.news is not None:
             await self.news.start()
+        if self.trail is not None:
+            await self.trail.start()
         self.audit.log("ENGINE_START", f"Engine iniciado en modo {self.settings.ENGINE_MODE}")
         if self.news is not None and not self.news.ai.enabled:
             logger.info("Calendario: sin ANTHROPIC_API_KEY, los avisos de noticias llevan un análisis por reglas (pon la clave en engine/.env para usar la IA)")
@@ -68,6 +74,8 @@ class Container:
             logger.warning("API_TOKEN sigue siendo el valor por defecto; cámbialo en engine/.env antes de exponer el engine")
 
     async def stop(self) -> None:
+        if self.trail is not None:
+            await self.trail.stop()
         if self.news is not None:
             await self.news.stop()
         await self.accounts.stop()
@@ -116,7 +124,8 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
     replication.commissions = commissions
     risk.commissions = commissions
     notify = NotifyService(store, bus)
-    news = NewsService(ttl_s=max(60, cfg.NEWS_REFRESH_SECONDS), store=store, ai=AIService(cfg.ANTHROPIC_API_KEY, cfg.AI_MODEL), audit=audit, bus=bus,
+    ai = AIService(cfg.ANTHROPIC_API_KEY, cfg.AI_MODEL)
+    news = NewsService(ttl_s=max(60, cfg.NEWS_REFRESH_SECONDS), store=store, ai=ai, audit=audit, bus=bus,
                        alert_minutes=cfg.NEWS_ALERT_MINUTES, countries=cfg.NEWS_COUNTRIES, min_impact=cfg.NEWS_MIN_IMPACT)
     if cfg.ENGINE_MODE != "ninja" and cfg.MOCK_DEMO_HISTORY:
         news.seed_demo()
@@ -130,6 +139,8 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
             logger.warning(f"No se pudo generar el histórico de demostración: {exc}")
     trade = TradeService(bridge, accounts, risk, audit, cfg)
     replication.on_manual_status = trade.on_manual_status
+    market = MarketService(bus)
+    trail = TrailService(trade, accounts, market, ai, audit, bridge, store, interval_s=cfg.TRAIL_INTERVAL_S, ai_interval_s=cfg.AI_TRAIL_INTERVAL_S, ai_model=cfg.AI_TRAIL_MODEL)
 
     async def _after_sync() -> None:
         # independientes: un fallo en una vigilancia no debe apagar la otra
@@ -139,4 +150,4 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
             except Exception as exc:
                 logger.exception(f"Error en vigilancia de {name}: {exc}")
     accounts.after_sync = _after_sync
-    return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal, commissions, performance, notify, news, trade)
+    return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal, commissions, performance, notify, news, trade, market, trail)

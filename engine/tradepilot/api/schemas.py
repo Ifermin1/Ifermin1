@@ -195,3 +195,16 @@ class ProtectRequest(BaseModel):
     tp_price: float = 0.0
     last_price: float = 0.0                                  # para comprobar que no se dispare al instante
     force: bool = False
+
+
+class TrailRequest(BaseModel):
+    account: str
+    symbol: str
+    mode: str = "fixed"                  # fixed | adaptive | ai
+    distance_ticks: int = Field(default=40, ge=1, le=4000)
+    step_ticks: int = Field(default=2, ge=1, le=400)
+    activate_ticks: int = Field(default=0, ge=0, le=4000)
+    lock_be_ticks: int = Field(default=0, ge=0, le=4000)
+    atr_k: float = Field(default=1.5, ge=0.3, le=5)
+    min_ticks: int = Field(default=8, ge=1, le=2000)
+    max_ticks: int = Field(default=200, ge=1, le=4000)

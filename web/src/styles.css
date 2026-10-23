@@ -716,3 +716,5 @@ table.trades tr.sel td { background: var(--hl); }
 .nudger.moving b { color: var(--accent); }
 .nudge-cell { display: flex; flex-direction: column; gap: 4px; }
 table.trades tbody tr.sel td { background: var(--hl); box-shadow: inset 0 0 0 1px var(--accent); }
+.trail-box { border-color: rgba(34,211,238,.35); }
+.trail-state { padding: 8px 10px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--line); }

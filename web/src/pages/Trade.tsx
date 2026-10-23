@@ -1,10 +1,10 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../lib/store";
-import type { ManualOrder, ManualOrderResult, TradeStatus, WorkingOrder } from "../lib/api";
+import type { ManualOrder, ManualOrderResult, TradeStatus, Trails, WorkingOrder } from "../lib/api";
 import { Card, Empty } from "../components/ui";
 import { Icon } from "../components/Icons";
 import { root, signedMoney, tickSize, pointValue } from "../lib/format";
-import { QuickAmount, ProtectPanel, ticksToText, StepPicker, Nudger, useNudge, loadStep, saveStep, stepLabel, STEPS, type Nudgeable, type Step } from "../components/TradeHelpers";
+import { QuickAmount, ProtectPanel, ticksToText, StepPicker, Nudger, useNudge, loadStep, saveStep, stepLabel, trailText, STEPS, type Nudgeable, type Step } from "../components/TradeHelpers";
 
 /* Operar: poner, modificar y cancelar órdenes y cerrar posiciones desde cualquier sitio.
  * Pensado para que un retraso nunca cueste dinero: cada orden lleva un id único (reenviarla nunca duplica), solo se marca
@@ -24,6 +24,17 @@ export function Trade() {
   const { client, accounts, health, rules, prices, wsStatus, wsRtt, wsLastAt, audit, risk } = useStore();
   const master = health?.bridge.master_account ?? null;
   const [status, setStatus] = useState<TradeStatus | null>(null);
+  const [trails, setTrails] = useState<Trails | null>(null);
+  const [trailTick, setTrailTick] = useState(0);
+  useEffect(() => {
+    if (!client) return;
+    let alive = true;
+    const load = () => client.trails().then((t) => { if (alive) setTrails(t); }).catch(() => {});
+    load();
+    const t = window.setInterval(load, 2000);
+    return () => { alive = false; window.clearInterval(t); };
+  }, [client, trailTick]);
+  const trailOf = (acc: string, sym: string) => trails?.trails.find((t) => t.account.toLowerCase() === acc.toLowerCase() && t.symbol.toLowerCase() === sym.toLowerCase()) ?? null;
   const enabledAccounts = accounts.filter((a) => a.enabled);
   const [account, setAccount] = useState("");
   const [symbol, setSymbol] = useState(() => load(SYMBOL_KEY, ""));
@@ -249,7 +260,7 @@ export function Trade() {
                 <Fragment key={key}>
                 <tr className={protect === key ? "sel" : ""} data-testid={`pos-${p.account}-${root(p.symbol)}`}>
                   <td>{p.account}{p.account === master && <span className="muted small"> · maestra</span>}</td><td>{p.symbol}</td>
-                  <td className={`num ${p.quantity > 0 ? "ok" : "bad"}`}>{p.quantity > 0 ? "Largo" : "Corto"} {Math.abs(p.quantity)}</td><td className="num">{fmtPx(p.avg_price, p.symbol)}</td>
+                  <td className={`num ${p.quantity > 0 ? "ok" : "bad"}`}>{p.quantity > 0 ? "Largo" : "Corto"} {Math.abs(p.quantity)}{(() => { const t = trailOf(p.account, p.symbol); return t ? <><br /><span className={`badge ${t.active ? "ok" : "warn"}`} data-testid={`trail-badge-${p.account}-${root(p.symbol)}`}>trailing {trailText(t)}</span></> : null; })()}</td><td className="num">{fmtPx(p.avg_price, p.symbol)}</td>
                   <td className="nowrap"><div className="nudge-cell">
                     <Nudger label="stop" o={exits.stops[0] ? asNudge({ ...exits.stops[0], account: p.account }) : null} nudge={nudge} shown={shown} disabled={!canClose} step={step} testId={`nudge-sl-${p.account}-${root(p.symbol)}`} />
                     <Nudger label="obj." o={exits.targets[0] ? asNudge({ ...exits.targets[0], account: p.account }) : null} nudge={nudge} shown={shown} disabled={!canClose} step={step} testId={`nudge-tp-${p.account}-${root(p.symbol)}`} />
@@ -263,7 +274,8 @@ export function Trade() {
           {(() => { const sel = positions.find((p) => p.account + "|" + p.symbol === protect); if (!sel) return null; const exits = exitOrders(sel.account, sel.symbol, sel.quantity); return (
             <ProtectPanel key={protect} client={client} account={sel.account} symbol={sel.symbol} quantity={sel.quantity} avg={sel.avg_price} last={prices[root(sel.symbol)]?.last ?? null} stops={exits.stops} targets={exits.targets}
                           isMaster={sel.account === master} followers={followersOf(sel.account)} copying={!!master && sel.account !== master && rules.some((r) => r.enabled && r.follower_account.toLowerCase() === sel.account.toLowerCase())}
-                          disabled={!canClose || busy !== null} onDone={(m) => setMsg(m)} onClose={() => setProtect(null)}
+                          disabled={!canClose || busy !== null} onDone={(m) => { setMsg(m); setTrailTick((x) => x + 1); }} onClose={() => setProtect(null)}
+                          trail={trailOf(sel.account, sel.symbol)} aiEnabled={!!status?.ai_enabled} market={trails?.market[sel.symbol] ?? null}
                           onSwitchToMaster={master && positions.some((p) => p.account === master && p.symbol === sel.symbol) ? () => setProtect(master + "|" + sel.symbol) : undefined} />); })()}
         </Card>
         <Card title={`Órdenes vivas · ${orders.length}`} icon="clock" right={<span className="muted small">▲▼ mueven {stepLabel(step)} · pulsa una fila y usa + / − o las flechas{selOrder ? " · seleccionada" : ""}</span>}>

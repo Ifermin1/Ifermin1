@@ -68,12 +68,36 @@ class MockBridge(BrokerBridge):
         self.health.connected = False
 
     async def _emit_loop(self) -> None:
+        self._price_task = asyncio.create_task(self._price_loop())
+        try:
+            while self._running:
+                try:
+                    await asyncio.sleep(self.interval)
+                    await self.emit_master_event()
+                except asyncio.CancelledError:
+                    break
+        finally:
+            self._price_task.cancel()
+
+    async def _price_loop(self) -> None:
+        """Ticks PRICE cada segundo (paseo aleatorio con volumen) como los publica el addon: alimentan la consola, la reacción a
+        noticias y el trailing stop en el simulador."""
         while self._running:
             try:
-                await asyncio.sleep(self.interval)
-                await self.emit_master_event()
+                await asyncio.sleep(1.0)
+                for sym in list(self._px):
+                    await self.emit_price(sym)
             except asyncio.CancelledError:
                 break
+
+    async def emit_price(self, symbol: str, move: float | None = None, vol: float | None = None) -> float:
+        ts = tick_size(symbol)
+        px = self._px.get(symbol, 20000.0)
+        px = round((px + (move if move is not None else random.gauss(0, 2.5) * ts)) / ts) * ts
+        self._px[symbol] = px
+        await self.bus.publish(TOPIC_MASTER_EVENT, {"msg_type": "PRICE", "symbol": symbol, "last": px, "bid": px - ts, "ask": px + ts,
+                                                    "vol": vol if vol is not None else random.randint(1, 40), "timestamp": datetime.now().astimezone().isoformat(timespec="milliseconds")})
+        return px
 
     async def emit_master_event(self, **overrides) -> dict:
         master = next(iter(self.accounts))
