@@ -263,7 +263,8 @@ export function Trade() {
           {(() => { const sel = positions.find((p) => p.account + "|" + p.symbol === protect); if (!sel) return null; const exits = exitOrders(sel.account, sel.symbol, sel.quantity); return (
             <ProtectPanel key={protect} client={client} account={sel.account} symbol={sel.symbol} quantity={sel.quantity} avg={sel.avg_price} last={prices[root(sel.symbol)]?.last ?? null} stops={exits.stops} targets={exits.targets}
                           isMaster={sel.account === master} followers={followersOf(sel.account)} copying={!!master && sel.account !== master && rules.some((r) => r.enabled && r.follower_account.toLowerCase() === sel.account.toLowerCase())}
-                          disabled={!canClose || busy !== null} onDone={(m) => setMsg(m)} onClose={() => setProtect(null)} />); })()}
+                          disabled={!canClose || busy !== null} onDone={(m) => setMsg(m)} onClose={() => setProtect(null)}
+                          onSwitchToMaster={master && positions.some((p) => p.account === master && p.symbol === sel.symbol) ? () => setProtect(master + "|" + sel.symbol) : undefined} />); })()}
         </Card>
         <Card title={`Órdenes vivas · ${orders.length}`} icon="clock" right={<span className="muted small">▲▼ mueven {stepLabel(step)} · pulsa una fila y usa + / − o las flechas{selOrder ? " · seleccionada" : ""}</span>}>
           {orders.length === 0 ? <Empty>Sin órdenes pendientes.</Empty> : (

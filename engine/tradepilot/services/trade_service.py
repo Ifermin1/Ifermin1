@@ -197,8 +197,23 @@ class TradeService:
         pos = next((p for p in snap.open_positions if p.symbol.lower() == symbol.lower() and p.quantity), None)
         if pos is None:
             raise ValueError(f"{snap.account_id} no tiene posición en {symbol}")
-        return await self.place({"client_id": client_id, "account": snap.account_id, "symbol": pos.symbol, "action": "SELL" if pos.quantity > 0 else "BUY",
-                                 "quantity": abs(pos.quantity), "order_type": "MARKET", "closing": True, "note": "cierre de posición desde la consola"})
+        result = await self.place({"client_id": client_id, "account": snap.account_id, "symbol": pos.symbol, "action": "SELL" if pos.quantity > 0 else "BUY",
+                                   "quantity": abs(pos.quantity), "order_type": "MARKET", "closing": True, "note": "cierre de posición desde la consola"})
+        # sin posición, un stop o un objetivo vivos serían una ENTRADA nueva: se cancelan ya (en la maestra, las copias siguen)
+        stops, tps = self._exit_orders(snap, pos.symbol, pos.quantity)
+        cancelled = []
+        for o in stops + tps:
+            try:
+                await self.bridge.cancel_order(snap.account_id, o.order_id)
+                self._note_cancel(o.order_id)
+                cancelled.append(f"{o.order_type} {o.quantity} @ {(o.stop_price or o.limit_price):.10g}")
+            except Exception as exc:
+                logger.warning(f"Cierre de {snap.account_id} {pos.symbol}: no se pudo cancelar {o.order_id}: {exc}")
+        if cancelled:
+            self.audit.log("MANUAL_CANCEL", f"{snap.account_id}: tras cerrar {pos.symbol} se cancelan sus salidas: " + ", ".join(cancelled), target=snap.account_id,
+                           details={"order_ids": [o.order_id for o in stops + tps]})
+        result["cancelled_exits"] = len(cancelled)
+        return result
 
     # ---- proteger una posición: stop a breakeven, stop y objetivo rápidos ----
     @staticmethod
@@ -291,7 +306,7 @@ class TradeService:
         ES = {"created": "creado", "modified": "movido", "unchanged": "sin cambio"}
         txt = []
         if out["sl"]:
-            txt.append(f"stop {ES[out['sl']['action']]} en {out['sl']['price']:.10g}" + (" (breakeven)" if req.get("breakeven") else "") + f" = {((out['sl']['price'] - pos.avg_price) * (1 if long else -1) * pv):+.0f} $/contrato")
+            txt.append(f"stop {ES[out['sl']['action']]} en {out['sl']['price']:.10g}" + (" (breakeven)" if req.get("breakeven") else "") + f" = {(round((out['sl']['price'] - pos.avg_price) * (1 if long else -1) * pv) or 0):+.0f} $/contrato")
         if out["tp"]:
             txt.append(f"objetivo {ES[out['tp']['action']]} en {out['tp']['price']:.10g} = {((out['tp']['price'] - pos.avg_price) * (1 if long else -1) * pv):+.0f} $/contrato")
         master = (self.bridge.health.master_account or "").lower() == acc.lower()
@@ -336,6 +351,9 @@ class TradeService:
         acc = str(data.get("account") or "")
         err = str(data.get("error") or "")
         what = f"{data.get('action')} {data.get('quantity')} {data.get('symbol')} {data.get('order_type')}"
+        mid, oid = str(data.get("manual_id") or ""), str(data.get("order_id") or "")
+        if oid and (mid.endswith("-SL") or mid.endswith("-TP")) and state.lower() in ("accepted", "working"):
+            self._exits[(acc, oid)] = str(data.get("symbol") or "")    # stop/objetivo automáticos del addon: se cancelan si la posición desaparece
         if err or state.lower() == "rejected":
             self.stats["rejected"] += 1
             self.audit.log("MANUAL_REJECTED", f"{acc}: {what} rechazada por el bróker: {err or state} {data.get('native_error') or ''}".strip(),

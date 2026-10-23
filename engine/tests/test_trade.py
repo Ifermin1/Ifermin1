@@ -130,3 +130,31 @@ async def test_protect_breakeven_quick_exits_and_orphan_sweep(client: AsyncClien
     types = [a.event_type for a in container.audit.recent(40)]
     assert "MANUAL_PROTECT" in types and types.count("MANUAL_CANCEL") >= 2
     assert container.trade.stats["orphans"] == 2
+
+
+async def test_close_cancels_exits_and_addon_brackets_are_swept(client: AsyncClient, container):
+    r = await client.post("/api/trade/order", json={"client_id": "c-brk-1", "account": "Sim102", "symbol": "NQ 12-26", "action": "SELL", "quantity": 2, "order_type": "MARKET", "sl_ticks": 20, "tp_ticks": 40})
+    assert r.status_code == 200
+    await container.accounts.sync_once()
+    acc = next(a for a in container.accounts.all() if a.account_id == "Sim102")
+    assert len(acc.working_orders) == 2
+    # cerrar la posición desde la consola cancela el stop y el objetivo que quedaban vivos
+    r = await client.post("/api/trade/close", json={"client_id": "c-brk-close", "account": "Sim102", "symbol": "NQ 12-26"})
+    assert r.status_code == 200 and r.json()["cancelled_exits"] == 2
+    await container.accounts.sync_once()
+    assert next(a for a in container.accounts.all() if a.account_id == "Sim102").working_orders == []
+    assert any(a.event_type == "MANUAL_CANCEL" and "se cancelan sus salidas" in a.message for a in container.audit.recent(10))
+    # un stop automático del addon (MANUAL_STATUS con id -SL) queda vigilado y se cancela cuando la posición desaparece
+    r = await client.post("/api/trade/order", json={"client_id": "c-brk-2", "account": "Sim103", "symbol": "ES 12-26", "action": "BUY", "quantity": 1, "order_type": "MARKET"})
+    assert r.status_code == 200
+    from tradepilot.domain.accounts import WorkingOrder
+    container.bridge.working_orders.append(("Sim103", WorkingOrder(order_id="brk-sl-1", action="SELL", symbol="ES 12-26", quantity=1, order_type="STOPMARKET", stop_price=5590)))
+    await container.replication.process_master_event({"msg_type": "MANUAL_STATUS", "account": "Sim103", "manual_id": "c-brk-2-SL", "order_id": "brk-sl-1", "action": "SELL",
+                                                       "quantity": 1, "symbol": "ES 12-26", "order_type": "STOPMARKET", "state": "Working"})
+    await container.accounts.sync_once()
+    await container.trade.sweep_orphans()
+    assert any(o.order_id == "brk-sl-1" for _, o in container.bridge.working_orders)          # con posición: se queda
+    container.bridge.positions[("Sim103", "ES 12-26")] = 0                                      # cerrada por fuera (a mano en NinjaTrader)
+    await container.accounts.sync_once()
+    await container.trade.sweep_orphans()
+    assert not any(o.order_id == "brk-sl-1" for _, o in container.bridge.working_orders)

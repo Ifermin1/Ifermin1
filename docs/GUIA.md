@@ -358,14 +358,17 @@ actualizar: NinjaScript Editor → F5).
   **Con el teclado**: pulsa una fila de *Órdenes vivas* para seleccionarla y usa `+` / `−` (o ▲ / ▼) para moverla,
   `◀` / `▶` para cambiar el paso y `Esc` para soltarla.
   En la **maestra** las copias de las seguidoras siguen el cambio (el addon publica la modificación y el engine la
-  replica). Si una salida creada por Proteger se queda sin posición (p. ej. cerraste a mano), el engine la cancela sola en
-  la siguiente sincronización para que no se convierta en una entrada nueva.
+  replica). **Protege siempre la maestra, no una seguidora**: si mueves el stop de una copia, el siguiente cambio en la
+  maestra lo sobrescribe, y si salta antes que el de la maestra la cuenta queda desincronizada; el panel lo avisa y ofrece
+  *Proteger en la maestra*. Si un stop u objetivo (de Proteger o automático del addon) se queda sin posición porque
+  cerraste por otro camino, el engine lo cancela solo en la siguiente sincronización para que no se convierta en una
+  entrada nueva.
 - **Qué significa cada estado** en *Enviadas en esta sesión*: *enviando…* → *aceptada por NinjaTrader · N ms* (el addon la
   ha recibido y enviado al bróker; en NinjaTrader la ves con nombre `TPM …`) → *ejecutada*. **NO CONFIRMADA** (rojo):
   el engine o NinjaTrader no contestaron en el plazo. No repitas a ciegas: mira en NinjaTrader si entró y, si no, pulsa
   *Reenviar (mismo id)*: cada orden lleva un identificador único y el addon ignora los repetidos, así que **nunca se
   duplica**. *rechazada*: el motivo viene del engine (validación) o del bróker (margen, cuenta bloqueada, hora…).
-- **Posiciones**: *Cerrar* cierra solo ese instrumento con una orden a mercado contraria; *Cerrar cuenta* cancela todo y
+- **Posiciones**: *Cerrar* cierra solo ese instrumento con una orden a mercado contraria y cancela sus stops y objetivos (sin posición serían una entrada nueva); *Cerrar cuenta* cancela todo y
   cierra todas sus posiciones (lo mismo que en Riesgo). **Órdenes vivas**: *Precio* edita el nivel (± tick) y *Guardar* lo
   manda; *Cancelar* la retira. Sirve también para los stops/objetivos de las copias y para órdenes puestas a mano.
 - **Latencias** (barra superior de Operar): *consola ↔ engine* (ida y vuelta del WebSocket; desde fuera de casa suele ser

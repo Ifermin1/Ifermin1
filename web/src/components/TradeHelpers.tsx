@@ -56,9 +56,9 @@ export function QuickAmount({ label, symbol, ticks, onChange, testId, tone, risk
 }
 
 /** Panel Proteger de una posición: stop a breakeven, stop/objetivo rápidos desde el precio medio y vista previa. */
-export function ProtectPanel({ client, account, symbol, quantity, avg, last, stops, targets, isMaster, followers, copying, disabled, onDone, onClose }: {
+export function ProtectPanel({ client, account, symbol, quantity, avg, last, stops, targets, isMaster, followers, copying, disabled, onDone, onClose, onSwitchToMaster }: {
   client: Client; account: string; symbol: string; quantity: number; avg: number; last: number | null; stops: WorkingOrder[]; targets: WorkingOrder[];
-  isMaster: boolean; followers: number; copying: boolean; disabled: boolean; onDone: (msg: string) => void; onClose?: () => void }) {
+  isMaster: boolean; followers: number; copying: boolean; disabled: boolean; onDone: (msg: string) => void; onClose?: () => void; onSwitchToMaster?: () => void }) {
   const long = quantity > 0, n = Math.abs(quantity), tick = tickSize(symbol), pv = pointValue(symbol);
   const [slTicks, setSlTicks] = useState(0);
   const [tpTicks, setTpTicks] = useState(0);
@@ -98,6 +98,7 @@ export function ProtectPanel({ client, account, symbol, quantity, avg, last, sto
         <span className="muted small">stop actual: {curStop !== null ? `${fmtPx(curStop, symbol)} (${usd(curStop) !== null ? money(usd(curStop)! * n) : "?"})` : "ninguno"} · objetivo: {curTp !== null ? `${fmtPx(curTp, symbol)} (${usd(curTp) !== null ? money(usd(curTp)! * n) : "?"})` : "ninguno"}</span>
         {isMaster && <span className="badge accent">maestra: se replica a {followers} copias</span>}
         {copying && <span className="badge warn" title="Esta cuenta copia a la maestra: lo que cambies aquí lo puede sobrescribir el siguiente cambio en la maestra. Mejor protege la maestra.">cuenta seguidora</span>}
+        {copying && onSwitchToMaster && <button className="chip-btn apply" onClick={onSwitchToMaster} data-testid="protect-switch-master">Proteger en la maestra (las copias siguen)</button>}
         {onClose && <button className="chip-btn" style={{ marginLeft: "auto" }} onClick={onClose}>Cerrar panel</button>}
       </div>
       <div className="protect-grid">
@@ -123,6 +124,7 @@ export function ProtectPanel({ client, account, symbol, quantity, avg, last, sto
           </button>
         </div>
       </div>
+      {copying && <div className="warn small">Ojo: esta cuenta es una copia. Si mueves aquí el stop, el próximo cambio en la maestra lo sobrescribe, y si salta aquí antes que en la maestra la cuenta queda desincronizada. Lo normal es proteger la maestra y dejar que las copias la sigan.</div>}
       {err && <div className="bad small">{err}</div>}
       <div className="muted small">Si existen stop u objetivo se mueven (y en la maestra las copias los siguen); si no existen se crean. Cuando se crean los dos a la vez van enlazados (OCO, addon ≥ 2.8); si la posición se cierra por otro camino, el engine cancela la salida que sobre.</div>
     </div>
