@@ -465,6 +465,21 @@ actualizar: NinjaScript Editor → F5).
   inexistente. VERDE envía sin más, ÁMBAR envía y te deja ver las señales, ROJO pide una confirmación extra con la lista
   de motivos. Nunca envía solo ni retrasa la orden más de lo que tarda la comprobación (milisegundos, sin IA).
 
+### Informe semanal y CSV (pestaña Análisis, arriba a la derecha)
+
+- **Informe semanal**: elige un día y pulsa el botón; se abre en otra pestaña el informe de esa semana (lunes a domingo)
+  con el neto, operaciones, acierto, factor de beneficio, comisiones y racha; una fila por cuenta (con saldo de cierre,
+  retiros pedidos y pagos recibidos esa semana), una por día, por instrumento, mejores y peores operaciones, los
+  movimientos de caja de la semana y tres reglas del coach para la siguiente. El botón *Imprimir / guardar PDF* usa la
+  impresión del navegador. Respeta el filtro de *Cuenta* o, con *Todas*, el *Grupo* (etiqueta) elegido: así sacas un
+  informe por cuenta, por grupo (*50K*, *PA*…) o del conjunto.
+- **CSV del periodo**: descarga todas las operaciones del periodo elegido (30 d, 90 d, año, todo) y la cuenta o grupo
+  seleccionados, con separador `;`, coma decimal y acentos correctos: se abre directamente en Excel en español. Columnas:
+  fecha, cuenta, alias, instrumento, lado, contratos, entrada, salida, bruto, comisiones, neto, duración, abierta,
+  cerrada, fills. (La pestaña *Duración y riesgo* mantiene su *Exportar CSV* con la lista ya filtrada.)
+- Por API: `GET /api/report/weekly?day=AAAA-MM-DD&account=&tag=&format=html|json` y
+  `GET /api/trades.csv?day_from=&day_to=&account=&tag=`, con el token en la cabecera.
+
 ### Coach IA (pestaña Análisis → Coach IA)
 
 - **Revisión de la sesión**: elige el día y verás qué costó o dio dinero (stops en menos de un minuto, operaciones

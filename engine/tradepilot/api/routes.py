@@ -5,6 +5,8 @@ from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRe
 from tradepilot.container import Container
 from tradepilot.domain.risk import RiskLimit, Schedule
 
+import re as _re
+_DAY_RE = _re.compile(r"^\d{4}-\d{2}-\d{2}$")
 router = APIRouter(prefix="/api", dependencies=[Depends(require_token)])
 
 
@@ -378,6 +380,34 @@ def stats_analysis(request: Request, day_from: str | None = None, day_to: str | 
     if d1 < d0:
         raise HTTPException(400, "el fin del periodo es anterior al inicio")
     return c.performance.analysis(d0, d1, account or None)
+
+
+@router.get("/report/weekly")
+def report_weekly(request: Request, day: str | None = None, account: str | None = None, tag: str | None = None, format: str = "html"):
+    """Informe semanal (lunes-domingo de `day`, hoy por defecto) por cuenta o por grupo (`tag`), como HTML imprimible o JSON."""
+    from fastapi.responses import HTMLResponse
+    c = _c(request)
+    if c.report is None:
+        raise HTTPException(503, "informes no disponibles")
+    if day and not _DAY_RE.match(day):
+        raise HTTPException(400, "day debe ser AAAA-MM-DD")
+    data = c.report.weekly(day, account or None, tag or None)
+    if format == "json":
+        return data
+    return HTMLResponse(c.report.weekly_html(data), headers={"Content-Disposition": f"inline; filename=informe-{data['from']}.html"})
+
+
+@router.get("/trades.csv")
+def trades_csv(request: Request, day_from: str, day_to: str, account: str | None = None, tag: str | None = None):
+    """Operaciones del periodo en CSV (separador ;, coma decimal, UTF-8 con BOM: abre directo en Excel en español)."""
+    from fastapi.responses import Response
+    c = _c(request)
+    if c.report is None:
+        raise HTTPException(503, "informes no disponibles")
+    if not (_DAY_RE.match(day_from) and _DAY_RE.match(day_to)):
+        raise HTTPException(400, "day_from/day_to deben ser AAAA-MM-DD")
+    body = c.report.trades_csv(day_from, day_to, account or None, tag or None)
+    return Response(body, media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f"attachment; filename=operaciones-{day_from}-{day_to}.csv"})
 
 
 @router.get("/cash")

@@ -26,6 +26,7 @@ from tradepilot.services.trail_service import TrailService
 from tradepilot.services.auto_risk_service import AutoRiskService
 from tradepilot.services.advisor_service import AdvisorService
 from tradepilot.services.coach_service import CoachService
+from tradepilot.services.report_service import ReportService
 from tradepilot.services.sync_service import SyncService
 
 
@@ -52,6 +53,7 @@ class Container:
     advisor: AdvisorService | None = None
     coach: CoachService | None = None
     push: PushService | None = None
+    report: ReportService | None = None
 
     async def start(self) -> None:
         if self.advisor is not None:
@@ -163,6 +165,7 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
     trail = TrailService(trade, accounts, market, ai, audit, bridge, store, interval_s=cfg.TRAIL_INTERVAL_S, ai_interval_s=cfg.AI_TRAIL_INTERVAL_S, ai_model=cfg.AI_TRAIL_MODEL)
     trade.trail = trail
     push = PushService(store, bus, notify, subject=cfg.PUSH_SUBJECT)
+    report = ReportService(store, accounts, coach, performance)
     notify.commands = TelegramCommands(notify, accounts, risk, trade, market, bridge)
 
     async def _after_sync() -> None:
@@ -173,4 +176,4 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
             except Exception as exc:
                 logger.exception(f"Error en vigilancia de {name}: {exc}")
     accounts.after_sync = _after_sync
-    return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal, commissions, performance, notify, news, trade, market, trail, auto_risk, advisor, coach, push)
+    return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal, commissions, performance, notify, news, trade, market, trail, auto_risk, advisor, coach, push, report)

@@ -76,6 +76,13 @@ class CoachService:
                 "rejections": [a.message[:160] for a in audits if a.event_type in ("MANUAL_REJECTED", "FOLLOWER_REJECTED")][:8],
                 "day_closed": counts.get("DAY_CLOSED", 0) > 0}
 
+    def heuristic_rules(self, trades: list[dict]) -> list[str]:
+        """Las reglas 'para mañana' por reglas a partir de un conjunto de operaciones (el informe semanal las usa)."""
+        quick = [t for t in trades if ts.net_of(t) < 0 and (ts.seconds_of(t) or 1e9) < 60]
+        d = {"day": "periodo", "trades": trades, "stats": ts.trade_stats(trades), "by_hour": ts.by_hour(trades), "worst": [ts.brief(t) for t in ts.worst(trades)], "best": [ts.brief(t) for t in ts.best(trades)],
+             "quick_stops": [ts.brief(t) for t in quick], "near_news": [], "rejections": [], "day_closed": False}
+        return self._heuristic_review(d)["tomorrow"]
+
     def _heuristic_review(self, d: dict) -> dict:
         s, patterns, tomorrow = d["stats"], [], []
         if s["n"] == 0:

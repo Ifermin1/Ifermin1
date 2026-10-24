@@ -151,6 +151,13 @@ export function makeClient(s: Session) {
     if (!r.ok) throw new ApiError(r.status, (await r.text()) || r.statusText);
     return r.status === 204 ? (undefined as T) : r.json();
   }
+  /** Descarga binaria/texto con el token en la cabecera (informes, CSV): devuelve el blob y el nombre sugerido. */
+  async function raw(path: string): Promise<{ blob: Blob; filename: string }> {
+    const r = await fetch(base + path, { headers: { Authorization: `Bearer ${s.token}` } });
+    if (!r.ok) throw new ApiError(r.status, (await r.text()) || r.statusText);
+    const m = /filename=([^;]+)/.exec(r.headers.get("Content-Disposition") ?? "");
+    return { blob: await r.blob(), filename: m ? m[1].trim().replace(/"/g, "") : "descarga" };
+  }
   return {
     health: () => req<Health>("/api/health"),
     accounts: () => req<Account[]>("/api/accounts"),
@@ -179,6 +186,8 @@ export function makeClient(s: Session) {
     testNotifications: () => req<{ ok: boolean; error: string | null }>("/api/notifications/test", { method: "POST" }),
     discoverChat: (bot_token?: string) => req<{ ok: boolean; chat_id?: string; name?: string; error?: string }>("/api/notifications/discover-chat", { method: "POST", body: JSON.stringify({ bot_token }) }),
     /** Análisis de un periodo: `from`/`to` = AAAA-MM-DD; `account` vacío = todas. */
+    weeklyReport: (day: string, account = "", tag = "") => raw(`/api/report/weekly?day=${day}&account=${encodeURIComponent(account)}&tag=${encodeURIComponent(tag)}`),
+    tradesCsv: (from: string, to: string, account = "", tag = "") => raw(`/api/trades.csv?day_from=${from}&day_to=${to}&account=${encodeURIComponent(account)}&tag=${encodeURIComponent(tag)}`),
     analysis: (from: string, to: string, account = "") =>
       req<AnalysisData>(`/api/stats/analysis?day_from=${from}&day_to=${to}${account ? `&account=${encodeURIComponent(account)}` : ""}`),
     cash: (account = "") => req<CashEvent[]>(`/api/cash${account ? `?account=${encodeURIComponent(account)}` : ""}`),

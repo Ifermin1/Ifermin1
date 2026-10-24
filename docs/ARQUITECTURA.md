@@ -108,6 +108,8 @@ Todas las rutas requieren `Authorization: Bearer <API_TOKEN>` (o `?token=` en el
 | POST | `/api/ai/review` | `{day, force}` revisión de la sesión (IA si hay clave, si no por reglas), cacheada por día |
 | POST | `/api/ai/check-entry` | Semáforo de una orden: `{verdict: green|amber|red, reasons[]}` sin IA (ms); `ai: true` añade la opinión del modelo |
 | POST | `/api/ai/ask` | Pregunta en lenguaje natural sobre las operaciones de los últimos N días (requiere clave de IA) |
+| GET | `/api/report/weekly?day=&account=&tag=&format=` | Informe semanal imprimible (HTML autocontenido) o JSON, por cuenta o grupo |
+| GET | `/api/trades.csv?day_from=&day_to=&account=&tag=` | Operaciones en CSV (`;`, coma decimal, BOM) |
 | GET | `/api/push` | Web Push: clave pública VAPID y dispositivos suscritos |
 | POST | `/api/push/subscribe` · `/api/push/unsubscribe` · `/api/push/test` | Alta/baja de la suscripción del navegador y envío de prueba |
 | POST | `/api/mock/master-event` | Solo modo mock: simular operación del maestro |

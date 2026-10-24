@@ -68,6 +68,22 @@ export function Analysis() {
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const [aiOn, setAiOn] = useState(false);
+  const [reportDay, setReportDay] = useState(() => iso(new Date()));
+  const [reportBusy, setReportBusy] = useState<string | null>(null);
+  const [reportTag, setReportTag] = useState("");
+  const allTags = useMemo(() => [...new Set(accounts.flatMap((a) => a.tags ?? []))].sort((x, y) => x.localeCompare(y)), [accounts]);
+  const openReport = async () => {
+    if (!client) return;
+    setReportBusy("report");
+    try { const { blob } = await client.weeklyReport(reportDay, account, account ? "" : reportTag); const url = URL.createObjectURL(blob); window.open(url, "_blank"); window.setTimeout(() => URL.revokeObjectURL(url), 60000); }
+    catch (ex) { setError(ex instanceof Error ? ex.message : String(ex)); } finally { setReportBusy(null); }
+  };
+  const downloadCsv = async () => {
+    if (!client) return;
+    setReportBusy("csv");
+    try { const { blob, filename } = await client.tradesCsv(from, to, account, account ? "" : reportTag); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = filename; a.click(); window.setTimeout(() => URL.revokeObjectURL(a.href), 2000); }
+    catch (ex) { setError(ex instanceof Error ? ex.message : String(ex)); } finally { setReportBusy(null); }
+  };
   useEffect(() => { if (client) client.tradeStatus().then((s) => setAiOn(s.ai_enabled)).catch(() => {}); }, [client]);
   // los fills llegan por WebSocket: se recarga como mucho cada 2 s (una ráfaga continua no pospone la recarga)
   const lastFillId = useThrottled(audit.find((a) => a.event_type === "FOLLOWER_FILL" || a.event_type === "ACCOUNT_FILL" || a.event_type === "MASTER_RECEIVED")?.id ?? null, 2000);
@@ -135,6 +151,16 @@ export function Analysis() {
                 {accountOptions.map((id) => <option key={id} value={id}>{label(id)}{id === master ? " · maestra" : ""}</option>)}
               </select>
             </label>
+            {!account && allTags.length > 0 && (
+              <label className="inline">Grupo
+                <select value={reportTag} onChange={(e) => setReportTag(e.target.value)} data-testid="an-tag"><option value="">todos</option>{allTags.map((t) => <option key={t} value={t}>{t}</option>)}</select>
+              </label>
+            )}
+            <span className="chips report-chips" data-testid="an-report">
+              <input type="date" value={reportDay} max={iso(new Date())} onChange={(e) => setReportDay(e.target.value)} title="semana del informe" data-testid="report-day" />
+              <button className="chip-btn" disabled={reportBusy !== null} onClick={() => void openReport()} title="Informe de la semana (lunes a domingo) del día elegido: se abre para imprimir o guardar en PDF" data-testid="report-open"><Icon name="download" size={12} /> {reportBusy === "report" ? "…" : "Informe semanal"}</button>
+              <button className="chip-btn" disabled={reportBusy !== null} onClick={() => void downloadCsv()} title="Todas las operaciones del periodo elegido en CSV (Excel en español)" data-testid="csv-open"><Icon name="download" size={12} /> {reportBusy === "csv" ? "…" : "CSV del periodo"}</button>
+            </span>
             {(tab === "duration" || tab === "stats") && (
               <div className="view-tabs" data-testid="an-mode">
                 <button className={mode === "gross" ? "active" : ""} onClick={() => setMode("gross")}>Bruto</button>

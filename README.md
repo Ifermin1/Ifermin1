@@ -87,6 +87,7 @@ Si *Cuentas* queda vacío, el addon no está respondiendo en 5557: revisa que Ni
 ## Protecciones
 
 - **Grupos y presets**: etiquetas por cuenta (50K, PA…) con filtro y acciones en bloque, presets de riesgo (Conservador/Moderado/Agresivo, editables) y una tarjeta de *Recomendaciones* en Inicio con la acción de un clic (pausar, pasar a conservador, igualar, cerrar, poner perfil).
+- **Informe semanal y CSV**: informe imprimible (PDF desde el navegador) por cuenta, grupo o conjunto con resultado, por día e instrumento, retiros y pagos de la semana y reglas del coach; exportación CSV lista para Excel.
 - **Móvil**: avisos push al teléfono con la consola cerrada (Web Push, sin Telegram), órdenes por Telegram (`/estado`, `/posiciones`, `/breakeven`, `/pausar`, `/reanudar`, `/cerrar` con confirmación) y vista de bolsillo `#pocket` con P&L, posiciones y los botones de cortar.
 - **Coach IA**: revisión de cada sesión (qué costó dinero, tres reglas para mañana, nota de disciplina), semáforo de la orden antes de enviarla y chat con tus propios datos. Sin clave de IA funciona por reglas; con `ANTHROPIC_API_KEY` escribe Claude.
 - **Red de seguridad automática**: perfil de prop firm aplicado solo a las cuentas nuevas (drawdown, colchón, tope de contratos), tope de contratos también en Operar, y pérdida máxima del día para el conjunto de cuentas que cierra todo y bloquea hasta mañana.
