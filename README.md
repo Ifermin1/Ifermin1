@@ -106,6 +106,7 @@ Todo esto requiere el addon **v2.6** (el 2.5 y anteriores mandaban órdenes extr
 
 - **`Proactor event loop does not implement add_reader`** en Windows: versión antigua del engine. Haz `git pull`; el arranque actual fuerza el bucle de eventos que ZMQ necesita.
 - **`Timeout sincronizando cuentas (5557)`** o *Cuentas* vacío: NinjaTrader no está abierto o el addon no está cargado (en NinjaTrader, *Tools → Output* debe mostrar `[TradePilotX] Bridge online`).
+- **Banner "El engine rechazó el token guardado"**, `WebSocket 403` o `429 Too Many Requests`: el navegador guarda un token que ya no es el `API_TOKEN` del `engine\.env`. *Salir y volver a entrar* con el token actual (y reiniciar el engine si acabas de cambiar el `.env`).
 - **`Failed to fetch`** en la pantalla de login: el engine no está arrancado. Comprueba que la ventana de PowerShell muestra `Uvicorn running`.
 
 ## Desarrollo

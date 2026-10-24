@@ -95,8 +95,8 @@ hacia Cloudflare y Cloudflare te reenvía; en tu router no se toca nada.
    dominio; crea el túnel, el registro DNS y una tarea programada "TradePilotX Tunnel" que arranca al iniciar sesión y
    se reconecta sola. Desde entonces `https://consola.tudominio.com` funciona desde cualquier red.
 4. **En la consola**, abajo a la izquierda, **Acceso remoto** muestra la dirección pública con su QR y avisa si el
-   token es débil. Al estar publicada, el engine bloquea 5 minutos cualquier IP que falle el token 10 veces (`AUTH_LOCKED`
-   en Auditoría) y manda cabeceras de seguridad (HSTS, sin iframes).
+   token es débil. Al estar publicada, el engine bloquea 5 minutos cualquier IP que pruebe 10 tokens inválidos distintos (`AUTH_LOCKED`
+   en Auditoría; repetir el mismo token viejo no cuenta, así una consola con el token antiguo no te bloquea a ti) y manda cabeceras de seguridad (HSTS, sin iframes).
 5. **Quitarla:** `scripts\publish.ps1 -Uninstall`.
 
 Capa extra opcional: en el panel de Cloudflare, *Zero Trust → Access* te deja poner un login (correo con código, Google…)
@@ -454,6 +454,14 @@ Si la maestra opera y las seguidoras no entran, abre **Auditoría** y mira el mo
   acabas de aplicar un perfil de prop firm y la cuenta se pausó por drawdown, el tamaño elegido no corresponde con el
   saldo real (el suelo quedó por encima del saldo): corrige el perfil y reanuda.
 - `cuenta bloqueada por el prop firm` → el bróker rechazó por administración; la cuenta se desactivó sola.
+
+### Si la consola dice "El engine rechazó el token guardado"
+
+El navegador guarda el token con el que entraste; si después cambias `API_TOKEN` en `engine\.env` (o el engine arranca
+desde otra carpeta con otro `.env`), verás un banner rojo con el botón *Salir y volver a entrar*, y en la ventana del
+engine líneas `WebSocket … 403`. Entra de nuevo con el token actual; si acabas de cambiar el `.env`, reinicia el engine
+antes. Si además esa ventana dice `Cuenta Sim101 activada`, ese engine está en modo simulador: en ese mismo `.env` pon
+`ENGINE_MODE=ninja`.
 
 ## 7. Emergencias
 
