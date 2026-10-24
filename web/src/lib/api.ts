@@ -61,8 +61,12 @@ export type NotifyState = { enabled: boolean; bot_token: string; chat_id: string
 export type NotifyConfig = Pick<NotifyState, "enabled" | "bot_token" | "chat_id" | "events">;
 
 /** Operativa manual (pestaña Operar). */
+export type TrailSpec = { mode: "fixed" | "adaptive" | "ai"; distance_ticks?: number; step_ticks?: number; activate_ticks?: number; lock_be_ticks?: number; atr_k?: number; min_ticks?: number; max_ticks?: number };
 export type ManualOrder = { client_id: string; account: string; symbol: string; action: "BUY" | "SELL"; quantity: number; order_type: "MARKET" | "LIMIT" | "STOPMARKET" | "STOPLIMIT";
-                            limit_price?: number; stop_price?: number; sl_ticks?: number; tp_ticks?: number; note?: string };
+                            limit_price?: number; stop_price?: number; sl_ticks?: number; tp_ticks?: number; note?: string; trail?: TrailSpec | null };
+export type TradeTemplate = { id: string; name: string; symbol: string; quantity: number; order_type: ManualOrder["order_type"]; sl_ticks: number; tp_ticks: number; trail: TrailSpec | null };
+export type OcoLeg = { action: "BUY" | "SELL"; order_type: "STOPMARKET" | "LIMIT" | "STOPLIMIT"; limit_price?: number; stop_price?: number };
+export type Bars = { symbol: string; bars: { t: string; o: number; h: number; l: number; c: number; v: number; m: number }[]; last: number | null; age_s: number | null; atr_ticks: number | null; volume_ratio: number | null; n_bars: number };
 export type ManualOrderResult = { client_id: string; order_id: string; status: string; detail: string; ms: number; account: string; symbol: string; action: string; quantity: number;
                                   order_type: string; at: string; duplicate?: boolean };
 export type ProtectRequest = { client_id: string; account: string; symbol: string; breakeven?: boolean; be_offset_ticks?: number; sl_price?: number; tp_price?: number; last_price?: number; force?: boolean };
@@ -181,7 +185,12 @@ export function makeClient(s: Session) {
     trailStop: (account: string, symbol: string) => req<Trail>(`/api/trade/trail?account=${encodeURIComponent(account)}&symbol=${encodeURIComponent(symbol)}`, { method: "DELETE" }),
     trails: () => req<Trails>("/api/trade/trails"),
     tradeProtect: (r: ProtectRequest) => req<ProtectResult>("/api/trade/protect", { method: "POST", body: JSON.stringify(r) }),
-    tradeClose: (client_id: string, account: string, symbol: string) => req<ManualOrderResult>("/api/trade/close", { method: "POST", body: JSON.stringify({ client_id, account, symbol }) }),
+    tradeClose: (client_id: string, account: string, symbol: string, quantity = 0) => req<ManualOrderResult & { remaining?: number; cancelled_exits?: number }>("/api/trade/close", { method: "POST", body: JSON.stringify({ client_id, account, symbol, quantity }) }),
+    tradeOco: (r: { client_id: string; account: string; symbol: string; quantity: number; legs: OcoLeg[]; sl_ticks?: number; tp_ticks?: number; trail?: TrailSpec | null }) =>
+      req<{ client_id: string; legs: ManualOrderResult[]; trail_pending?: boolean }>("/api/trade/oco", { method: "POST", body: JSON.stringify(r) }),
+    templates: () => req<{ templates: TradeTemplate[] }>("/api/ui/trade-templates"),
+    saveTemplates: (templates: TradeTemplate[]) => req<{ templates: TradeTemplate[] }>("/api/ui/trade-templates", { method: "PUT", body: JSON.stringify({ templates }) }),
+    bars: (symbol: string, n = 60) => req<Bars>(`/api/market/bars?symbol=${encodeURIComponent(symbol)}&n=${n}`),
     newsAlerts: () => req<NewsAlerts>("/api/news/alerts"),
     newsStats: (days = 90) => req<NewsStats>(`/api/news/stats?days=${days}`),
     newsAnalyze: (id: string, kind: "pre" | "post", force = false) => req<{ event: NewsEvent; analysis: NewsAnalysis; ai: AiStatus }>(`/api/news/analyze/${encodeURIComponent(id)}?kind=${kind}${force ? "&force=true" : ""}`, { method: "POST" }),

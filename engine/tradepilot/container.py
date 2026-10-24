@@ -151,10 +151,11 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
     accounts.on_account_seen = auto_risk.on_account_seen
     advisor = AdvisorService(accounts, risk, replication, store)
     trail = TrailService(trade, accounts, market, ai, audit, bridge, store, interval_s=cfg.TRAIL_INTERVAL_S, ai_interval_s=cfg.AI_TRAIL_INTERVAL_S, ai_model=cfg.AI_TRAIL_MODEL)
+    trade.trail = trail
 
     async def _after_sync() -> None:
         # independientes: un fallo en una vigilancia no debe apagar la otra
-        for name, fn in (("sincronización", sync.check), ("riesgo", risk.check), ("salidas huérfanas", trade.sweep_orphans)):
+        for name, fn in (("sincronización", sync.check), ("riesgo", risk.check), ("salidas huérfanas", trade.sweep_orphans), ("trailing pendiente", trade.apply_pending_trails)):
             try:
                 await fn()
             except Exception as exc:

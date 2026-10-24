@@ -189,8 +189,9 @@ class ManualOrderRequest(BaseModel):
     limit_price: float = 0.0
     stop_price: float = 0.0
     sl_ticks: int = 0                                        # stop de protección automático (ticks desde el fill), solo a mercado
-    tp_ticks: int = 0                                        # objetivo automático (ticks desde el fill), solo a mercado
+    tp_ticks: int = 0                                        # objetivo automático (ticks desde el fill)
     note: str = ""
+    trail: Optional["TrailSpec"] = None                      # trailing que se activa solo cuando exista la posición
 
 
 class CancelOrderRequest(BaseModel):
@@ -210,6 +211,52 @@ class ClosePositionRequest(BaseModel):
     client_id: str = Field(min_length=4, max_length=48)
     account: str
     symbol: str
+    quantity: int = Field(default=0, ge=0)       # 0 = toda la posición; N = cierre parcial
+
+
+class TrailSpec(BaseModel):
+    mode: str = "fixed"
+    distance_ticks: int = Field(default=40, ge=1, le=4000)
+    step_ticks: int = Field(default=2, ge=1, le=400)
+    activate_ticks: int = Field(default=0, ge=0, le=4000)
+    lock_be_ticks: int = Field(default=0, ge=0, le=4000)
+    atr_k: float = Field(default=1.5, ge=0.3, le=5)
+    min_ticks: int = Field(default=8, ge=1, le=2000)
+    max_ticks: int = Field(default=200, ge=1, le=4000)
+
+
+class OcoLeg(BaseModel):
+    action: str
+    order_type: str = "STOPMARKET"
+    limit_price: float = 0.0
+    stop_price: float = 0.0
+
+
+class OcoEntryRequest(BaseModel):
+    client_id: str = Field(min_length=4, max_length=40)
+    account: str
+    symbol: str
+    quantity: int = Field(gt=0)
+    legs: list[OcoLeg]
+    sl_ticks: int = 0
+    tp_ticks: int = 0
+    note: str = ""
+    trail: Optional[TrailSpec] = None
+
+
+class TradeTemplate(BaseModel):
+    id: str = Field(min_length=1, max_length=24)
+    name: str = Field(min_length=1, max_length=40)
+    symbol: str = ""
+    quantity: int = Field(default=1, ge=1)
+    order_type: str = "MARKET"
+    sl_ticks: int = 0
+    tp_ticks: int = 0
+    trail: Optional[TrailSpec] = None
+
+
+class TradeTemplates(BaseModel):
+    templates: list[TradeTemplate]
 
 
 class ProtectRequest(BaseModel):

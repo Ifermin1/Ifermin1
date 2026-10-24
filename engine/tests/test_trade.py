@@ -235,3 +235,43 @@ async def test_tags_presets_and_advice(client: AsyncClient, container):
     codes = {(a["account_id"], a["code"]) for a in r.json()["advice"]}
     assert ("Sim101", "NO_LIMITS") in codes and ("Sim101", "LOSING_STREAK") in codes
     assert r.json()["counts"]["warn"] >= 2
+
+
+async def test_oco_entry_partial_close_templates_and_pending_trail(client: AsyncClient, container):
+    b = container.bridge
+    px = b._px["NQ 12-26"]
+    # OCO de entrada: compra stop arriba / venta stop abajo con stop automático; quedan vivas y enlazadas
+    r = await client.post("/api/trade/oco", json={"client_id": "oco-1", "account": "Sim101", "symbol": "NQ 12-26", "quantity": 1, "sl_ticks": 40,
+                                                 "legs": [{"action": "BUY", "order_type": "STOPMARKET", "stop_price": px + 10}, {"action": "SELL", "order_type": "STOPMARKET", "stop_price": px - 10}],
+                                                 "trail": {"mode": "fixed", "distance_ticks": 30}})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert len(d["legs"]) == 2 and d["trail_pending"] and set(b.oco_groups.values()) >= {"TPM-OCO-oco-1"}
+    await container.accounts.sync_once()
+    acc = next(a for a in container.accounts.all() if a.account_id == "Sim101")
+    assert sorted(o.action for o in acc.working_orders) == ["BUY", "SELL"]
+    # brackets en una orden límite: ya no se rechaza
+    r = await client.post("/api/trade/order", json={"client_id": "lim-br", "account": "Sim102", "symbol": "ES 12-26", "action": "BUY", "quantity": 1, "order_type": "LIMIT", "limit_price": 5000, "sl_ticks": 20, "tp_ticks": 40})
+    assert r.status_code == 200
+    # entrada a mercado con trailing automático: el trailing arranca cuando existe la posición
+    r = await client.post("/api/trade/order", json={"client_id": "mkt-trail", "account": "Sim103", "symbol": "NQ 12-26", "action": "BUY", "quantity": 4, "order_type": "MARKET", "sl_ticks": 40,
+                                                   "trail": {"mode": "fixed", "distance_ticks": 20}})
+    assert r.status_code == 200 and r.json()["trail_pending"]
+    await container.accounts.sync_once()
+    await container.trade.apply_pending_trails()
+    assert container.trail.get("Sim103", "NQ 12-26") is not None
+    # cierre parcial: 2 de 4; el stop pasa a 2 contratos
+    r = await client.post("/api/trade/close", json={"client_id": "close-half", "account": "Sim103", "symbol": "NQ 12-26", "quantity": 2})
+    assert r.status_code == 200 and r.json()["remaining"] == 2 and r.json()["quantity"] == 2
+    await container.accounts.sync_once()
+    acc = next(a for a in container.accounts.all() if a.account_id == "Sim103")
+    assert acc.open_positions[0].quantity == 2 and all(o.quantity == 2 for o in acc.working_orders)
+    # plantillas
+    tpl = [{"id": "nq-scalp", "name": "NQ scalp", "symbol": "NQ 12-26", "quantity": 2, "order_type": "MARKET", "sl_ticks": 40, "tp_ticks": 80, "trail": {"mode": "adaptive", "distance_ticks": 40}}]
+    assert (await client.put("/api/ui/trade-templates", json={"templates": tpl})).status_code == 200
+    assert (await client.get("/api/ui/trade-templates")).json()["templates"][0]["trail"]["mode"] == "adaptive"
+    assert (await client.put("/api/ui/trade-templates", json={"templates": tpl + tpl})).status_code == 422
+    # velas para el gráfico
+    await b.emit_price("NQ 12-26", move=0.0)
+    r = await client.get("/api/market/bars?symbol=NQ%2012-26&n=50")
+    assert r.status_code == 200 and isinstance(r.json()["bars"], list) and r.json()["bars"][-1]["c"] == b._px["NQ 12-26"] and r.json()["last"] == b._px["NQ 12-26"] and r.json()["n_bars"] >= 1

@@ -366,6 +366,23 @@ actualizar: NinjaScript Editor → F5).
   - **Stop / Objetivo rápidos**: los mismos botones de 100 en 100 $ (o puntos/ticks, o 1R-3R) medidos desde el precio de
     entrada, con vista previa del precio resultante, los dólares totales de la posición y el ratio. *Aplicar* mueve los
     que existan o crea los que falten (los dos nuevos a la vez van enlazados en OCO con addon ≥ 2.8).
+- **Plantillas de operación**: con el ticket configurado (instrumento, cantidad, tipo, stop/objetivo, trailing) pulsa
+  *guardar la actual como plantilla* y dale nombre ("NQ scalp"). Aparecen como botones sobre el ticket: un clic la carga y
+  solo queda COMPRAR o VENDER. La ✕ la borra.
+- **Stop y objetivo automáticos también en límite y stop**: se crean (OCO) cuando la entrada se ejecute, sea del tipo que
+  sea.
+- **Trailing al ejecutarse**: en el ticket, *trailing al ejecutarse* (fijo, adaptativo o IA) deja programado el trailing
+  con la distancia del stop; arranca solo en cuanto exista la posición (también en las OCO de entrada) y luego se ajusta en
+  *Proteger*.
+- **OCO de entrada** (pestaña *OCO* del tipo de orden): compra stop por encima y venta stop por debajo del precio (botones
+  ±4/8/20 ticks del último); la que ejecute cancela la otra (addon ≥ 2.8). El stop/objetivo automáticos y el trailing se
+  aplican a la que entre.
+- **Cierre parcial**: en cada posición, *½* cierra la mitad y *N…* pregunta cuántos; el stop y el objetivo se reducen a lo
+  que queda. *Cerrar* lo cierra todo y cancela sus salidas.
+- **Gráfico de 1 minuto** (tarjeta bajo el ticket): velas que el engine construye con los ticks del addon para el
+  instrumento del ticket, con las líneas de entrada, stop(s), objetivo(s) y último precio de la posición de la cuenta
+  elegida. **Arrastra el stop o el objetivo** y al soltar se envía la modificación (igual que Proteger; en la maestra las
+  copias siguen). Botones 30/60/120/240 min.
 - **Trailing stop** (dentro de *Proteger*): el stop sigue al precio solo, en tres modos:
   - **Fijo**: a una distancia fija en ticks del mejor precio alcanzado; solo se mueve a favor.
   - **Adaptativo**: la distancia es *k × ATR* de las velas de 1 minuto que el engine construye con los ticks del addon,

@@ -720,3 +720,7 @@ table.trades tbody tr.sel td { background: var(--hl); box-shadow: inset 0 0 0 1p
 .trail-state { padding: 8px 10px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--line); }
 .chip.tag { background: rgba(167,139,250,.14); color: #c4b5fd; border-color: rgba(167,139,250,.4); cursor: pointer; } .chip.tag.active { background: #a78bfa; color: #1e1b4b; }
 .tag-filter { margin-left: 8px; align-items: center; }
+.ticket-actions.one { grid-template-columns: 1fr; } .ticket-actions .oco-btn { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; }
+.tpl { display: inline-flex; align-items: center; gap: 2px; }
+.oco-row { flex-direction: column; align-items: stretch; }
+.candle-box svg.dragging { cursor: ns-resize; }

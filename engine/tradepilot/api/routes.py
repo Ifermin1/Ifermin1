@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from tradepilot.api.auth import require_token
-from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest, ProtectRequest, TrailRequest, DayLossRequest, AutoRiskRequest, RiskPresets, ApplyPresetRequest, TagsRequest
+from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest, ProtectRequest, TrailRequest, DayLossRequest, AutoRiskRequest, RiskPresets, ApplyPresetRequest, TagsRequest, OcoEntryRequest, TradeTemplates
 from tradepilot.container import Container
 from tradepilot.domain.risk import RiskLimit, Schedule
 
@@ -427,7 +427,7 @@ async def trade_close(body: ClosePositionRequest, request: Request):
     """Cierra solo la posición de ese instrumento con una orden a mercado contraria."""
     c = _c(request)
     try:
-        return await _trade(c).close_position(body.account, body.symbol, body.client_id)
+        return await _trade(c).close_position(body.account, body.symbol, body.client_id, body.quantity)
     except ValueError as exc:
         raise HTTPException(422, str(exc))
     except RuntimeError as exc:
@@ -479,6 +479,59 @@ async def trade_trail_stop(account: str, symbol: str, request: Request):
     if t is None:
         raise HTTPException(404, "esa posición no tiene trailing")
     return t
+
+
+@router.post("/trade/oco")
+async def trade_oco(body: OcoEntryRequest, request: Request):
+    """OCO de entrada: dos órdenes enlazadas (p. ej. compra stop arriba y venta stop abajo); la que ejecuta cancela la otra."""
+    c = _c(request)
+    try:
+        req = body.model_dump()
+        trail = req.pop("trail", None)
+        out = await _trade(c).place_oco(req)
+        if trail:
+            for leg in out["legs"]:
+                _trade(c)._pending_trails[(leg["account"].lower(), leg["symbol"].lower())] = {**trail, "account": leg["account"], "symbol": leg["symbol"], "expires": __import__("time").monotonic() + 6 * 3600}
+            out["trail_pending"] = True
+        return out
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(502, str(exc))
+
+
+TEMPLATES_KEY = "ui.trade_templates"
+
+
+@router.get("/ui/trade-templates")
+def get_templates(request: Request):
+    import json as _json
+    raw = _c(request).store.get_kv(TEMPLATES_KEY)
+    try:
+        return {"templates": _json.loads(raw) if raw else []}
+    except ValueError:
+        return {"templates": []}
+
+
+@router.put("/ui/trade-templates")
+def put_templates(body: TradeTemplates, request: Request):
+    import json as _json
+    ids = [t.id for t in body.templates]
+    if len(ids) != len(set(ids)):
+        raise HTTPException(422, "ids de plantilla repetidos")
+    _c(request).store.set_kv(TEMPLATES_KEY, _json.dumps([t.model_dump() for t in body.templates]))
+    return {"templates": [t.model_dump() for t in body.templates]}
+
+
+@router.get("/market/bars")
+def market_bars(symbol: str, request: Request, n: int = 120):
+    """Velas de 1 minuto construidas con los ticks del addon (para el gráfico de Operar)."""
+    c = _c(request)
+    if c.market is None:
+        raise HTTPException(503, "sin mercado")
+    snap = c.market.snapshot(symbol)
+    snap["n_bars"] = snap.pop("bars", 0)
+    return {**snap, "symbol": symbol, "bars": [b.as_dict() | {"m": b.minute} for b in c.market.recent_bars(symbol, max(10, min(n, 240)))]}
 
 
 @router.get("/trade/trails")

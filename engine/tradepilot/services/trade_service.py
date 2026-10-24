@@ -40,7 +40,9 @@ class TradeService:
         self._inflight: set[str] = set()
         self.stats = {"orders": 0, "rejected": 0, "cancels": 0, "modifies": 0, "unconfirmed": 0, "protects": 0, "orphans": 0}
         self._exits: dict[tuple[str, str], str] = {}
-        self._cancelled_by_us: OrderedDict[str, float] = OrderedDict()   # orderKey -> cuándo: para no auditar dos veces la cancelación     # (cuenta, orderKey) -> símbolo: salidas creadas por Proteger, para cancelarlas si la posición ya cerró
+        self._cancelled_by_us: OrderedDict[str, float] = OrderedDict()   # orderKey -> cuándo: para no auditar dos veces la cancelación
+        self._pending_trails: dict[tuple[str, str], dict] = {}            # (cuenta, símbolo) -> trailing a activar cuando exista la posición
+        self.trail = None                                                  # TrailService (lo fija el contenedor)     # (cuenta, orderKey) -> símbolo: salidas creadas por Proteger, para cancelarlas si la posición ya cerró
 
     # ---- comprobaciones ----
     def _check_addon(self) -> None:
@@ -99,8 +101,6 @@ class TradeService:
         sl, tp = int(req.get("sl_ticks") or 0), int(req.get("tp_ticks") or 0)
         if sl < 0 or tp < 0 or sl > 2000 or tp > 2000:
             raise ValueError("stop y objetivo en ticks deben estar entre 0 y 2000")
-        if otype != "MARKET" and (sl or tp):
-            raise ValueError("el stop/objetivo automático solo se admite en órdenes a mercado (en límite o stop ponlos después, cuando se ejecute)")
         cid = str(req.get("client_id", "")).strip()
         if not cid or len(cid) > 48 or not all(ch.isalnum() or ch in "-_" for ch in cid):
             raise ValueError("client_id inválido")
@@ -119,6 +119,55 @@ class TradeService:
         return result
 
     async def place(self, req: dict) -> dict:
+        cid = str(req.get("client_id", "")).strip()
+        if cid and cid in self._done:
+            return {**self._done[cid], "duplicate": True}
+        trail_req = req.pop("trail", None) if isinstance(req, dict) else None
+        result = await self._place(req)
+        if trail_req and isinstance(trail_req, dict) and trail_req.get("mode") and not result.get("duplicate"):
+            # el trailing arranca solo cuando la posición exista (al ejecutarse la entrada): lo revisa apply_pending_trails tras cada sincronización
+            self._pending_trails[(result["account"].lower(), result["symbol"].lower())] = {**trail_req, "account": result["account"], "symbol": result["symbol"], "expires": time.monotonic() + 6 * 3600}
+            result["trail_pending"] = True
+            if self.trail is not None:
+                await self.apply_pending_trails()
+        return result
+
+    async def apply_pending_trails(self) -> None:
+        if not self._pending_trails or self.trail is None:
+            return
+        for key, req in list(self._pending_trails.items()):
+            if time.monotonic() > req["expires"]:
+                self._pending_trails.pop(key, None)
+                continue
+            snap = self.accounts.find(req["account"])
+            if snap is None or not any(p.symbol.lower() == req["symbol"].lower() and p.quantity for p in snap.open_positions):
+                continue
+            self._pending_trails.pop(key, None)
+            try:
+                await self.trail.start_trail({k: v for k, v in req.items() if k != "expires"})
+            except Exception as exc:
+                self.audit.log("MANUAL_REJECTED", f"{req['account']}: no se pudo activar el trailing automático en {req['symbol']}: {exc}", target=req["account"])
+
+    async def place_oco(self, req: dict) -> dict:
+        """Dos entradas enlazadas (OCO): p. ej. compra stop por encima y venta stop por debajo; la que ejecuta cancela la otra.
+        Requiere addon >= 2.8 (campo oco); en uno anterior se mandan sueltas y se avisa."""
+        cid = str(req.get("client_id", "")).strip()
+        if not cid:
+            raise ValueError("client_id obligatorio")
+        base = {k: req.get(k) for k in ("account", "symbol", "quantity", "sl_ticks", "tp_ticks", "note")}
+        legs = []
+        for i, leg in enumerate(req.get("legs") or []):
+            legs.append({**base, **leg, "client_id": f"{cid}-{i + 1}", "oco": f"TPM-OCO-{cid}"})
+        if len(legs) != 2:
+            raise ValueError("una OCO de entrada lleva exactamente dos patas")
+        for leg in legs:
+            self.validate(leg)              # las dos válidas antes de mandar ninguna
+        out = [await self._place(leg) for leg in legs]
+        self.audit.log("MANUAL_ORDER", f"{base['account']}: OCO de entrada en {base['symbol']}: " + " / ".join(f"{o['action']} {o['quantity']} {o['order_type']}" for o in out) + " (la que ejecuta cancela la otra)",
+                       target=str(base["account"]), details={"client_id": cid, "legs": out})
+        return {"client_id": cid, "legs": out}
+
+    async def _place(self, req: dict) -> dict:
         cid = str(req.get("client_id", "")).strip()
         if cid and cid in self._done:
             return {**self._done[cid], "duplicate": True}
@@ -192,19 +241,33 @@ class TradeService:
                        target=acc, details={"order_id": order_id, "reply": reply, "ms": ms})
         return {"account": acc, "order_id": order_id, "detail": reply, "ms": ms}
 
-    async def close_position(self, account: str, symbol: str, client_id: str) -> dict:
-        """Cierra solo la posición de ese instrumento con una orden a mercado contraria (a diferencia de Cerrar cuenta, que
-        cancela todo y cierra todos los instrumentos)."""
+    async def close_position(self, account: str, symbol: str, client_id: str, quantity: int = 0) -> dict:
+        """Cierra la posición de ese instrumento (o `quantity` contratos de ella) con una orden a mercado contraria. Cierre total:
+        se cancelan sus stops y objetivos; parcial: se reducen a lo que queda."""
         snap = self.accounts.find(account)
         if snap is None:
             raise ValueError(f"cuenta desconocida: {account}")
         pos = next((p for p in snap.open_positions if p.symbol.lower() == symbol.lower() and p.quantity), None)
         if pos is None:
             raise ValueError(f"{snap.account_id} no tiene posición en {symbol}")
+        total = abs(pos.quantity)
+        qty = total if quantity <= 0 or quantity >= total else int(quantity)
         result = await self.place({"client_id": client_id, "account": snap.account_id, "symbol": pos.symbol, "action": "SELL" if pos.quantity > 0 else "BUY",
-                                   "quantity": abs(pos.quantity), "order_type": "MARKET", "closing": True, "note": "cierre de posición desde la consola"})
-        # sin posición, un stop o un objetivo vivos serían una ENTRADA nueva: se cancelan ya (en la maestra, las copias siguen)
+                                   "quantity": qty, "order_type": "MARKET", "closing": True, "note": "cierre parcial desde la consola" if qty < total else "cierre de posición desde la consola"})
         stops, tps = self._exit_orders(snap, pos.symbol, pos.quantity)
+        if qty < total:
+            remaining = total - qty
+            for o in stops + tps:
+                if o.quantity != remaining:
+                    try:
+                        await self.bridge.modify_order(snap.account_id, o.order_id, remaining, 0.0, 0.0)
+                    except Exception as exc:
+                        logger.warning(f"Cierre parcial de {snap.account_id} {pos.symbol}: no se pudo ajustar {o.order_id}: {exc}")
+            if stops or tps:
+                self.audit.log("MANUAL_MODIFY", f"{snap.account_id}: tras cerrar {qty} de {total} en {pos.symbol}, sus stops/objetivos pasan a {remaining} contratos", target=snap.account_id)
+            result["remaining"] = remaining
+            return result
+        # sin posición, un stop o un objetivo vivos serían una ENTRADA nueva: se cancelan ya (en la maestra, las copias siguen)
         cancelled = []
         for o in stops + tps:
             try:
