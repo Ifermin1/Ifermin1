@@ -61,6 +61,12 @@ class Settings(BaseSettings):
     NEWS_ALERT_MINUTES: int = 30          # aviso (Inicio + Telegram) cuando falta menos de esto para una noticia
     NEWS_COUNTRIES: str = "USD"           # países vigilados (USD,EUR,...); "" = todos
     NEWS_MIN_IMPACT: str = "low"          # impacto mínimo vigilado: low | medium | high
+    # Hub (opcional): un servidor central al que este engine manda operaciones, estado y avisos (varios PCs / cuentas en un
+    # sitio). Vacío = desactivado. Lo que no se pueda enviar se guarda en una cola local y se reintenta.
+    HUB_URL: str = ""
+    HUB_TOKEN: str = ""
+    HUB_NODE: str = ""                      # nombre de este engine en el hub; vacío = nombre del PC
+    HUB_INTERVAL_S: int = 30
     MOCK_DEMO_HISTORY: bool = True          # simulador: genera un mes de operaciones inventadas para el calendario (no en :memory:)
 
 

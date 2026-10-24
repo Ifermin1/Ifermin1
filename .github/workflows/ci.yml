@@ -14,6 +14,8 @@ jobs:
         with: { python-version: "3.11" }
       - run: pip install -e "engine[dev]"
       - run: cd engine && python -m pytest -q -p no:cacheprovider
+      - name: Hub (pytest)
+        run: python -m pytest -q -p no:cacheprovider hub/tests
 
   web:
     name: Consola (tsc + vite build)

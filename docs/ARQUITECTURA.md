@@ -61,7 +61,7 @@ Componentes:
 | Fase | Qué | Esfuerzo | Estado |
 |---|---|---|---|
 | 1 | **PWA** instalable (lo que hay ahora) | Ya hecho | ✅ |
-| 2 | **Notificaciones push** (Web Push desde el engine cuando hay `BLOCKED`, `ERROR` o kill switch) | Medio | pendiente |
+| 2 | **Notificaciones push** (Web Push desde el engine: límites, cierres, rechazos, caídas; abren la vista de bolsillo `#pocket`) + órdenes por Telegram | Hecho | ✅ |
 | 3 | Empaquetar la misma web con **Capacitor** para publicar en App Store / Play Store si hace falta | Bajo-medio (no se reescribe nada) | opcional |
 
 No hace falta una app nativa aparte: la PWA cubre el 90 % y Capacitor reutiliza el mismo código si en el futuro quieres tienda de apps.
@@ -108,6 +108,7 @@ Todas las rutas requieren `Authorization: Bearer <API_TOKEN>` (o `?token=` en el
 | POST | `/api/ai/review` | `{day, force}` revisión de la sesión (IA si hay clave, si no por reglas), cacheada por día |
 | POST | `/api/ai/check-entry` | Semáforo de una orden: `{verdict: green|amber|red, reasons[]}` sin IA (ms); `ai: true` añade la opinión del modelo |
 | POST | `/api/ai/ask` | Pregunta en lenguaje natural sobre las operaciones de los últimos N días (requiere clave de IA) |
+| GET/POST | `/api/hub` · `/api/hub/flush` | Estado del reporter del hub (cola, último envío) y envío forzado |
 | GET | `/api/report/weekly?day=&account=&tag=&format=` | Informe semanal imprimible (HTML autocontenido) o JSON, por cuenta o grupo |
 | GET | `/api/trades.csv?day_from=&day_to=&account=&tag=` | Operaciones en CSV (`;`, coma decimal, BOM) |
 | GET | `/api/push` | Web Push: clave pública VAPID y dispositivos suscritos |
@@ -180,11 +181,20 @@ contra una foto de posiciones pedida después de recibirlo, y los fills parciale
 aún deba (`_master_filled`) en vez de saltarse por "ya ejecutó su orden".
 Avisos por Telegram: hechos (`NotifyService`).
 
+## 6b. Hub (varios engines en un sitio)
+
+Cada PC de trading sigue teniendo su engine junto a NinjaTrader (la copia nunca depende de Internet). Opcionalmente, cada
+engine **empuja** al hub (`hub/`, FastAPI + SQLite, `hub/README.md`) sus operaciones cerradas, una foto de su estado y los
+avisos importantes: `HubReporter` encola en `hub_outbox` y manda lotes a `POST /api/ingest` cada `HUB_INTERVAL_S`; si el
+hub no responde la cola se conserva y se reintenta (tope 5000 elementos). El hub es solo lectura (fase 1): `GET /api/summary`
+y una página mínima con el P&L del día de cada nodo, cuentas, kill switch, operaciones de la semana y últimos avisos. La
+fase 2 (órdenes desde el hub, usuarios) queda abierta.
+
 ## 7. Próximos pasos sugeridos
 
 1. **Probar con NinjaTrader real**: `ENGINE_MODE=ninja` en el PC de trading y verificar que el addon ZMQ sigue enviando el mismo JSON (el protocolo no ha cambiado).
 2. **Túnel**: elegir Cloudflare Tunnel o Tailscale y probar la PWA desde el móvil con datos.
-3. **Push**: notificaciones al teléfono en `BLOCKED`/`ERROR`/kill switch.
+3. **Push**: hecho (Web Push + vista de bolsillo + órdenes por Telegram).
 4. **P&L diario real**: NinjaTrader hoy solo devuelve balance por 5557; ampliar el addon para enviar P&L y posiciones abiertas y así activar el límite de pérdida diaria (ya está modelado en `RiskLimit.max_daily_loss`).
 5. **Multiusuario / roles** si más de una persona va a operar la consola (hoy un solo token).
 6. **Historial de ejecuciones** con confirmación del ejecutor (fills reales) además de la auditoría de envío.

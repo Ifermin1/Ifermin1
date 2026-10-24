@@ -480,6 +480,14 @@ actualizar: NinjaScript Editor → F5).
 - Por API: `GET /api/report/weekly?day=AAAA-MM-DD&account=&tag=&format=html|json` y
   `GET /api/trades.csv?day_from=&day_to=&account=&tag=`, con el token en la cabecera.
 
+### Hub: varios PCs o firmas en un solo sitio (opcional)
+
+Si tienes más de un PC de trading (o quieres el histórico de todas las cuentas junto), arranca el **hub** en cualquier
+máquina (`hub/README.md`: `pip install -r hub/requirements.txt`, `HUB_TOKEN`, `python -m uvicorn hub.app:app --port 8100`)
+y en cada `engine\.env` pon `HUB_URL`, `HUB_TOKEN` y un `HUB_NODE` (nombre del PC). Cada engine manda sus operaciones,
+estado y avisos; si el hub está apagado, los guarda y los reenvía cuando vuelva. En la consola, *Riesgo → Hub* muestra la
+cola y el último envío. La página del hub enseña el P&L del día de cada engine, sus cuentas, kill switch y últimos avisos.
+
 ### Coach IA (pestaña Análisis → Coach IA)
 
 - **Revisión de la sesión**: elige el día y verás qué costó o dio dinero (stops en menos de un minuto, operaciones

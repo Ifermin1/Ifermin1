@@ -382,6 +382,27 @@ def stats_analysis(request: Request, day_from: str | None = None, day_to: str | 
     return c.performance.analysis(d0, d1, account or None)
 
 
+@router.get("/hub")
+def hub_state(request: Request):
+    """Estado del reporter del hub: configurado o no, cola pendiente, último envío y errores."""
+    c = _c(request)
+    if c.hub is None:
+        raise HTTPException(503, "hub no disponible")
+    return c.hub.state()
+
+
+@router.post("/hub/flush")
+async def hub_flush(request: Request):
+    """Fuerza un ciclo: recoge lo nuevo y lo envía al hub ahora."""
+    c = _c(request)
+    if c.hub is None:
+        raise HTTPException(503, "hub no disponible")
+    if not c.hub.enabled:
+        raise HTTPException(400, "hub no configurado: pon HUB_URL y HUB_TOKEN en engine/.env y reinicia")
+    r = await c.hub.tick()
+    return {**r, **c.hub.state()}
+
+
 @router.get("/report/weekly")
 def report_weekly(request: Request, day: str | None = None, account: str | None = None, tag: str | None = None, format: str = "html"):
     """Informe semanal (lunes-domingo de `day`, hoy por defecto) por cuenta o por grupo (`tag`), como HTML imprimible o JSON."""

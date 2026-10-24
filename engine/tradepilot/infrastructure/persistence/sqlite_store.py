@@ -85,6 +85,9 @@ class SQLiteStore:
                     event_id TEXT, symbol TEXT, px_before REAL, px_5m REAL, px_15m REAL, px_30m REAL, high REAL, low REAL,
                     updated_at TEXT, PRIMARY KEY (event_id, symbol)
                 );
+                CREATE TABLE IF NOT EXISTS hub_outbox (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, payload TEXT, created_at TEXT, attempts INTEGER DEFAULT 0, last_error TEXT
+                );
                 """
             )
             # migraciones ligeras
@@ -454,6 +457,48 @@ class SQLiteStore:
             rows = self._conn.execute("SELECT r.*, e.time, e.impact, e.title, e.country, e.forecast, e.actual FROM news_reaction r JOIN news_events e ON e.id = r.event_id "
                                       "WHERE e.time >= ? AND e.time <= ? ORDER BY e.time", (from_iso, to_iso)).fetchall()
         return [dict(r) for r in rows]
+
+    # ---- hub: cola de salida (lo que aún no se ha podido enviar al hub) ----
+    def get_trades_since(self, last_id: int, limit: int = 200) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute("SELECT * FROM trades WHERE id > ? ORDER BY id LIMIT ?", (int(last_id), int(limit))).fetchall()
+        return [dict(r) for r in rows]
+
+    def outbox_add(self, kind: str, payload: str, created_at: str) -> int:
+        with self._lock, self._conn:
+            cur = self._conn.execute("INSERT INTO hub_outbox (kind, payload, created_at) VALUES (?, ?, ?)", (kind, payload, created_at))
+            return int(cur.lastrowid)
+
+    def outbox_peek(self, limit: int = 200) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute("SELECT * FROM hub_outbox ORDER BY id LIMIT ?", (int(limit),)).fetchall()
+        return [dict(r) for r in rows]
+
+    def outbox_delete(self, ids: list[int]) -> None:
+        if not ids:
+            return
+        with self._lock, self._conn:
+            self._conn.executemany("DELETE FROM hub_outbox WHERE id = ?", [(int(i),) for i in ids])
+
+    def outbox_delete_kind(self, kind: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM hub_outbox WHERE kind = ?", (kind,))
+
+    def outbox_fail(self, ids: list[int], error: str) -> None:
+        if not ids:
+            return
+        with self._lock, self._conn:
+            self._conn.executemany("UPDATE hub_outbox SET attempts = attempts + 1, last_error = ? WHERE id = ?", [(error[:200], int(i)) for i in ids])
+
+    def outbox_count(self) -> int:
+        with self._lock:
+            return int(self._conn.execute("SELECT COUNT(*) FROM hub_outbox").fetchone()[0])
+
+    def outbox_trim(self, max_rows: int) -> int:
+        """Si el hub lleva mucho caído, se descartan los elementos más antiguos (nunca los últimos `max_rows`)."""
+        with self._lock, self._conn:
+            cur = self._conn.execute("DELETE FROM hub_outbox WHERE id NOT IN (SELECT id FROM hub_outbox ORDER BY id DESC LIMIT ?)", (int(max_rows),))
+            return int(cur.rowcount or 0)
 
     def get_kv(self, key: str, default: str | None = None) -> str | None:
         with self._lock:

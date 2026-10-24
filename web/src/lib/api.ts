@@ -59,6 +59,8 @@ export type MonthStats = { from: string; to: string; days: DayStat[]; trades: Tr
 export type NotifyState = { enabled: boolean; bot_token: string; chat_id: string; events: string[]; defaults: string[]; titles: Record<string, string>;
                             stats: { sent: number; errors: number; last_error: string | null; last_sent_at: number | null; suppressed: number } };
 export type NotifyConfig = Pick<NotifyState, "enabled" | "bot_token" | "chat_id" | "events">;
+export type HubState = { enabled: boolean; url: string; node: string; interval_s: number; queued: number; last_trade_id: number;
+                         stats: { sent: number; batches: number; errors: number; last_error: string | null; last_ok_at: number | null; dropped: number } };
 export type PushState = { available: boolean; public_key: string; subscriptions: number; devices: { endpoint: string; ua: string; created_at: number | null }[];
                           stats: { sent: number; errors: number; removed: number; last_error: string | null; last_sent_at: number | null } };
 
@@ -179,6 +181,8 @@ export function makeClient(s: Session) {
     execution: (limit = 40) => req<Execution[]>(`/api/execution?limit=${limit}`),
     notifications: () => req<NotifyState>("/api/notifications"),
     setNotifications: (c: NotifyConfig) => req<NotifyState>("/api/notifications", { method: "PUT", body: JSON.stringify(c) }),
+    hub: () => req<HubState>("/api/hub"),
+    hubFlush: () => req<HubState & { ok: boolean; sent: number; error: string | null }>("/api/hub/flush", { method: "POST" }),
     pushState: () => req<PushState>("/api/push"),
     pushSubscribe: (subscription: Record<string, unknown>, ua: string) => req<PushState>("/api/push/subscribe", { method: "POST", body: JSON.stringify({ subscription, ua }) }),
     pushUnsubscribe: (endpoint: string) => req<PushState>("/api/push/unsubscribe", { method: "POST", body: JSON.stringify({ endpoint }) }),
