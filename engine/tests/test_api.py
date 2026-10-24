@@ -1049,10 +1049,14 @@ async def test_bruteforce_throttle_locks_ip_and_security_headers(client: AsyncCl
     from tradepilot.api import auth
     auth.reset_throttle()
     try:
-        bad = {"Authorization": "Bearer nope", "X-Forwarded-For": "203.0.113.9"}
-        for _ in range(auth.MAX_FAILS - 1):
-            assert (await client.get("/api/accounts", headers=bad)).status_code == 401
-        r = await client.get("/api/accounts", headers=bad)
+        # el mismo token inválido repetido (una consola con un token guardado antiguo) no bloquea nunca
+        stale = {"Authorization": "Bearer viejo", "X-Forwarded-For": "203.0.113.9"}
+        for _ in range(auth.MAX_FAILS * 2):
+            assert (await client.get("/api/accounts", headers=stale)).status_code == 401
+        # tokens distintos (fuerza bruta): a los MAX_FAILS se bloquea la IP
+        for i in range(auth.MAX_FAILS - 2):
+            assert (await client.get("/api/accounts", headers={"Authorization": f"Bearer nope{i}", "X-Forwarded-For": "203.0.113.9"})).status_code == 401
+        r = await client.get("/api/accounts", headers={"Authorization": "Bearer nope-final", "X-Forwarded-For": "203.0.113.9"})
         assert r.status_code == 429
         # bloqueada incluso con el token correcto; otra IP sigue entrando; queda auditado
         assert (await client.get("/api/accounts", headers={"X-Forwarded-For": "203.0.113.9"})).status_code == 429

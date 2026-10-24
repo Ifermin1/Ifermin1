@@ -7,10 +7,12 @@ from loguru import logger
 
 _bearer = HTTPBearer(auto_error=False)
 
-# Freno a la fuerza bruta cuando la consola está publicada en Internet: tras MAX_FAILS tokens inválidos desde la misma IP
-# en WINDOW_S segundos, esa IP queda bloqueada LOCK_S segundos (también con el token correcto) y se audita una vez.
+# Freno a la fuerza bruta cuando la consola está publicada en Internet: tras MAX_FAILS tokens inválidos DISTINTOS desde la
+# misma IP en WINDOW_S segundos, esa IP queda bloqueada LOCK_S segundos (también con el token correcto) y se audita una vez.
+# Repetir el mismo token inválido cuenta una sola vez: una consola con un token guardado antiguo reintenta sola cada
+# segundo y no debe bloquear a su propio dueño; un ataque de fuerza bruta prueba tokens diferentes.
 MAX_FAILS, WINDOW_S, LOCK_S = 10, 600, 300
-_fails: dict[str, list[float]] = {}
+_fails: dict[str, dict[str, float]] = {}      # ip -> {hash del token inválido: cuándo}
 _locked: dict[str, float] = {}
 
 
@@ -35,7 +37,7 @@ def _valid(token: str | None, expected: str) -> bool:
     return bool(token) and secrets.compare_digest(token, expected)
 
 
-def _note(req, ok: bool) -> str | None:
+def _note(req, ok: bool, token: str | None = None) -> str | None:
     """Devuelve None si se puede seguir; si no, el motivo ("locked" o "invalid")."""
     ip = client_ip(req)
     now = time.monotonic()
@@ -47,7 +49,10 @@ def _note(req, ok: bool) -> str | None:
     if ok:
         _fails.pop(ip, None)
         return None
-    fails = [t for t in _fails.get(ip, []) if now - t < WINDOW_S] + [now]
+    import hashlib
+    key = hashlib.sha256((token or "").encode("utf-8", "ignore")).hexdigest()[:16]
+    fails = {k: t for k, t in _fails.get(ip, {}).items() if now - t < WINDOW_S}
+    fails[key] = now
     _fails[ip] = fails
     if len(fails) >= MAX_FAILS:
         _locked[ip] = now + LOCK_S
@@ -64,7 +69,7 @@ def _note(req, ok: bool) -> str | None:
 
 async def require_token(request: Request, creds: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> None:
     token = creds.credentials if creds else request.query_params.get("token")
-    why = _note(request, _valid(token, _expected(request)))
+    why = _note(request, _valid(token, _expected(request)), token)
     if why == "locked":
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Demasiados intentos: espera unos minutos")
     if why == "invalid":
@@ -76,4 +81,4 @@ def ws_token_ok(ws: WebSocket) -> bool:
     if not token:
         auth = ws.headers.get("authorization", "")
         token = auth.removeprefix("Bearer ").strip() or None
-    return _note(ws, _valid(token, _expected(ws))) is None
+    return _note(ws, _valid(token, _expected(ws)), token) is None

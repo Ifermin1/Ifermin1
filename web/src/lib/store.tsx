@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { show as notifyShow } from "./notify";
-import { makeClient, loadSession, saveSession, type Account, type AuditEvent, type Client, type Health, type Price,
+import { ApiError, makeClient, loadSession, saveSession, type Account, type AuditEvent, type Client, type Health, type Price,
          type RiskState, type Rule, type Session } from "./api";
 import { root } from "./format";
 
@@ -14,6 +14,7 @@ type Store = {
   health: Health | null; accounts: Account[]; rules: Rule[]; audit: AuditEvent[]; risk: RiskState | null;
   prices: PriceMap; wsStatus: WsStatus; error: string | null;
   wsRtt: number | null; wsLastAt: number;      // ida y vuelta del WebSocket (ms) y cuándo llegó el último mensaje del engine
+  authError: string | null;                    // el engine rechazó el token guardado (401/4401) o bloqueó la IP (429)
   density: Density; setDensity: (d: Density) => void;
   theme: Theme; setTheme: (t: Theme) => void;
   refresh: () => Promise<void>; setRules: (r: Rule[]) => void; setRisk: (r: RiskState) => void;
@@ -39,6 +40,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [wsLastAt, setWsLastAt] = useState(0);
   const [wsStatus, setWsStatus] = useState<WsStatus>("closed");
   const [error, setError] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const authRef = useRef<string | null>(null);
+  const noteAuth = (e: unknown) => {
+    const st = e instanceof ApiError ? e.status : 0;
+    const msg = st === 401 ? "El engine rechazó el token guardado en este navegador (ha cambiado API_TOKEN en engine\\.env). Pulsa Salir y vuelve a entrar con el token actual."
+      : st === 429 ? "El engine ha bloqueado esta IP unos minutos por demasiados tokens inválidos distintos. Espera 5 minutos y vuelve a entrar con el token correcto."
+      : null;
+    if (msg !== authRef.current) { authRef.current = msg; setAuthError(msg); }
+    return !!msg;
+  };
   const [density, setDensityState] = useState<Density>(loadDensity);
   const wsRef = useRef<WebSocket | null>(null);
   const priceBuf = useRef<PriceMap>({});   // los ticks llegan varias veces por segundo: se vuelcan al estado cada 400 ms
@@ -56,8 +67,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!client) return;
     try {
       const [h, a, r, au, rk] = await Promise.all([client.health(), client.accounts(), client.rules(), client.audit(100), client.risk()]);
-      setHealth(h); setAccounts(a); setRules(r); setAudit(au); setRisk(rk); setError(null);
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+      setHealth(h); setAccounts(a); setRules(r); setAudit(au); setRisk(rk); setError(null); noteAuth(null);
+    } catch (e) { if (!noteAuth(e)) setError(e instanceof Error ? e.message : String(e)); }
   }, [client]);
 
   const login = useCallback(async (s: Session) => {
@@ -88,11 +99,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           priceBuf.current[root(data.symbol)] = { symbol: data.symbol, last: data.last, bid: data.bid ?? data.last, ask: data.ask ?? data.last, at: Date.now() };
         }
       };
-      ws.onclose = () => { setWsStatus("closed"); setWsRtt(null); window.clearInterval(ping); if (!stopped) timer = window.setTimeout(connect, 1000); };
+      ws.onclose = (ev) => {
+        setWsStatus("closed"); setWsRtt(null); window.clearInterval(ping);
+        if (ev.code === 4401) noteAuth(new ApiError(401, "token"));
+        // con el token rechazado se reintenta despacio: no tiene sentido insistir cada segundo con el mismo token
+        if (!stopped) timer = window.setTimeout(connect, ev.code === 4401 || authRef.current ? 15000 : 1000);
+      };
       ws.onerror = () => ws.close();
     };
     void refresh(); connect();
-    const poll = window.setInterval(() => void client.health().then(setHealth).catch(() => {}), 10000);
+    const poll = window.setInterval(() => void client.health().then((h) => { setHealth(h); noteAuth(null); }).catch((e) => noteAuth(e)), 10000);
     const flush = window.setInterval(() => {
       const buf = priceBuf.current;
       if (Object.keys(buf).length === 0) return;
@@ -102,7 +118,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return () => { stopped = true; window.clearTimeout(timer); window.clearInterval(ping); window.clearInterval(poll); window.clearInterval(flush); wsRef.current?.close(); };
   }, [client, refresh]);
 
-  const value: Store = { session, client, login, logout, health, accounts, rules, audit, risk, prices, wsStatus, error, wsRtt, wsLastAt,
+  const value: Store = { session, client, login, logout, health, accounts, rules, audit, risk, prices, wsStatus, error, wsRtt, wsLastAt, authError,
                          density, setDensity, theme, setTheme, refresh, setRules, setRisk };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
