@@ -172,7 +172,7 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
     trade.trail = trail
     push = PushService(store, bus, notify, subject=cfg.PUSH_SUBJECT)
     report = ReportService(store, accounts, coach, performance)
-    hub = HubReporter(store, bus, cfg.HUB_URL, cfg.HUB_TOKEN, cfg.HUB_NODE, cfg.HUB_INTERVAL_S, accounts, risk, bridge, mode=cfg.ENGINE_MODE, version=cfg.MANUAL_ADDON_VERSION)
+    hub = HubReporter(store, bus, cfg.HUB_URL, cfg.HUB_TOKEN, cfg.HUB_NODE, cfg.HUB_INTERVAL_S, accounts, risk, bridge, mode=cfg.ENGINE_MODE)
     notify.commands = TelegramCommands(notify, accounts, risk, trade, market, bridge)
 
     async def _after_sync() -> None:

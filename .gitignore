@@ -20,3 +20,5 @@ Thumbs.db
 .vscode/
 .idea/
 web/shots/
+hub/hub.db
+hub/hub.db-*

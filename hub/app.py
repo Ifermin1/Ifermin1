@@ -21,12 +21,24 @@ _bearer = HTTPBearer(auto_error=False)
 
 
 class HubStore:
+    """SQLite del hub. La conexión se abre en el primer uso (importar el módulo no crea ningún fichero)."""
     def __init__(self, path: str) -> None:
-        self._conn = sqlite3.connect(path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
+        self.path = path
+        self._db: sqlite3.Connection | None = None
         self._lock = threading.Lock()
-        with self._lock, self._conn:
-            self._conn.executescript("""
+
+    @property
+    def _conn(self) -> sqlite3.Connection:
+        if self._db is None:
+            self._db = sqlite3.connect(self.path, check_same_thread=False)
+            self._db.row_factory = sqlite3.Row
+            self._init(self._db)
+        return self._db
+
+    @staticmethod
+    def _init(conn: sqlite3.Connection) -> None:
+        with conn:
+            conn.executescript("""
                 CREATE TABLE IF NOT EXISTS nodes (id TEXT PRIMARY KEY, mode TEXT, version TEXT, first_seen TEXT, last_seen TEXT, snapshot TEXT, snapshot_at TEXT);
                 CREATE TABLE IF NOT EXISTS trades (node_id TEXT, trade_id INTEGER, account_id TEXT, day TEXT, symbol TEXT, side TEXT, quantity INTEGER,
                     entry_price REAL, exit_price REAL, pnl REAL, commissions REAL, opened_at TEXT, closed_at TEXT, received_at TEXT, PRIMARY KEY (node_id, trade_id));
@@ -138,7 +150,7 @@ def create_app(db_path: str | None = None, token: str | None = None) -> FastAPI:
                 stale = (datetime.now().astimezone() - datetime.fromisoformat(n["last_seen"])).total_seconds() > 180 if n.get("last_seen") else True
             except ValueError:
                 stale = True
-            nodes.append({"id": n["id"], "mode": n["mode"], "version": n["version"], "last_seen": n["last_seen"], "stale": stale,
+            nodes.append({"id": n["id"], "mode": n["mode"], "version": n["version"], "addon_version": s.get("addon_version"), "last_seen": n["last_seen"], "stale": stale,
                           "day_total": s.get("day_total"), "kill_switch": s.get("kill_switch"), "day_closed": s.get("day_closed"), "connected": s.get("connected"),
                           "accounts": [{"account_id": a["account_id"], "alias": a.get("alias"), "net_pnl": a.get("net_pnl"), "balance": a.get("balance"),
                                         "positions": len(a.get("positions") or []), "enabled": a.get("enabled"), "drawdown": a.get("drawdown"), "drawdown_limit": a.get("drawdown_limit")}
@@ -178,7 +190,7 @@ function save(){localStorage.setItem(K,document.getElementById('tok').value.trim
 async function load(){const t=localStorage.getItem(K);if(!t)return;const r=await fetch('/api/summary',{headers:{Authorization:'Bearer '+t}});if(!r.ok){localStorage.removeItem(K);document.getElementById('login').style.display='';return;}
 const d=await r.json();document.getElementById('login').style.display='none';const app=document.getElementById('app');app.style.display='';
 app.innerHTML=`<div class="kpis"><div class="kpi"><small>P&L hoy (todos)</small><b class="${cls(d.day_total)}">${usd(d.day_total)}</b></div><div class="kpi"><small>Operaciones hoy</small><b>${d.today.n}</b> <span class="muted">${usd(d.today.net)}</span></div><div class="kpi"><small>Semana</small><b>${d.week.n}</b> <span class="muted">${usd(d.week.net)} · acierto ${d.week.win_rate==null?'—':Math.round(d.week.win_rate*100)+' %'}</span></div><div class="kpi"><small>Engines</small><b>${d.nodes.length}</b> <span class="muted">${d.nodes.filter(n=>n.stale).length} sin señal</span></div></div>`
-+d.nodes.map(n=>`<div class="node"><b>${n.id}</b> <span class="muted">${n.mode||''} ${n.version||''} · visto ${n.last_seen?n.last_seen.slice(11,16):'—'}</span> ${n.stale?'<span class="bad">SIN SEÑAL</span>':''} ${n.kill_switch?'<span class="bad">KILL SWITCH</span>':''} ${n.connected===false?'<span class="bad">sin NinjaTrader</span>':''}
++d.nodes.map(n=>`<div class="node"><b>${n.id}</b> <span class="muted">${n.mode||''}${n.addon_version?' · addon '+n.addon_version:''} · visto ${n.last_seen?n.last_seen.slice(11,16):'—'}</span> ${n.stale?'<span class="bad">SIN SEÑAL</span>':''} ${n.kill_switch?'<span class="bad">KILL SWITCH</span>':''} ${n.connected===false?'<span class="bad">sin NinjaTrader</span>':''}
 <span style="float:right" class="${cls(n.day_total)}"><b>${usd(n.day_total)}</b> hoy</span>
 <table><tr><th>Cuenta</th><th>P&L hoy</th><th>Saldo</th><th>Pos.</th><th>Drawdown</th></tr>${n.accounts.filter(a=>a.enabled!==false).map(a=>`<tr><td>${a.alias||a.account_id}</td><td class="${cls(a.net_pnl)}">${usd(a.net_pnl)}</td><td>${a.balance==null?'—':Number(a.balance).toLocaleString('es-ES',{maximumFractionDigits:0})+' $'}</td><td>${a.positions||''}</td><td>${a.drawdown_limit?Math.round(a.drawdown/a.drawdown_limit*100)+' %':'—'}</td></tr>`).join('')}</table>
 <div class="muted" style="margin-top:6px">hoy ${n.today.n} op. ${usd(n.today.net)} · semana ${n.week.n} op. ${usd(n.week.net)}</div></div>`).join('')
