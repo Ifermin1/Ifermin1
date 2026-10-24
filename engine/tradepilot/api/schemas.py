@@ -26,6 +26,15 @@ class NotifyRequest(BaseModel):
     events: list[str] = Field(default_factory=list)
 
 
+class PushSubscribeRequest(BaseModel):
+    subscription: dict
+    ua: str = ""
+
+
+class PushUnsubscribeRequest(BaseModel):
+    endpoint: str
+
+
 class DiscoverChatRequest(BaseModel):
     bot_token: Optional[str] = None
 

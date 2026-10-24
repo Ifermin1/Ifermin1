@@ -27,8 +27,9 @@ async def test_important_events_are_sent_grouped_and_deduplicated(container):
     container.audit.log("DESYNC", "Sim103 no coincide con la maestra", target="Sim103")
     container.audit.log("DESYNC", "Sim103 no coincide con la maestra", target="Sim103")  # repetido: se suprime
     await asyncio.sleep(0.1)
-    assert len(tg.calls) == 1
-    token, method, payload = tg.calls[0]
+    sent = [c for c in tg.calls if c[1] == "sendMessage"]        # el sondeo de órdenes (getUpdates) no cuenta
+    assert len(sent) == 1
+    token, method, payload = sent[0]
     assert token == "123:abc" and method == "sendMessage" and payload["chat_id"] == "42" and payload["parse_mode"] == "HTML"
     assert "Límite de pérdida diaria" in payload["text"] and "Sim102" in payload["text"] and "Seguidora desincronizada" in payload["text"]
     assert payload["text"].count("desincronizada") == 1 and "Fill" not in payload["text"]
@@ -38,7 +39,7 @@ async def test_important_events_are_sent_grouped_and_deduplicated(container):
     n.set_config(NotifyConfig(enabled=False, bot_token="123:abc", chat_id="42"))
     container.audit.log("KILL_SWITCH_ON", "Kill switch")
     await asyncio.sleep(0.05)
-    assert len(tg.calls) == 1
+    assert len([c for c in tg.calls if c[1] == "sendMessage"]) == 1
 
 
 async def test_errors_are_counted_and_test_and_discover_work(container):

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { Client, NotifyState } from "../lib/api";
 import { Card } from "./ui";
 import * as local from "../lib/notify";
+import * as push from "../lib/push";
 
 /* Avisos al teléfono: Telegram (con la app cerrada) y notificaciones del navegador (con la consola abierta). */
 const GROUPS: { label: string; hint: string; types: string[] }[] = [
@@ -17,6 +18,15 @@ export function NotifyCard({ client }: { client: Client }) {
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [localOn, setLocalOn] = useState(local.enabled());
+  const [pushOn, setPushOn] = useState(false);
+  const [pushInfo, setPushInfo] = useState<{ n: number; available: boolean } | null>(null);
+  useEffect(() => { void push.current().then((s) => setPushOn(!!s)); client.pushState().then((s) => setPushInfo({ n: s.subscriptions, available: s.available })).catch(() => {}); }, [client]);
+  const togglePush = () => run("push", async () => {
+    if (pushOn) { await push.unsubscribe(client); setPushOn(false); setMsg("Avisos push quitados en este dispositivo."); }
+    else { const err = await push.subscribe(client); if (err) setMsg(err); else { setPushOn(true); setMsg("Avisos push activados en este dispositivo: te llegan con la consola cerrada."); } }
+    setPushInfo(await client.pushState().then((s) => ({ n: s.subscriptions, available: s.available })));
+  });
+  const testPush = () => run("pushtest", async () => { const r = await client.pushTest(); setMsg(r.ok ? `Prueba push enviada a ${r.sent} dispositivo${r.sent === 1 ? "" : "s"}.` : `No se pudo enviar: ${r.error}`); });
   useEffect(() => { client.notifications().then((s) => { setSt(s); setForm({ enabled: s.enabled, bot_token: s.bot_token, chat_id: s.chat_id, events: s.events }); }).catch(() => {}); }, [client]);
 
   const groupState = (types: string[]) => { const on = types.filter((t) => form.events.includes(t)).length; return on === 0 ? "off" : on === types.length ? "on" : "some"; };
@@ -42,7 +52,7 @@ export function NotifyCard({ client }: { client: Client }) {
     <Card title="Avisos al teléfono" right={<label className="inline small"><input type="checkbox" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} data-testid="notify-enabled" /> Telegram activado</label>}>
       <div className="notify-grid">
         <div>
-          <p className="muted small"><b>Telegram</b> avisa aunque la consola esté cerrada. Tres pasos: 1) en Telegram, abre <b>@BotFather</b>, escribe <code>/newbot</code>, ponle nombre y copia el <i>token</i>; 2) abre el chat de tu bot nuevo y escríbele <code>/start</code>; 3) pega el token aquí, pulsa <i>Detectar chat</i>, guarda y envía una prueba.</p>
+          <p className="muted small"><b>Telegram</b> avisa aunque la consola esté cerrada y, con los avisos activados, <b>obedece órdenes</b> desde el mismo chat: <code>/estado</code>, <code>/posiciones</code>, <code>/breakeven</code>, <code>/pausar</code>, <code>/reanudar</code> y <code>/cerrar</code> (pide confirmación con botones). Solo responde al chat configurado aquí.</p><p className="muted small">Tres pasos: 1) en Telegram, abre <b>@BotFather</b>, escribe <code>/newbot</code>, ponle nombre y copia el <i>token</i>; 2) abre el chat de tu bot nuevo y escríbele <code>/start</code>; 3) pega el token aquí, pulsa <i>Detectar chat</i>, guarda y envía una prueba.</p>
           <div className="notify-form">
             <label>Token del bot<input value={form.bot_token} onChange={(e) => setForm({ ...form, bot_token: e.target.value })} placeholder="123456789:AAH…" autoComplete="off" data-testid="notify-token" /></label>
             <label>Chat<span className="fee-row"><input value={form.chat_id} onChange={(e) => setForm({ ...form, chat_id: e.target.value })} placeholder="se detecta solo" data-testid="notify-chat" />
@@ -63,7 +73,15 @@ export function NotifyCard({ client }: { client: Client }) {
           </div>
         </div>
         <div>
-          <p className="muted small"><b>En este dispositivo</b>: notificaciones del navegador para los avisos importantes mientras la consola esté abierta o en segundo plano (Android y PC; en iPhone solo con la app abierta). No necesita configurar nada.</p>
+          <p className="muted small"><b>Push en este teléfono</b> (recomendado): avisos aunque la consola esté cerrada, sin Telegram. Android/Chrome y PC; en iPhone instala antes la consola en la pantalla de inicio. Necesita abrir la consola por HTTPS (la URL pública de <i>Acceso remoto</i>). Manda los mismos tipos de aviso marcados a la izquierda.</p>
+          <div className="chips">
+            <button className={`small-btn ${pushOn ? "primary" : ""}`} onClick={() => void togglePush()} disabled={busy !== null || !push.supported()} data-testid="notify-push">
+              {!push.supported() ? "Este navegador no admite push" : busy === "push" ? "…" : pushOn ? "Push en este dispositivo: activado" : "Avisar en este teléfono (push)"}
+            </button>
+            {pushInfo && pushInfo.n > 0 && <button className="small-btn" disabled={busy !== null} onClick={() => void testPush()}>{busy === "pushtest" ? "Enviando…" : "Probar push"}</button>}
+            {pushInfo && <span className="muted small">{pushInfo.available ? `${pushInfo.n} dispositivo${pushInfo.n === 1 ? "" : "s"} suscrito${pushInfo.n === 1 ? "" : "s"}` : "el engine no tiene Web Push (ejecuta update.ps1)"}</span>}
+          </div>
+          <p className="muted small" style={{ marginTop: 10 }}><b>En este dispositivo</b>: notificaciones del navegador para los avisos importantes mientras la consola esté abierta o en segundo plano. No necesita configurar nada.</p>
           <button className={`small-btn ${localOn ? "primary" : ""}`} onClick={() => void toggleLocal()} disabled={!local.supported()} data-testid="notify-local">
             {!local.supported() ? "Este navegador no admite notificaciones" : localOn ? "Avisos en este dispositivo: activados" : "Activar avisos en este dispositivo"}
           </button>

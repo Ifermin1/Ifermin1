@@ -5,7 +5,7 @@ import { Icon, type IconName } from "./Icons";
 import { livePnl } from "./AccountPanel";
 import { signedMoney } from "../lib/format";
 
-export type Route = "dashboard" | "trade" | "performance" | "analysis" | "accounts" | "risk" | "audit";
+export type Route = "dashboard" | "trade" | "performance" | "analysis" | "accounts" | "risk" | "audit" | "pocket";
 
 const NAV: { id: Route; label: string; icon: IconName }[] = [
   { id: "dashboard", label: "Inicio", icon: "home" },
@@ -139,6 +139,7 @@ export function Shell({ route, onRoute, children }: { route: Route; onRoute: (r:
           <div className="muted small">{session?.baseUrl}</div>
           <div className="muted small" title={BUILT.toISOString()}>consola del {fmtBuild(BUILT)}</div>
           <button className="link" onClick={() => setRemote(true)} data-testid="remote-open">{health?.public_url ? "Acceso remoto · publicada" : "Acceso remoto"}</button>
+          <button className="link" onClick={() => onRoute("pocket")} data-testid="pocket-open">Vista de bolsillo</button>
           <button className="link" onClick={logout}>Salir</button>
         </div>
       </aside>

@@ -3,7 +3,8 @@
 Se suscribe a la auditoría y manda por Telegram los eventos importantes (límites, cierres, rechazos, desincronización,
 addon caído...). Agrupa lo que llega en 1,5 s en un solo mensaje y no repite el mismo aviso de la misma cuenta en un
 minuto. Configuración en la consola (Riesgo → Avisos al teléfono): token del bot (BotFather) y chat; el chat se puede
-detectar solo tras escribirle /start al bot.
+detectar solo tras escribirle /start al bot. Si hay un manejador de órdenes (`commands`), el servicio sondea getUpdates y
+atiende /estado, /cerrar, /pausar… solo del chat configurado.
 """
 import asyncio
 import json
@@ -61,16 +62,78 @@ class NotifyService:
         self._pending: list[str] = []
         self._flush_task: asyncio.Task | None = None
         self._recent: dict[tuple, float] = {}
-        self.stats = {"sent": 0, "errors": 0, "last_error": None, "last_sent_at": None, "suppressed": 0}
+        self.stats = {"sent": 0, "errors": 0, "last_error": None, "last_sent_at": None, "suppressed": 0, "commands": 0}
+        self.commands = None                      # objeto con `async handle(update)` (TelegramCommands); None = solo avisos
+        self.poll_timeout_s = 25                  # long polling de Telegram
+        self.poll_idle_s = 0.5
+        self._poll_task: asyncio.Task | None = None
+        self._offset = 0
+        self._loop: asyncio.AbstractEventLoop | None = None
         bus.subscribe(TOPIC_AUDIT, self._on_audit)
+
+    # ---- ciclo de vida: sondeo de órdenes ----
+    async def start(self) -> None:
+        self._loop = asyncio.get_running_loop()
+        self._ensure_poll()
+
+    async def stop(self) -> None:
+        if self._poll_task is not None:
+            self._poll_task.cancel()
+            self._poll_task = None
+
+    def _want_poll(self) -> bool:
+        return bool(self.commands is not None and self.config.enabled and self.config.bot_token and self.config.chat_id)
+
+    def _ensure_poll(self) -> None:
+        """Arranca o para el sondeo según la configuración. Se puede llamar desde otro hilo (rutas síncronas)."""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            if self._loop is not None and not self._loop.is_closed():
+                self._loop.call_soon_threadsafe(self._ensure_poll)
+            return
+        running = self._poll_task is not None and not self._poll_task.done()
+        if self._want_poll() and not running:
+            self._poll_task = loop.create_task(self._poll_loop())
+        elif not self._want_poll() and running:
+            self._poll_task.cancel()
+            self._poll_task = None
+
+    async def _poll_loop(self) -> None:
+        logger.info("Telegram: atendiendo órdenes (/estado, /cerrar, /pausar, /reanudar, /breakeven)")
+        token = self.config.bot_token
+        while True:
+            try:
+                r = await self.sender(token, "getUpdates", {"offset": self._offset, "timeout": self.poll_timeout_s, "allowed_updates": ["message", "callback_query"]})
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning(f"Telegram: fallo sondeando órdenes: {exc}")
+                await asyncio.sleep(5)
+                continue
+            if not r.get("ok", False):
+                logger.warning(f"Telegram: getUpdates rechazado: {r.get('description')}")
+                await asyncio.sleep(10)
+                continue
+            for u in r.get("result", []):
+                self._offset = max(self._offset, int(u.get("update_id", 0)) + 1)
+                if self.commands is not None:
+                    self.stats["commands"] += 1
+                    await self.commands.handle(u)
+            await asyncio.sleep(self.poll_idle_s)
 
     # ---- configuración ----
     def set_config(self, cfg: NotifyConfig) -> NotifyConfig:
         cfg.bot_token, cfg.chat_id = cfg.bot_token.strip(), cfg.chat_id.strip()
         cfg.events = sorted({e.strip().upper() for e in cfg.events if e.strip()})
+        restart = cfg.bot_token != self.config.bot_token
         self.config = cfg
         if self.store:
             self.store.set_kv("notifications", cfg.model_dump_json())
+        if restart and self._poll_task is not None:
+            self._poll_task.cancel()
+            self._poll_task = None
+        self._ensure_poll()
         return cfg
 
     def state(self) -> dict:
@@ -112,6 +175,10 @@ class NotifyService:
             await self.send("\n\n".join(batch))
 
     # ---- salida: Telegram ----
+    async def api(self, method: str, payload: dict) -> dict:
+        """Llamada directa a la API del bot (teclados, respuestas a botones, editar mensajes)."""
+        return await self.sender(self.config.bot_token, method, payload)
+
     async def send(self, text: str) -> bool:
         try:
             r = await self.sender(self.config.bot_token, "sendMessage",
@@ -139,10 +206,15 @@ class NotifyService:
         token = (bot_token or self.config.bot_token).strip()
         if not token:
             return {"ok": False, "error": "falta el token del bot"}
+        if self._poll_task is not None:
+            self._poll_task.cancel()
+            self._poll_task = None
         try:
             r = await self.sender(token, "getUpdates", {"limit": 20})
         except Exception as exc:
             return {"ok": False, "error": str(exc)[:200]}
+        finally:
+            self._ensure_poll()
         if not r.get("ok", False):
             return {"ok": False, "error": str(r.get("description") or "Telegram no respondió")}
         chats = [u.get("message", {}).get("chat") or u.get("channel_post", {}).get("chat") for u in r.get("result", [])]

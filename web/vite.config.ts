@@ -25,6 +25,8 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // Web Push: el manejador de notificaciones vive en public/sw-push.js y lo importa el service worker generado.
+        importScripts: ["sw-push.js"],
         // La API nunca se cachea: siempre datos en vivo.
         navigateFallbackDenylist: [/^\/api\//],
         runtimeCaching: [],

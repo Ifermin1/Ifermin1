@@ -125,9 +125,15 @@ offline). Funciona igual. Con HTTPS (túnel) la instalación es la completa.
 
 ### Avisos al teléfono
 
-Hay dos vías, y se pueden usar las dos a la vez (*Riesgo → Avisos al teléfono*):
+Hay tres vías, y se pueden combinar (*Riesgo → Avisos al teléfono*):
 
-- **Telegram** (recomendada): avisa **aunque la consola esté cerrada** o el teléfono bloqueado. Manda los eventos
+- **Push en el teléfono** (la más sencilla): abre la consola **por HTTPS** (la URL pública de *Acceso remoto*; en iPhone,
+  además, instalada en la pantalla de inicio) y pulsa **Avisar en este teléfono (push)**. Acepta el permiso y listo: los
+  avisos llegan con la consola cerrada y el teléfono bloqueado, sin Telegram. Manda los mismos tipos de aviso que tengas
+  marcados para Telegram. Al tocar la notificación se abre la **vista de bolsillo** (abajo). *Probar push* manda uno de
+  prueba a todos los teléfonos suscritos; las suscripciones caducadas se limpian solas. Sobre `http://IP` no hay push
+  (el navegador no lo permite): usa Telegram o la URL pública.
+- **Telegram**: avisa **aunque la consola esté cerrada** o el teléfono bloqueado y, además, **obedece órdenes** (abajo). Manda los eventos
   importantes: límite de pérdida u objetivo alcanzado (y el aviso al 80 %), drawdown, kill switch, cierres, stop
   rechazado, orden rechazada, cuenta bloqueada por el prop firm, seguidora desincronizada, addon sin heartbeat o
   reiniciado, mensajes perdidos, errores. Agrupa lo que pasa en el mismo instante en un solo mensaje y no repite el mismo
@@ -142,6 +148,30 @@ Hay dos vías, y se pueden usar las dos a la vez (*Riesgo → Avisos al teléfon
 - **En este dispositivo**: notificaciones del navegador. Pulsa *Activar avisos en este dispositivo* y acepta el permiso.
   Avisan con la consola abierta o en segundo plano (Android y PC); en iPhone solo mientras la app está abierta. No
   necesitan configuración, pero no sustituyen a Telegram cuando la app está cerrada.
+
+#### Órdenes por Telegram
+
+Con los avisos por Telegram activados, el mismo bot atiende órdenes **solo desde el chat configurado** (cualquier otro
+chat se ignora y queda en el log). Escríbele:
+
+| Orden | Qué hace |
+|---|---|
+| `/estado` | P&L neto de hoy, cuentas con su resultado y drawdown, si está copiando o con kill switch, conexión con NinjaTrader |
+| `/posiciones` | Posiciones abiertas con precio de entrada y flotante |
+| `/breakeven` | Pone el stop en el precio de entrada en todas las posiciones (si el precio ya va en contra, lo dice y no toca) |
+| `/pausar` | Activa el kill switch: no se copia ni se opera (las posiciones se quedan como están) |
+| `/reanudar` | Quita el kill switch |
+| `/cerrar` | **CERRAR TODO**: responde con dos botones, *Sí, cerrar todo* / *No*. Solo cierra si pulsas *Sí* en los 90 s siguientes. Deja el kill switch activado |
+| `/ayuda` | La lista |
+
+Todo lo que hace queda en *Auditoría* como "desde Telegram".
+
+#### Vista de bolsillo
+
+`https://tu-consola/#pocket` (o el enlace *Vista de bolsillo* del menú) es una sola pantalla pensada para el teléfono:
+P&L del día, estado de la copia, cada posición con **Breakeven** y **Cerrar**, y dos botones grandes, **PAUSAR/REANUDAR
+COPIA** y **CERRAR TODO** (con confirmación). Es la que abren las notificaciones push; guárdala en la pantalla de inicio
+si solo quieres vigilar y cortar.
 
 ### La consola de un vistazo
 

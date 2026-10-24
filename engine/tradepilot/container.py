@@ -16,6 +16,8 @@ from tradepilot.services.risk_service import RiskService
 from tradepilot.services.commission_service import CommissionService
 from tradepilot.services.performance_service import PerformanceService
 from tradepilot.services.notify_service import NotifyService
+from tradepilot.services.push_service import PushService
+from tradepilot.services.telegram_commands import TelegramCommands
 from tradepilot.services.news_service import NewsService
 from tradepilot.services.ai_service import AIService
 from tradepilot.services.trade_service import TradeService
@@ -49,6 +51,7 @@ class Container:
     auto_risk: AutoRiskService | None = None
     advisor: AdvisorService | None = None
     coach: CoachService | None = None
+    push: PushService | None = None
 
     async def start(self) -> None:
         if self.advisor is not None:
@@ -61,6 +64,8 @@ class Container:
             await self.news.start()
         if self.trail is not None:
             await self.trail.start()
+        if self.notify is not None:
+            await self.notify.start()
         self.audit.log("ENGINE_START", f"Engine iniciado en modo {self.settings.ENGINE_MODE}")
         if self.news is not None and not self.news.ai.enabled:
             logger.info("Calendario: sin ANTHROPIC_API_KEY, los avisos de noticias llevan un análisis por reglas (pon la clave en engine/.env para usar la IA)")
@@ -83,6 +88,8 @@ class Container:
             logger.warning("API_TOKEN sigue siendo el valor por defecto; cámbialo en engine/.env antes de exponer el engine")
 
     async def stop(self) -> None:
+        if self.notify is not None:
+            await self.notify.stop()
         if self.trail is not None:
             await self.trail.stop()
         if self.news is not None:
@@ -155,6 +162,8 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
     coach = CoachService(store, accounts, risk, news, market, ai, trade)
     trail = TrailService(trade, accounts, market, ai, audit, bridge, store, interval_s=cfg.TRAIL_INTERVAL_S, ai_interval_s=cfg.AI_TRAIL_INTERVAL_S, ai_model=cfg.AI_TRAIL_MODEL)
     trade.trail = trail
+    push = PushService(store, bus, notify, subject=cfg.PUSH_SUBJECT)
+    notify.commands = TelegramCommands(notify, accounts, risk, trade, market, bridge)
 
     async def _after_sync() -> None:
         # independientes: un fallo en una vigilancia no debe apagar la otra
@@ -164,4 +173,4 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
             except Exception as exc:
                 logger.exception(f"Error en vigilancia de {name}: {exc}")
     accounts.after_sync = _after_sync
-    return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal, commissions, performance, notify, news, trade, market, trail, auto_risk, advisor, coach)
+    return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal, commissions, performance, notify, news, trade, market, trail, auto_risk, advisor, coach, push)

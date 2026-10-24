@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     # URL pública de la consola (túnel). Si está vacía se lee de PUBLIC_URL_FILE, que escribe scripts/publish.ps1.
     PUBLIC_URL: str = ""
     PUBLIC_URL_FILE: str = "data/public_url.txt"
+    # Web Push: contacto que va en las claves VAPID (mailto:). Las claves se generan solas la primera vez.
+    PUSH_SUBJECT: str = "mailto:tradepilot@example.com"
     # Carpeta con el build de la consola web (se sirve desde el mismo proceso)
     WEB_DIST: str = "../web/dist"
 

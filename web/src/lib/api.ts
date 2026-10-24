@@ -59,6 +59,8 @@ export type MonthStats = { from: string; to: string; days: DayStat[]; trades: Tr
 export type NotifyState = { enabled: boolean; bot_token: string; chat_id: string; events: string[]; defaults: string[]; titles: Record<string, string>;
                             stats: { sent: number; errors: number; last_error: string | null; last_sent_at: number | null; suppressed: number } };
 export type NotifyConfig = Pick<NotifyState, "enabled" | "bot_token" | "chat_id" | "events">;
+export type PushState = { available: boolean; public_key: string; subscriptions: number; devices: { endpoint: string; ua: string; created_at: number | null }[];
+                          stats: { sent: number; errors: number; removed: number; last_error: string | null; last_sent_at: number | null } };
 
 /** Operativa manual (pestaña Operar). */
 export type TrailSpec = { mode: "fixed" | "adaptive" | "ai"; distance_ticks?: number; step_ticks?: number; activate_ticks?: number; lock_be_ticks?: number; atr_k?: number; min_ticks?: number; max_ticks?: number };
@@ -170,6 +172,10 @@ export function makeClient(s: Session) {
     execution: (limit = 40) => req<Execution[]>(`/api/execution?limit=${limit}`),
     notifications: () => req<NotifyState>("/api/notifications"),
     setNotifications: (c: NotifyConfig) => req<NotifyState>("/api/notifications", { method: "PUT", body: JSON.stringify(c) }),
+    pushState: () => req<PushState>("/api/push"),
+    pushSubscribe: (subscription: Record<string, unknown>, ua: string) => req<PushState>("/api/push/subscribe", { method: "POST", body: JSON.stringify({ subscription, ua }) }),
+    pushUnsubscribe: (endpoint: string) => req<PushState>("/api/push/unsubscribe", { method: "POST", body: JSON.stringify({ endpoint }) }),
+    pushTest: () => req<{ ok: boolean; sent: number; removed: number; error: string | null }>("/api/push/test", { method: "POST" }),
     testNotifications: () => req<{ ok: boolean; error: string | null }>("/api/notifications/test", { method: "POST" }),
     discoverChat: (bot_token?: string) => req<{ ok: boolean; chat_id?: string; name?: string; error?: string }>("/api/notifications/discover-chat", { method: "POST", body: JSON.stringify({ bot_token }) }),
     /** Análisis de un periodo: `from`/`to` = AAAA-MM-DD; `account` vacío = todas. */

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from tradepilot.api.auth import require_token
-from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest, ProtectRequest, TrailRequest, DayLossRequest, AutoRiskRequest, RiskPresets, ApplyPresetRequest, TagsRequest, OcoEntryRequest, TradeTemplates, ReviewRequest, CheckEntryRequest, AskRequest
+from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest, ProtectRequest, TrailRequest, DayLossRequest, AutoRiskRequest, RiskPresets, ApplyPresetRequest, TagsRequest, OcoEntryRequest, TradeTemplates, ReviewRequest, CheckEntryRequest, AskRequest, PushSubscribeRequest, PushUnsubscribeRequest
 from tradepilot.container import Container
 from tradepilot.domain.risk import RiskLimit, Schedule
 
@@ -290,6 +290,44 @@ async def test_notifications(request: Request):
     if c.notify is None:
         raise HTTPException(503, "avisos no disponibles")
     return await c.notify.test()
+
+
+@router.get("/push")
+def push_state(request: Request):
+    """Web Push: clave pública VAPID (para suscribir el navegador) y dispositivos suscritos."""
+    c = _c(request)
+    if c.push is None:
+        raise HTTPException(503, "push no disponible")
+    return c.push.state()
+
+
+@router.post("/push/subscribe")
+def push_subscribe(body: PushSubscribeRequest, request: Request):
+    c = _c(request)
+    if c.push is None:
+        raise HTTPException(503, "push no disponible")
+    try:
+        st = c.push.subscribe(body.subscription, body.ua)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    c.audit.log("PUSH_SUBSCRIBED", f"Avisos push activados en un dispositivo ({st['subscriptions']} suscritos)")
+    return st
+
+
+@router.post("/push/unsubscribe")
+def push_unsubscribe(body: PushUnsubscribeRequest, request: Request):
+    c = _c(request)
+    if c.push is None:
+        raise HTTPException(503, "push no disponible")
+    return c.push.unsubscribe(body.endpoint)
+
+
+@router.post("/push/test")
+async def push_test(request: Request):
+    c = _c(request)
+    if c.push is None:
+        raise HTTPException(503, "push no disponible")
+    return await c.push.test()
 
 
 @router.post("/notifications/discover-chat")
