@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import datetime
 
 from loguru import logger
@@ -7,6 +8,23 @@ from tradepilot.core.events import TOPIC_ACCOUNTS, TOPIC_HEALTH, EventBus
 from tradepilot.domain.accounts import AccountSnapshot, BridgeHealth, DrawdownSnapshot, PositionSnapshot
 from tradepilot.infrastructure.persistence.sqlite_store import SQLiteStore
 from tradepilot.infrastructure.brokers.base import BrokerBridge
+
+
+def _tags(raw) -> list[str]:
+    try:
+        v = json.loads(raw) if isinstance(raw, str) else (raw or [])
+        return normalize_tags(v)
+    except ValueError:
+        return []
+
+
+def normalize_tags(v) -> list[str]:
+    out: list[str] = []
+    for t in v or []:
+        t = " ".join(str(t).split())[:24]
+        if t and t.lower() not in [x.lower() for x in out]:
+            out.append(t)
+    return out[:12]
 
 
 class AccountService:
@@ -37,6 +55,7 @@ class AccountService:
                 enabled=bool(row["enabled"]), enabled_source=row["enabled_source"] or "auto",
                 alias=row["alias"] or "", reported=False, firm=(row["firm"] if "firm" in row.keys() else "") or "",
                 plan=(row["plan"] if "plan" in row.keys() else "") or "", plan_size=float((row["plan_size"] if "plan_size" in row.keys() else 0) or 0),
+                tags=_tags(row["tags"] if "tags" in row.keys() else None),
                 updated_at=datetime.fromisoformat(row["last_seen"]) if row["last_seen"] else datetime.now())
         self._task: asyncio.Task | None = None
         self._running = False
@@ -338,7 +357,7 @@ class AccountService:
 
     async def publish_accounts(self, force: bool = False) -> None:
         """Publica el snapshot solo si cambió algo relevante (con cientos de cuentas importa)."""
-        sig = tuple((a.account_id, a.balance, a.connected, a.enabled, a.alias, a.firm, a.plan, a.plan_size, a.reported, a.desync, round(a.daily_pnl),
+        sig = tuple((a.account_id, a.balance, a.connected, a.enabled, a.alias, a.firm, a.plan, a.plan_size, tuple(a.tags), a.reported, a.desync, round(a.daily_pnl),
                      round(a.drawdown.peak), a.drawdown.floor, a.drawdown.pct, a.contracts_today,
                      tuple((p.symbol, p.quantity) for p in a.open_positions),
                      tuple((o.order_id, o.quantity, o.filled, o.limit_price, o.stop_price, o.state) for o in a.working_orders))
@@ -354,7 +373,7 @@ class AccountService:
 
     async def set_settings(self, account_id: str, enabled: bool | None = None, alias: str | None = None,
                            auto: bool = False, firm: str | None = None, plan: str | None = None,
-                           plan_size: float | None = None) -> AccountSnapshot:
+                           plan_size: float | None = None, tags: list[str] | None = None) -> AccountSnapshot:
         """enabled fija la cuenta a mano (source=user); auto=True vuelve a la política automática; firm/plan/plan_size
         guardan el perfil del prop firm (los tres a la vez)."""
         snap = self.accounts.get(account_id)
@@ -373,8 +392,10 @@ class AccountService:
         if firm is not None:
             snap.firm, snap.plan, snap.plan_size = firm.strip(), (plan or "").strip(), float(plan_size or 0)
             profile = (snap.firm, snap.plan, snap.plan_size)
+        if tags is not None:
+            snap.tags = normalize_tags(tags)
         if self.store:
-            self.store.set_account_settings(account_id, enabled, alias, source, profile)
+            self.store.set_account_settings(account_id, enabled, alias, source, profile, snap.tags if tags is not None else None)
         await self.publish_accounts()
         return snap
 

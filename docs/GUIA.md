@@ -316,6 +316,21 @@ Hay dos vías, y se pueden usar las dos a la vez (*Riesgo → Avisos al teléfon
 
 ---
 
+### Grupos, presets y recomendaciones
+
+- **Grupos (etiquetas)**: en *Cuentas*, marca varias cuentas → *Etiquetar…* y escribe el grupo (`50K`, `PA`, `alto
+  riesgo`). Los grupos aparecen como filtro junto a las pestañas (*grupo 50K · 2*) y como chips en cada fila; *marcar el
+  grupo* selecciona todas las del filtro para vincularlas, pausarlas, ponerles corte, objetivo, prop firm o preset de una
+  vez. *Quitar etiqueta…* la retira. Una cuenta puede tener hasta 12 etiquetas.
+- **Presets de riesgo** (*Riesgo → Presets de riesgo*): paquetes editables (por defecto Conservador, Moderado y Agresivo)
+  con pérdida diaria, corte del día, contratos máximos, colchón del drawdown y, para las que copian, multiplicador y modo
+  de entrada. Se aplican desde *Cuentas → marcar → Preset…*. El drawdown máximo lo sigue poniendo el perfil de prop firm.
+- **Recomendaciones** (tarjeta de *Inicio*): el engine revisa cada cuenta activa y propone con un botón lo que toca:
+  desincronizada (igualar o cerrar), drawdown ≥ 60 % (pasar a Conservador, multiplicador ×1) o ≥ 85 % (pausar, cerrar),
+  multiplicador alto con el drawdown gastado, cerca de la pérdida diaria, tres pérdidas seguidas hoy (pausar), sin límites
+  (aplicar perfil automático), regla de consistencia del prop firm, pausada por riesgo, sin vincular. Se recalcula cada
+  30 s y tras cada acción; las informativas se pueden ocultar.
+
 ## 5. Operativa diaria
 
 1. Abrir NinjaTrader y conectar la cuenta maestra y las seguidoras. Comprobar en el Output `Bridge v2.9 online`.
@@ -433,6 +448,7 @@ actualizar: NinjaScript Editor → F5).
 | `MANUAL_CANCEL` / `MANUAL_MODIFY` | Orden cancelada o modificada desde Operar (también "salida huérfana": un stop u objetivo creado por Proteger cuya posición ya no existe). | Nada. |
 | `MANUAL_PROTECT` | Breakeven o stop/objetivo aplicados desde Proteger, con los precios y los dólares por contrato. | Nada. |
 | `DAY_CLOSED` ⛔ | La pérdida neta conjunta del día alcanzó el límite global: todo cerrado y bloqueado hasta mañana. | Parar por hoy. Si de verdad quieres seguir, Reanudar (no vuelve a saltar ese día). |
+| `PRESET_APPLIED` | Preset de riesgo aplicado a una cuenta (límites y, si copia, multiplicador y entrada). | Nada. |
 | `AUTO_RISK_APPLIED` 🛡️ | Una cuenta nueva recibió sola el perfil de prop firm (drawdown, colchón, contratos, objetivo). | Comprobar en Riesgo que el tamaño deducido es el correcto. |
 | `TRAIL_START` / `TRAIL_MOVE` / `TRAIL_END` | Trailing stop activado, stop movido (con la razón: distancia fija, k × ATR, volumen, IA, breakeven) o terminado. | Nada; si ves muchos `TRAIL_MOVE` seguidos sube el *paso mínimo*. |
 | `NEWS_SOON` 📰 | Faltan menos de 30 min para un dato económico vigilado; el aviso trae el análisis del impacto posible. | Lee el consejo: no abrir entradas justo antes, reducir tamaño o cerrar si el dato es de impacto alto. |

@@ -1,5 +1,6 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useStore } from "../lib/store";
+import type { RiskPreset } from "../lib/api";
 import { money, signedMoney } from "../lib/format";
 import { Card, Empty, Kpi } from "../components/ui";
 import { AccountPanel, livePnl, liveDrawdown } from "../components/AccountPanel";
@@ -33,11 +34,30 @@ function Meter({ value, of, done, invert, text }: { value: number; of: number; d
 }
 
 export function Accounts() {
-  const { client, accounts, rules, setRules, risk, setRisk, health, audit, prices } = useStore();
+  const { client, accounts, rules, setRules, risk, setRisk, health, audit, prices, refresh } = useStore();
   const detected = health?.bridge.master_account ?? null;
   const master = detected ?? "";
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<Filter>("visible");
+  const [tag, setTag] = useState<string>("");                 // grupo (etiqueta) seleccionado en el filtro
+  const [presets, setPresets] = useState<RiskPreset[]>([]);
+  useEffect(() => { if (client) client.presets().then((r) => setPresets(r.presets)).catch(() => {}); }, [client]);
+  const tagMany = (ids: string[], remove = false) => guard("__bulk", async () => {
+    const t = prompt(remove ? `Etiqueta a quitar de ${ids.length} cuentas:` : `Etiqueta (grupo) para ${ids.length} cuentas, p. ej. "50K", "PA", "alto riesgo":`, remove ? (tag || "") : "");
+    if (!t || !t.trim()) return;
+    await client!.setTags(ids, remove ? [] : [t.trim()], remove ? [t.trim()] : []);
+    await refresh();
+    setMsg(`${remove ? "Etiqueta quitada de" : "Etiqueta puesta a"} ${ids.length} cuentas.`);
+  });
+  const presetMany = (ids: string[]) => guard("__bulk", async () => {
+    if (!presets.length) { setMsg("No hay presets: créalos en Riesgo."); return; }
+    const choice = prompt(`Preset para ${ids.length} cuentas. Escribe el nombre:\n` + presets.map((p) => `· ${p.name}: ×${p.multiplier}, pérdida diaria ${p.max_daily_loss || "—"}, corte ${p.max_daily_profit || "—"}, máx ${p.max_position_size || "—"} contratos, colchón ${p.drawdown_buffer}, entrada ${p.entry_mode}`).join("\n"), presets[0].name);
+    const pz = presets.find((p) => p.name.toLowerCase() === (choice || "").trim().toLowerCase() || p.id === (choice || "").trim().toLowerCase());
+    if (!pz) { if (choice) setMsg("Preset no encontrado."); return; }
+    const r = await client!.applyPreset(pz.id, ids);
+    await refresh(); setRisk(await client!.risk());
+    setMsg(`Preset ${pz.name} aplicado a ${r.applied.length} cuentas.`);
+  });
   const [sort, setSort] = useState<Sort>("default");
   const [msel, setMsel] = useState<Set<string>>(new Set());
   const [open, setOpen] = useState<string | null>(null);            // fila desplegada
@@ -206,8 +226,10 @@ export function Accounts() {
     return { a, link, limit, pnl, live: gross.live, dd, start, gained, copying };
   }), [accounts, rules, limits, prices, master, risk?.kill_switch]);   // eslint-disable-line react-hooks/exhaustive-deps
   const needle = q.trim().toLowerCase();
+  const allTags = useMemo(() => [...new Set(accounts.flatMap((a) => a.tags ?? []))].sort((x, y) => x.localeCompare(y)), [accounts]);
   const visible = rows.filter(({ a, link }) => {
-    if (needle && !a.account_id.toLowerCase().includes(needle) && !a.alias.toLowerCase().includes(needle) && !a.firm.toLowerCase().includes(needle)) return false;
+    if (tag && !(a.tags ?? []).some((t) => t.toLowerCase() === tag.toLowerCase())) return false;
+    if (needle && !a.account_id.toLowerCase().includes(needle) && !a.alias.toLowerCase().includes(needle) && !a.firm.toLowerCase().includes(needle) && !(a.tags ?? []).some((t) => t.toLowerCase().includes(needle))) return false;
     if (filter === "all") return true;
     if (filter === "hidden") return !a.enabled;
     if (filter === "copying") return isMaster(a) || !!link?.enabled;
@@ -271,6 +293,8 @@ export function Accounts() {
         <input placeholder="Buscar cuenta, alias o prop firm…" value={q} onChange={(e) => setQ(e.target.value)} data-testid="acc-search" />
         <div className="view-tabs" data-testid="acc-filter">
           {([["copying", `Copiando (${counts.copyingAll})`], ["visible", `Visibles (${counts.visible})`], ["hidden", `Ocultas (${counts.hidden})`], ["all", `Todas (${rows.length})`]] as const).map(([k, l]) => <button key={k} className={filter === k ? "active" : ""} onClick={() => setFilter(k)}>{l}</button>)}
+          {allTags.length > 0 && <span className="chips tag-filter" data-testid="tag-filter"><span className="muted small">grupo</span>{allTags.map((t) => <button key={t} className={`chip-btn ${tag === t ? "active" : ""}`} onClick={() => setTag(tag === t ? "" : t)}>{t} <span className="muted">{accounts.filter((a) => (a.tags ?? []).includes(t)).length}</span></button>)}
+            {tag && <button className="chip-btn" onClick={() => { setMsel(new Set(visible.map((r) => r.a.account_id))); }} title="Marcar todas las del grupo para actuar sobre ellas">marcar el grupo</button>}</span>}
         </div>
         <select value={sort} onChange={(e) => setSort(e.target.value as Sort)} data-testid="acc-sort"><option value="default">Orden: estado</option><option value="pnl">Orden: P&L hoy</option><option value="goal">Orden: % objetivo</option><option value="dd">Orden: drawdown</option><option value="name">Orden: nombre</option></select>
       </div>}>
@@ -283,6 +307,9 @@ export function Accounts() {
             <button className="chip-btn" disabled={!!busy} onClick={() => void setTargetMany(selIds)}>Corte del día…</button>
             <button className="chip-btn" disabled={!!busy} onClick={() => void setGoalMany(selIds)}>Objetivo…</button>
             <button className="chip-btn" disabled={!!busy} onClick={() => { setProfileAlso(selIds.slice(1)); setOpen(selIds[0]); setOpenProfile(selIds[0]); setOpenOpts(null); }} data-testid="bulk-profile">Prop firm…</button>
+            <button className="chip-btn" disabled={!!busy} onClick={() => void presetMany(selIds)} data-testid="bulk-preset">Preset…</button>
+            <button className="chip-btn" disabled={!!busy} onClick={() => void tagMany(selIds)} data-testid="bulk-tag">Etiquetar…</button>
+            <button className="chip-btn" disabled={!!busy} onClick={() => void tagMany(selIds, true)} data-testid="bulk-untag">Quitar etiqueta…</button>
             <button className="chip-btn danger" disabled={!!busy} onClick={() => void flattenMany(selIds)}>Cerrar posiciones</button>
             <button className="chip-btn" disabled={!!busy} onClick={() => void bulkAccounts("disable")} data-testid="hide-selected">Ocultar</button>
             <button className="chip-btn" disabled={!!busy} onClick={() => void bulkAccounts("enable")}>Mostrar</button>
@@ -309,6 +336,7 @@ export function Accounts() {
                       <td><div className="acc-cell">
                         <b>{m && <span className="crown-badge inline" title="Cuenta líder"><Icon name="crown" size={13} /></span>}{label(a)}</b>{a.alias && <span className="muted small">{id}</span>}
                         {prof && <span className="chip profile small">{prof} · {DD_SHORT[dd.mode === "static" ? "static" : dd.mode === "eod" ? "eod" : "intraday"]}</span>}
+                        {(a.tags ?? []).length > 0 && <span className="chips">{a.tags.map((t) => <button key={t} className={`chip tag ${tag === t ? "active" : ""}`} onClick={() => setTag(tag === t ? "" : t)} title="Filtrar por este grupo">{t}</button>)}</span>}
                       </div></td>
                       <td><div className="status-cell">
                         {m ? <span className="badge accent leader-badge"><Icon name="crown" size={11} /> líder</span> : null}

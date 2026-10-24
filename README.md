@@ -86,6 +86,7 @@ Si *Cuentas* queda vacío, el addon no está respondiendo en 5557: revisa que Ni
 
 ## Protecciones
 
+- **Grupos y presets**: etiquetas por cuenta (50K, PA…) con filtro y acciones en bloque, presets de riesgo (Conservador/Moderado/Agresivo, editables) y una tarjeta de *Recomendaciones* en Inicio con la acción de un clic (pausar, pasar a conservador, igualar, cerrar, poner perfil).
 - **Red de seguridad automática**: perfil de prop firm aplicado solo a las cuentas nuevas (drawdown, colchón, tope de contratos), tope de contratos también en Operar, y pérdida máxima del día para el conjunto de cuentas que cierra todo y bloquea hasta mañana.
 - **Cerrar todo**: en *Riesgo*, "Cerrar todas las seguidoras" o "Cerrar TODO (incluida la maestra)". El kill switch puede cerrar además de bloquear. En *Cuentas*, cada cuenta con posición tiene su botón *Cerrar*.
 - **Desincronización**: si una seguidora no tiene la posición de la maestra × multiplicador durante más de 6 s, aparece en rojo como DESINCRONIZADA, solo se le copian salidas, y el botón *Igualar a la maestra* manda la diferencia a mercado.

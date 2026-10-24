@@ -102,6 +102,33 @@ class AccountSettings(BaseModel):
     firm: Optional[str] = Field(default=None, max_length=40)
     plan: Optional[str] = Field(default=None, max_length=40)
     plan_size: Optional[float] = Field(default=None, ge=0)
+    tags: Optional[list[str]] = None     # grupos/etiquetas; se sustituyen todas
+
+
+class RiskPreset(BaseModel):
+    id: str = Field(min_length=1, max_length=24)
+    name: str = Field(min_length=1, max_length=40)
+    multiplier: float = Field(default=1.0, ge=0.01, le=50)
+    max_daily_loss: float = Field(default=0, ge=0)
+    max_daily_profit: float = Field(default=0, ge=0)
+    max_position_size: int = Field(default=0, ge=0)
+    drawdown_buffer: float = Field(default=0, ge=0)
+    entry_mode: str = Field(default="market", pattern="^(market|limit)$")
+
+
+class RiskPresets(BaseModel):
+    presets: list[RiskPreset]
+
+
+class ApplyPresetRequest(BaseModel):
+    preset_id: str
+    accounts: list[str]
+
+
+class TagsRequest(BaseModel):
+    accounts: list[str]
+    add: list[str] = []
+    remove: list[str] = []
 
 
 class MasterRequest(BaseModel):

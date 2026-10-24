@@ -18,7 +18,7 @@ export type Drawdown = { equity: number; mode: "intraday" | "eod" | "closed" | "
                          floor: number | null; room: number | null; pct: number | null; buffer: number; locked: boolean };
 export type Account = { account_id: string; balance: number; net_liquidity: number; daily_pnl: number; contracts_today: number; commissions_today: number; net_pnl: number;
                         open_positions: Position[]; updated_at: string;
-                        enabled: boolean; enabled_source: "auto" | "user"; alias: string; firm: string; plan: string; plan_size: number; connected: boolean | null; connection: string; reported: boolean;
+                        enabled: boolean; enabled_source: "auto" | "user"; alias: string; firm: string; plan: string; plan_size: number; tags: string[]; connected: boolean | null; connection: string; reported: boolean;
                         realized_pnl: number; unrealized_pnl: number; desync: boolean; desync_detail: string; working_orders: WorkingOrder[]; drawdown: Drawdown };
 /** Tick de precio del addon (topic market.price), indexado por raíz del símbolo (NQ, MNQ…). */
 export type Price = { symbol: string; last: number; bid: number; ask: number; at: number };
@@ -77,6 +77,10 @@ export type Trail = { account: string; symbol: string; mode: TrailMode; distance
                       active: boolean; distance_now: number | null; ai_reason: string; ai_confidence: number | null; ai_error: string | null; ai_stop: number | null; note: string };
 export type Trails = { trails: Trail[]; stats: { moves: number; ai_calls: number; ended: number }; ai_interval_s: number; ai: AiStatus | null;
                        market: Record<string, { symbol: string; last: number | null; age_s: number | null; atr_ticks: number | null; volume_ratio: number | null; bars: number }> };
+export type RiskPreset = { id: string; name: string; multiplier: number; max_daily_loss: number; max_daily_profit: number; max_position_size: number; drawdown_buffer: number; entry_mode: "market" | "limit" };
+export type AdviceAction = { type: "preset" | "pause" | "resume" | "link" | "resync" | "flatten" | "multiplier" | "profile"; label: string; preset_id?: string; value?: number };
+export type Advice = { account_id: string; severity: "bad" | "warn" | "ok" | "info"; code: string; title: string; detail: string; actions: AdviceAction[] };
+export type AdviceList = { advice: Advice[]; counts: Record<"bad" | "warn" | "ok" | "info", number>; generated_at: string };
 export type TradeStatus = { ready: boolean; reason: string | null; max_qty: number; mode: string; symbols: string[]; addon_version: string | null; required_addon: string; ping_ms: number | null;
                             last_order_ms: number | null; heartbeat_age_s: number | null; master: string | null; trails: number; ai_enabled: boolean;
                             stats: { orders: number; rejected: number; cancels: number; modifies: number; unconfirmed: number } };
@@ -142,7 +146,7 @@ export function makeClient(s: Session) {
     createRule: (b: Pick<Rule, "master_account" | "follower_account" | "multiplier" | "symbol_filter" | "enabled">) => req<Rule>("/api/rules", { method: "POST", body: JSON.stringify(b) }),
     updateRule: (id: string, b: Partial<Rule>) => req<Rule>(`/api/rules/${id}`, { method: "PATCH", body: JSON.stringify(b) }),
     deleteRule: (id: string) => req<void>(`/api/rules/${id}`, { method: "DELETE" }),
-    setAccount: (id: string, body: { enabled?: boolean; alias?: string; auto?: boolean; firm?: string; plan?: string; plan_size?: number }) =>
+    setAccount: (id: string, body: { enabled?: boolean; alias?: string; auto?: boolean; firm?: string; plan?: string; plan_size?: number; tags?: string[] }) =>
       req<Account>(`/api/accounts/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) }),
     forgetAccount: (id: string) => req<void>(`/api/accounts/${encodeURIComponent(id)}`, { method: "DELETE" }),
     setMaster: (account: string) => req<{ master_account: string }>("/api/master", { method: "POST", body: JSON.stringify({ account }) }),
@@ -197,6 +201,11 @@ export function makeClient(s: Session) {
     deleteLimit: (id: string) => req<void>(`/api/risk/limits/${encodeURIComponent(id)}`, { method: "DELETE" }),
     /** Fija el máximo del drawdown (marca de agua) de una cuenta; null = reiniciarlo al valor actual. */
     setPeak: (id: string, peak: number | null) => req<Account>(`/api/accounts/${encodeURIComponent(id)}/peak`, { method: "PUT", body: JSON.stringify({ peak }) }),
+    setTags: (accounts: string[], add: string[], remove: string[]) => req<Account[]>("/api/accounts/tags", { method: "PUT", body: JSON.stringify({ accounts, add, remove }) }),
+    presets: () => req<{ presets: RiskPreset[]; defaults: RiskPreset[] }>("/api/ui/risk-presets"),
+    savePresets: (presets: RiskPreset[]) => req<{ presets: RiskPreset[]; defaults: RiskPreset[] }>("/api/ui/risk-presets", { method: "PUT", body: JSON.stringify({ presets }) }),
+    applyPreset: (preset_id: string, accounts: string[]) => req<{ applied: string[]; preset: RiskPreset }>("/api/risk/preset", { method: "POST", body: JSON.stringify({ preset_id, accounts }) }),
+    advice: () => req<AdviceList>("/api/advice"),
     setDayLoss: (limit: number) => req<RiskState>("/api/risk/day-loss", { method: "PUT", body: JSON.stringify({ limit }) }),
     autoRiskStatus: () => req<AutoRiskStatus>("/api/risk/auto"),
     autoRisk: (account_id = "", force = false) => req<{ applied: AutoRiskStatus["applied"]; skipped: number }>("/api/risk/auto", { method: "POST", body: JSON.stringify({ account_id, force }) }),

@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useStore } from "../lib/store";
-import type { AutoRiskStatus } from "../lib/api";
+import type { AutoRiskStatus, RiskPreset } from "../lib/api";
 import { money, time, signedMoney } from "../lib/format";
 import { Card, Empty } from "../components/ui";
 import type { Commissions, RiskLimit } from "../lib/api";
@@ -81,6 +81,13 @@ export function Risk() {
     setBusy(true);
     try { const r = await client!.autoRisk(); setRisk(await client!.risk()); setAutoInfo(await client!.autoRiskStatus()); setMsg(r.applied.length ? `Perfil aplicado a ${r.applied.map((a) => `${a.account_id} (${a.firm} ${a.size / 1000}K, ${a.contracts} contratos)`).join(", ")}.` : "No se pudo deducir el plan de ninguna (revisa los saldos)."); }
     catch (ex) { setMsg(ex instanceof Error ? ex.message : String(ex)); } finally { setBusy(false); }
+  }
+  const [presets, setPresets] = useState<RiskPreset[]>([]);
+  useEffect(() => { if (client) client.presets().then((r) => setPresets(r.presets)).catch(() => {}); }, [client]);
+  const setPreset = (i: number, patch: Partial<RiskPreset>) => setPresets(presets.map((p, k) => (k === i ? { ...p, ...patch } : p)));
+  async function savePresets() {
+    try { const r = await client!.savePresets(presets); setPresets(r.presets); setMsg("Presets guardados. Aplícalos desde Cuentas (marca las cuentas → Preset…)."); }
+    catch (ex) { setMsg(ex instanceof Error ? ex.message : String(ex)); }
   }
   async function reopen() {
     if (!confirm("¿Levantar el bloqueo del cierre programado de hoy? Las copias se reanudan ahora.")) return;
@@ -203,6 +210,27 @@ export function Risk() {
           <button className="primary">Guardar horario</button>
         </form>
         {risk?.schedule.enabled && <p className="muted small">Activo: {risk.schedule.window_start ? `desde ${risk.schedule.window_start}` : "sin hora de inicio"}{risk.schedule.flatten_at ? ` · cierre a las ${risk.schedule.flatten_at}` : " · sin cierre programado"}{risk.schedule.last_flatten_day ? ` · último cierre ${risk.schedule.last_flatten_day}` : ""}</p>}
+      </Card>
+
+      <Card title="Presets de riesgo" data-testid="presets-card">
+        <p className="muted small">Paquetes de límites para aplicar a un grupo de cuentas de golpe desde <b>Cuentas → marcar → Preset…</b> (y los que ofrecen las Recomendaciones de Inicio). Cada preset fija pérdida diaria, corte del día, contratos máximos y colchón del drawdown; si la cuenta copia, también su multiplicador y el modo de entrada. El drawdown máximo lo pone el perfil de prop firm, no el preset.</p>
+        <div className="table-wrap"><table className="limits" data-testid="presets-table">
+          <thead><tr><th>Nombre</th><th className="num">Multiplicador</th><th className="num">Pérdida diaria $</th><th className="num">Corte del día $</th><th className="num">Máx. contratos</th><th className="num">Colchón DD $</th><th>Entrada</th><th></th></tr></thead>
+          <tbody>{presets.map((p, i) => <tr key={p.id}>
+            <td><input value={p.name} onChange={(e) => setPreset(i, { name: e.target.value })} style={{ width: 130 }} /></td>
+            <td className="num"><input type="number" step="0.1" min="0.1" value={p.multiplier} onChange={(e) => setPreset(i, { multiplier: Number(e.target.value) })} style={{ width: 70 }} /></td>
+            <td className="num"><input type="number" min="0" value={p.max_daily_loss} onChange={(e) => setPreset(i, { max_daily_loss: Number(e.target.value) })} style={{ width: 90 }} /></td>
+            <td className="num"><input type="number" min="0" value={p.max_daily_profit} onChange={(e) => setPreset(i, { max_daily_profit: Number(e.target.value) })} style={{ width: 90 }} /></td>
+            <td className="num"><input type="number" min="0" value={p.max_position_size} onChange={(e) => setPreset(i, { max_position_size: Number(e.target.value) })} style={{ width: 70 }} /></td>
+            <td className="num"><input type="number" min="0" value={p.drawdown_buffer} onChange={(e) => setPreset(i, { drawdown_buffer: Number(e.target.value) })} style={{ width: 80 }} /></td>
+            <td><select value={p.entry_mode} onChange={(e) => setPreset(i, { entry_mode: e.target.value as RiskPreset["entry_mode"] })}><option value="market">a mercado</option><option value="limit">límite con tolerancia</option></select></td>
+            <td><button className="ghost danger small-btn" onClick={() => setPresets(presets.filter((_, k) => k !== i))}>Quitar</button></td>
+          </tr>)}</tbody>
+        </table></div>
+        <div className="chips" style={{ marginTop: 8 }}>
+          <button className="ghost small-btn" onClick={() => setPresets([...presets, { id: `p${Date.now().toString(36)}`, name: "Nuevo", multiplier: 1, max_daily_loss: 0, max_daily_profit: 0, max_position_size: 0, drawdown_buffer: 0, entry_mode: "market" }])}>Añadir preset</button>
+          <button className="primary small-btn" onClick={() => void savePresets()} data-testid="presets-save">Guardar presets</button>
+        </div>
       </Card>
 
       <Card title="Cierre de emergencia">

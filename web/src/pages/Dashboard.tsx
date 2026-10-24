@@ -7,6 +7,7 @@ import { PnlChart } from "../components/PnlChart";
 import { ExecutionQuality } from "../components/ExecutionQuality";
 import { NewsToday, analysisLine, useNewsAlerts } from "../components/NewsPanel";
 import { RecentStats } from "../components/RecentStats";
+import { AdviceCard } from "../components/AdviceCard";
 import type { Route } from "../components/Shell";
 
 /** Inicio = sala de control: alertas, P&L del día, cuentas en juego y estado del puente. */
@@ -140,6 +141,7 @@ export function Dashboard({ onRoute }: { onRoute?: (r: Route) => void } = {}) {
       </div>
 
       <div className="grid two">
+        <AdviceCard onRoute={onRoute} />
         <Card title="Puente con el bróker" icon="bolt">
           {b ? (
             <div className="kv">

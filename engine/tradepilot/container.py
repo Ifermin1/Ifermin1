@@ -22,6 +22,7 @@ from tradepilot.services.trade_service import TradeService
 from tradepilot.services.market_service import MarketService
 from tradepilot.services.trail_service import TrailService
 from tradepilot.services.auto_risk_service import AutoRiskService
+from tradepilot.services.advisor_service import AdvisorService
 from tradepilot.services.sync_service import SyncService
 
 
@@ -45,8 +46,12 @@ class Container:
     market: MarketService | None = None
     trail: TrailService | None = None
     auto_risk: AutoRiskService | None = None
+    advisor: AdvisorService | None = None
 
     async def start(self) -> None:
+        if self.advisor is not None:
+            from tradepilot.api.routes import _presets
+            self.advisor.presets_provider = lambda: _presets(self)
         await self.bridge.start()
         await self.replication.start()
         await self.accounts.start()
@@ -144,6 +149,7 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
     market = MarketService(bus)
     auto_risk = AutoRiskService(risk, accounts, audit, cfg)
     accounts.on_account_seen = auto_risk.on_account_seen
+    advisor = AdvisorService(accounts, risk, replication, store)
     trail = TrailService(trade, accounts, market, ai, audit, bridge, store, interval_s=cfg.TRAIL_INTERVAL_S, ai_interval_s=cfg.AI_TRAIL_INTERVAL_S, ai_model=cfg.AI_TRAIL_MODEL)
 
     async def _after_sync() -> None:
@@ -154,4 +160,4 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
             except Exception as exc:
                 logger.exception(f"Error en vigilancia de {name}: {exc}")
     accounts.after_sync = _after_sync
-    return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal, commissions, performance, notify, news, trade, market, trail, auto_risk)
+    return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal, commissions, performance, notify, news, trade, market, trail, auto_risk, advisor)

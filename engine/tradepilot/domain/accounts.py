@@ -103,6 +103,7 @@ class AccountSnapshot(DomainModel):
     firm: str = ""
     plan: str = ""
     plan_size: float = 0.0
+    tags: list[str] = []               # grupos/etiquetas libres ("50K", "PA", "alto riesgo")
     connected: Optional[bool] = None
     connection: str = ""
     reported: bool = True              # False = el bróker no la reportó en la última sincronización

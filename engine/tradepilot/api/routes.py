@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from tradepilot.api.auth import require_token
-from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest, ProtectRequest, TrailRequest, DayLossRequest, AutoRiskRequest
+from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest, ProtectRequest, TrailRequest, DayLossRequest, AutoRiskRequest, RiskPresets, ApplyPresetRequest, TagsRequest
 from tradepilot.container import Container
 from tradepilot.domain.risk import RiskLimit, Schedule
 
@@ -101,7 +101,97 @@ async def set_master(body: MasterRequest, request: Request):
 @router.patch("/accounts/{account_id}")
 async def account_settings(account_id: str, body: AccountSettings, request: Request):
     """Activar/desactivar una cuenta o ponerle alias desde la consola."""
-    return await _c(request).accounts.set_settings(account_id, body.enabled, body.alias, body.auto, body.firm, body.plan, body.plan_size)
+    return await _c(request).accounts.set_settings(account_id, body.enabled, body.alias, body.auto, body.firm, body.plan, body.plan_size, body.tags)
+
+
+@router.put("/accounts/tags")
+async def accounts_tags(body: TagsRequest, request: Request):
+    """Añade o quita etiquetas (grupos) a varias cuentas de una vez."""
+    c = _c(request)
+    out = []
+    for acc in body.accounts:
+        snap = c.accounts.find(acc)
+        if snap is None:
+            continue
+        tags = [t for t in snap.tags if t.lower() not in {x.lower() for x in body.remove}] + [t for t in body.add if t.lower() not in {x.lower() for x in snap.tags}]
+        out.append(await c.accounts.set_settings(snap.account_id, tags=tags))
+    return out
+
+
+PRESETS_KEY = "ui.risk_presets"
+DEFAULT_PRESETS = [
+    {"id": "conservador", "name": "Conservador", "multiplier": 1.0, "max_daily_loss": 500, "max_daily_profit": 800, "max_position_size": 2, "drawdown_buffer": 250, "entry_mode": "limit"},
+    {"id": "moderado", "name": "Moderado", "multiplier": 1.0, "max_daily_loss": 1000, "max_daily_profit": 1500, "max_position_size": 5, "drawdown_buffer": 150, "entry_mode": "market"},
+    {"id": "agresivo", "name": "Agresivo", "multiplier": 2.0, "max_daily_loss": 0, "max_daily_profit": 0, "max_position_size": 10, "drawdown_buffer": 50, "entry_mode": "market"},
+]
+
+
+def _presets(c: Container) -> list[dict]:
+    import json as _json
+    raw = c.store.get_kv(PRESETS_KEY)
+    if raw:
+        try:
+            return _json.loads(raw)
+        except ValueError:
+            pass
+    return [dict(p) for p in DEFAULT_PRESETS]
+
+
+@router.get("/ui/risk-presets")
+def get_presets(request: Request):
+    return {"presets": _presets(_c(request)), "defaults": DEFAULT_PRESETS}
+
+
+@router.put("/ui/risk-presets")
+def put_presets(body: RiskPresets, request: Request):
+    import json as _json
+    ids = [p.id for p in body.presets]
+    if len(ids) != len(set(ids)):
+        raise HTTPException(422, "ids de preset repetidos")
+    c = _c(request)
+    c.store.set_kv(PRESETS_KEY, _json.dumps([p.model_dump() for p in body.presets]))
+    return {"presets": _presets(c), "defaults": DEFAULT_PRESETS}
+
+
+@router.post("/risk/preset")
+async def apply_preset(body: ApplyPresetRequest, request: Request):
+    """Aplica un preset a varias cuentas: límites (pérdida/corte diario, contratos, colchón) y, si copian, multiplicador y modo de entrada."""
+    c = _c(request)
+    preset = next((p for p in _presets(c) if p["id"] == body.preset_id), None)
+    if preset is None:
+        raise HTTPException(404, "preset no encontrado")
+    master = c.accounts.health().master_account or ""
+    applied = []
+    for acc in body.accounts:
+        snap = c.accounts.find(acc)
+        if snap is None:
+            continue
+        prev = c.risk.limits.get(snap.account_id)
+        limit = (prev.model_copy() if prev else RiskLimit(account_id=snap.account_id)).model_copy(update={
+            "max_daily_loss": float(preset["max_daily_loss"]), "max_daily_profit": float(preset["max_daily_profit"]),
+            "max_position_size": int(preset["max_position_size"]), "drawdown_buffer": float(preset["drawdown_buffer"])})
+        try:
+            c.risk.upsert_limit(limit)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc))
+        rule = next((r for r in c.replication.rules if r.follower_account.lower() == snap.account_id.lower() and not r.symbol_filter and (not master or r.master_matches(master))), None)
+        if rule is not None:
+            c.replication.update_rule(rule.id, multiplier=float(preset["multiplier"]), entry_mode=preset["entry_mode"])
+        c.audit.log("PRESET_APPLIED", f"{snap.account_id}: preset {preset['name']} (pérdida diaria {preset['max_daily_loss']}, corte {preset['max_daily_profit']}, "
+                    f"máx {preset['max_position_size']} contratos, colchón {preset['drawdown_buffer']}" + (f", ×{preset['multiplier']} {preset['entry_mode']}" if rule else "") + ")",
+                    target=snap.account_id)
+        applied.append(snap.account_id)
+    await c.accounts.publish_accounts(force=True)
+    return {"applied": applied, "preset": preset}
+
+
+@router.get("/advice")
+def advice(request: Request):
+    """Recomendaciones por cuenta (desincronización, drawdown, racha, sin límites…) con acciones de un clic."""
+    c = _c(request)
+    if c.advisor is None:
+        raise HTTPException(503, "recomendaciones no disponibles")
+    return c.advisor.advise()
 
 
 @router.put("/accounts/{account_id}/peak")

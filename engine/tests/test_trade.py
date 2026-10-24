@@ -197,3 +197,41 @@ async def test_auto_risk_profile_contract_cap_and_day_closed(client: AsyncClient
     st = container.risk.state()
     assert not st.kill_switch and not st.day_closed
     assert any(a.event_type == "DAY_REOPENED" for a in container.audit.recent(10))
+
+
+async def test_tags_presets_and_advice(client: AsyncClient, container):
+    # etiquetas por cuenta y en lote
+    r = await client.patch("/api/accounts/Sim102", json={"tags": ["50K", " alto riesgo ", "50k"]})
+    assert r.status_code == 200 and r.json()["tags"] == ["50K", "alto riesgo"]
+    r = await client.put("/api/accounts/tags", json={"accounts": ["Sim102", "Sim103"], "add": ["PA"], "remove": ["alto riesgo"]})
+    assert r.status_code == 200 and {a["account_id"]: a["tags"] for a in r.json()} == {"Sim102": ["50K", "PA"], "Sim103": ["PA"]}
+    accs = {a["account_id"]: a for a in (await client.get("/api/accounts")).json()}
+    assert accs["Sim102"]["tags"] == ["50K", "PA"]
+    # presets: por defecto tres; editables; aplicar a varias cuentas toca límites y regla
+    r = await client.get("/api/ui/risk-presets")
+    assert [p["id"] for p in r.json()["presets"]] == ["conservador", "moderado", "agresivo"]
+    bad = r.json()["presets"] + [dict(r.json()["presets"][0])]
+    assert (await client.put("/api/ui/risk-presets", json={"presets": bad})).status_code == 422
+    await client.put("/api/accounts/Sim102/link", json={"master_account": "Sim101", "multiplier": 3})
+    r = await client.post("/api/risk/preset", json={"preset_id": "conservador", "accounts": ["Sim102", "Sim103"]})
+    assert r.status_code == 200 and r.json()["applied"] == ["Sim102", "Sim103"]
+    lim = container.risk.limits["Sim102"]
+    assert lim.max_daily_loss == 500 and lim.max_position_size == 2 and lim.drawdown_buffer == 250
+    rule = next(x for x in container.replication.rules if x.follower_account == "Sim102")
+    assert rule.multiplier == 1.0 and rule.entry_mode == "limit"
+    # consejos: sin límites, desincronizada, racha perdedora
+    container.bridge.positions[("Sim102", "NQ 12-26")] = 4     # la maestra está plana: desincronizada
+    await container.accounts.sync_once()
+    await container.sync.check()
+    import time
+    container.sync.grace_s = 0
+    await container.sync.check()
+    day = container.performance.day_key(__import__("datetime").datetime.now())
+    for i in range(3):
+        container.store.save_trade({"account_id": "Sim101", "day": day, "symbol": "NQ 12-26", "side": "long", "quantity": 1, "entry_price": 1, "exit_price": 0, "pnl": -100, "commissions": 4,
+                                    "opened_at": f"2026-01-01T10:0{i}:00", "closed_at": f"2026-01-01T10:0{i}:30", "fills": 2})
+    r = await client.get("/api/advice")
+    assert r.status_code == 200
+    codes = {(a["account_id"], a["code"]) for a in r.json()["advice"]}
+    assert ("Sim101", "NO_LIMITS") in codes and ("Sim101", "LOSING_STREAK") in codes
+    assert r.json()["counts"]["warn"] >= 2
