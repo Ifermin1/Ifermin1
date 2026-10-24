@@ -158,3 +158,42 @@ async def test_close_cancels_exits_and_addon_brackets_are_swept(client: AsyncCli
     await container.accounts.sync_once()
     await container.trade.sweep_orphans()
     assert not any(o.order_id == "brk-sl-1" for _, o in container.bridge.working_orders)
+
+
+async def test_auto_risk_profile_contract_cap_and_day_closed(client: AsyncClient, container):
+    b = container.bridge
+    # aparece una cuenta APEX de 50K: el engine le aplica el perfil solo (evaluación 50K: 2.500 de drawdown, 5 contratos como máximo)
+    b.accounts["APEX112924000009999"] = 50_000.0
+    await container.accounts.sync_once()
+    lim = container.risk.limits.get("APEX112924000009999")
+    assert lim is not None and lim.max_trailing_drawdown == 2500 and lim.drawdown_mode == "intraday" and lim.max_position_size == 5 and lim.profit_goal == 3000 and lim.start_balance == 50000
+    acc = next(a for a in container.accounts.all() if a.account_id == "APEX112924000009999")
+    assert acc.firm == "apex" and acc.plan == "eval" and acc.plan_size == 50000
+    assert any(a.event_type == "AUTO_RISK_APPLIED" for a in container.audit.recent(10))
+    # una Sim no se toca sola; el botón de Riesgo (todas las que falten) sí la perfila con la firma por defecto
+    assert container.risk.limits.get("Sim103") is None
+    st = (await client.get("/api/risk/auto")).json()
+    assert st["enabled"] and "Sim103" in st["pending"]
+    r = await client.post("/api/risk/auto", json={})
+    assert r.status_code == 200 and any(a["account_id"] == "Sim103" and a["size"] == 100000 for a in r.json()["applied"])
+    # tope de contratos también en Operar: 6 contratos en una cuenta con máximo 5 se rechaza
+    r = await client.post("/api/trade/order", json={"client_id": "cap-1", "account": "APEX112924000009999", "symbol": "NQ 12-26", "action": "BUY", "quantity": 6, "order_type": "MARKET"})
+    assert r.status_code == 422 and "límite de riesgo" in r.text
+    r = await client.post("/api/trade/order", json={"client_id": "cap-2", "account": "APEX112924000009999", "symbol": "NQ 12-26", "action": "BUY", "quantity": 2, "order_type": "MARKET"})
+    assert r.status_code == 200
+    # día cerrado: pérdida conjunta de las cuentas activas ≥ límite → kill switch + cierre de todo
+    r = await client.put("/api/risk/day-loss", json={"limit": 1000})
+    assert r.status_code == 200 and r.json()["day_loss_limit"] == 1000 and r.json()["day_closed"] is False
+    b.pnl["Sim101"], b.pnl["Sim102"] = -700.0, -400.0
+    await container.accounts.sync_once()
+    await container.risk.check()
+    st = container.risk.state()
+    assert st.day_closed and st.kill_switch and "día cerrado" in (st.kill_switch_reason or "") and st.day_total <= -1000
+    assert b.positions.get(("APEX112924000009999", "NQ 12-26"), 0) == 0            # cerrada con el resto
+    assert any(a.event_type == "DAY_CLOSED" for a in container.audit.recent(20))
+    # reanudar a mano levanta el bloqueo y no vuelve a saltar hoy
+    await client.post("/api/risk/kill-switch", json={"active": False})
+    await container.risk.check()
+    st = container.risk.state()
+    assert not st.kill_switch and not st.day_closed
+    assert any(a.event_type == "DAY_REOPENED" for a in container.audit.recent(10))

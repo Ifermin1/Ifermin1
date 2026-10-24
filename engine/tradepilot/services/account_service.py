@@ -20,6 +20,7 @@ class AccountService:
         self.interval = interval
         self.after_sync = None                 # corrutina a llamar tras cada sincronización (SyncService.check)
         self.on_positions_refreshed = None     # callable(cuenta | None) tras actualizar posiciones (libro de exposición)
+        self.on_account_seen = None            # corrutina(cuenta) al descubrir o activar una cuenta (riesgo automático)
         self.limits_provider = lambda: {}      # {cuenta: RiskLimit} (lo inyecta el contenedor) para el drawdown dinámico
         self.eod_time = "17:00"                # hora local del cierre del día para el drawdown EOD (DRAWDOWN_EOD_TIME)
         self.commissions = None                # CommissionService (lo inyecta el contenedor)
@@ -54,6 +55,7 @@ class AccountService:
         now = datetime.now()
         reported = {a.account_id for a in data}
         new_hidden = 0
+        seen: list[str] = []
         for info in data:
             # Política "auto": una cuenta está activa mientras esté conectada. Si el addon no informa
             # del estado (versión antigua) todo lo reportado cuenta como conectado.
@@ -64,11 +66,14 @@ class AccountService:
                                                                         enabled=auto_enabled)
                 if auto_enabled:
                     logger.info(f"Cuenta conectada detectada: {info.account_id} ({info.connection or 'sin conexión'})")
+                    seen.append(info.account_id)
                 else:
                     new_hidden += 1
             elif snap.enabled_source == "auto" and snap.enabled != auto_enabled:
                 snap.enabled = auto_enabled
                 logger.info(f"Cuenta {info.account_id} {'activada (conectada)' if auto_enabled else 'oculta (desconectada)'}")
+                if auto_enabled:
+                    seen.append(info.account_id)
             snap.balance = snap.net_liquidity = info.balance
             snap.realized_pnl, snap.unrealized_pnl = info.realized_pnl, info.unrealized_pnl
             snap.daily_pnl = info.realized_pnl + info.unrealized_pnl
@@ -82,6 +87,12 @@ class AccountService:
             if self.store:
                 self.store.upsert_account_seen(info.account_id, info.balance, now.isoformat(), snap.enabled, info.connected)
             self._track_drawdown(snap, self.now())
+        if seen and self.on_account_seen is not None:
+            for acc in seen:
+                try:
+                    await self.on_account_seen(acc)
+                except Exception as exc:
+                    logger.warning(f'Riesgo automático en {acc}: {exc}')
         if new_hidden:
             logger.info(f"{new_hidden} cuentas nuevas sin conexión quedan ocultas (se activan solas al conectarse)")
         import time as _t

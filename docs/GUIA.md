@@ -432,6 +432,8 @@ actualizar: NinjaScript Editor → F5).
 | `MANUAL_REJECTED` ⛔ | Una orden desde Operar no pasó las validaciones del engine (cantidad, kill switch, cuenta pausada, addon antiguo) o el bróker la rechazó. | Lee el motivo en el mensaje; si fue "NO confirmada", comprueba en NinjaTrader antes de reenviar (el reenvío con el mismo id no duplica). |
 | `MANUAL_CANCEL` / `MANUAL_MODIFY` | Orden cancelada o modificada desde Operar (también "salida huérfana": un stop u objetivo creado por Proteger cuya posición ya no existe). | Nada. |
 | `MANUAL_PROTECT` | Breakeven o stop/objetivo aplicados desde Proteger, con los precios y los dólares por contrato. | Nada. |
+| `DAY_CLOSED` ⛔ | La pérdida neta conjunta del día alcanzó el límite global: todo cerrado y bloqueado hasta mañana. | Parar por hoy. Si de verdad quieres seguir, Reanudar (no vuelve a saltar ese día). |
+| `AUTO_RISK_APPLIED` 🛡️ | Una cuenta nueva recibió sola el perfil de prop firm (drawdown, colchón, contratos, objetivo). | Comprobar en Riesgo que el tamaño deducido es el correcto. |
 | `TRAIL_START` / `TRAIL_MOVE` / `TRAIL_END` | Trailing stop activado, stop movido (con la razón: distancia fija, k × ATR, volumen, IA, breakeven) o terminado. | Nada; si ves muchos `TRAIL_MOVE` seguidos sube el *paso mínimo*. |
 | `NEWS_SOON` 📰 | Faltan menos de 30 min para un dato económico vigilado; el aviso trae el análisis del impacto posible. | Lee el consejo: no abrir entradas justo antes, reducir tamaño o cerrar si el dato es de impacto alto. |
 | `NEWS_RESULT` 📊 | Se ha publicado el dato: real frente a previsión, análisis del resultado y reacción del precio. | Espera a que el mercado digiera el dato antes de copiar con tamaño normal; mira la pestaña Noticias para el detalle. |
@@ -462,6 +464,21 @@ desde otra carpeta con otro `.env`), verás un banner rojo con el botón *Salir 
 engine líneas `WebSocket … 403`. Entra de nuevo con el token actual; si acabas de cambiar el `.env`, reinicia el engine
 antes. Si además esa ventana dice `Cuenta Sim101 activada`, ese engine está en modo simulador: en ese mismo `.env` pon
 `ENGINE_MODE=ninja`.
+
+### Red de seguridad automática (Riesgo)
+
+- **Perfil automático en cuentas nuevas**: cuando aparece una cuenta cuyo nombre delata la firma (`APEX…`, `TST…`, `MFF…`,
+  `TPT…`) y no tiene límites ni perfil, el engine deduce el tamaño por el saldo y aplica el plan del catálogo (drawdown y su
+  modo, suelo bloqueado si procede, objetivo de la evaluación, pérdida diaria del plan, colchón `AUTO_RISK_BUFFER` y un máximo
+  de contratos = el menor entre el del plan y `AUTO_RISK_MAX_CONTRACTS`). Queda en Auditoría como `AUTO_RISK_APPLIED` y es
+  editable en la tabla de límites. Para las que no se reconocen por el nombre (Sim…), el botón *Aplicar perfil a las N sin
+  límites* de la tarjeta *Red de seguridad* usa la firma por defecto (`AUTO_RISK_FIRM`). `AUTO_RISK=false` lo desactiva.
+- **Tope de contratos** (`máximo de contratos` del límite): vale para las copias y también para las órdenes desde *Operar*,
+  que se rechazan antes de enviarse si la posición resultante lo supera.
+- **Pérdida máxima del día (todas las cuentas)**: en la misma tarjeta. Si la pérdida neta conjunta de las cuentas activas
+  llega al límite, el engine activa el kill switch, cierra todas las posiciones (vinculadas o no) y bloquea entradas y
+  copias hasta mañana (`DAY_CLOSED`; aviso al 80 % con `DAY_LOSS_WARNING`). *Reanudar* en la barra de estado lo levanta
+  bajo tu responsabilidad y no vuelve a saltar ese día (`DAY_REOPENED`).
 
 ## 7. Emergencias
 

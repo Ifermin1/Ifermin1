@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     MANUAL_ADDON_VERSION: str = "2.7"      # operar desde la consola (Operar) requiere este addon o superior
     MANUAL_MAX_QTY: int = 20               # contratos máximos por orden manual desde la consola
     MANUAL_CONFIRM_TIMEOUT_S: float = 8.0
+    # Riesgo automático: al aparecer una cuenta sin límites se le aplica el perfil del catálogo (firma por el nombre, tamaño por el saldo)
+    AUTO_RISK: bool = True
+    AUTO_RISK_FIRM: str = "apex"           # firma por defecto si el nombre de la cuenta no la delata
+    AUTO_RISK_PLAN: str = "eval"           # plan por defecto (apex: eval | pa | static | pa_static)
+    AUTO_RISK_MAX_CONTRACTS: int = 5       # tope de contratos por cuenta (se usa el menor entre este y el del plan); 0 = el del plan
+    AUTO_RISK_BUFFER: float = 250.0        # colchón en $ antes del suelo del drawdown al que el engine cierra y pausa
     TRAIL_INTERVAL_S: float = 1.0          # cada cuánto revisa el trailing stop cada posición
     AI_TRAIL_INTERVAL_S: int = 60          # trailing IA: cada cuánto se le pide a Claude dónde poner el stop
     AI_TRAIL_MODEL: str = ""               # modelo para el trailing IA; vacío = AI_MODEL (claude-sonnet-5-5 responde más rápido y barato)  # si NinjaTrader no confirma la orden manual en este tiempo se reporta como NO confirmada

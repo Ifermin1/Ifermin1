@@ -21,6 +21,7 @@ from tradepilot.services.ai_service import AIService
 from tradepilot.services.trade_service import TradeService
 from tradepilot.services.market_service import MarketService
 from tradepilot.services.trail_service import TrailService
+from tradepilot.services.auto_risk_service import AutoRiskService
 from tradepilot.services.sync_service import SyncService
 
 
@@ -43,6 +44,7 @@ class Container:
     trade: TradeService | None = None
     market: MarketService | None = None
     trail: TrailService | None = None
+    auto_risk: AutoRiskService | None = None
 
     async def start(self) -> None:
         await self.bridge.start()
@@ -140,6 +142,8 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
     trade = TradeService(bridge, accounts, risk, audit, cfg)
     replication.on_manual_status = trade.on_manual_status
     market = MarketService(bus)
+    auto_risk = AutoRiskService(risk, accounts, audit, cfg)
+    accounts.on_account_seen = auto_risk.on_account_seen
     trail = TrailService(trade, accounts, market, ai, audit, bridge, store, interval_s=cfg.TRAIL_INTERVAL_S, ai_interval_s=cfg.AI_TRAIL_INTERVAL_S, ai_model=cfg.AI_TRAIL_MODEL)
 
     async def _after_sync() -> None:
@@ -150,4 +154,4 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
             except Exception as exc:
                 logger.exception(f"Error en vigilancia de {name}: {exc}")
     accounts.after_sync = _after_sync
-    return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal, commissions, performance, notify, news, trade, market, trail)
+    return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal, commissions, performance, notify, news, trade, market, trail, auto_risk)

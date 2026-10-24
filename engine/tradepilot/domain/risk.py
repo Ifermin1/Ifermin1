@@ -54,6 +54,9 @@ class RiskState(DomainModel):
     session_closed: bool = False      # cierre programado ejecutado hoy: no se copia hasta mañana
     addon_silent: bool = False        # sin heartbeat del addon
     commissions: Commissions = Commissions()
+    day_loss_limit: float = 0.0       # pérdida neta conjunta del día (todas las cuentas activas) que cierra todo; 0 = sin límite
+    day_closed: bool = False          # saltó hoy
+    day_total: float = 0.0            # P&L neto del día sumado en las cuentas activas
 
 
 class RiskAlert(DomainModel):

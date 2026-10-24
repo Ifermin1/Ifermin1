@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useStore } from "../lib/store";
+import type { AutoRiskStatus } from "../lib/api";
 import { money, time, signedMoney } from "../lib/format";
 import { Card, Empty } from "../components/ui";
 import type { Commissions, RiskLimit } from "../lib/api";
@@ -65,6 +66,21 @@ export function Risk() {
     e.preventDefault();
     try { await client!.setSchedule(sched); setRisk(await client!.risk()); setMsg("Horario guardado."); }
     catch (ex) { setMsg(ex instanceof Error ? ex.message : String(ex)); }
+  }
+  const [dayLoss, setDayLoss] = useState("");
+  const [autoInfo, setAutoInfo] = useState<AutoRiskStatus | null>(null);
+  useEffect(() => { if (risk) setDayLoss(risk.day_loss_limit ? String(risk.day_loss_limit) : ""); }, [risk?.day_loss_limit]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (client) client.autoRiskStatus().then(setAutoInfo).catch(() => {}); }, [client, risk?.limits.length]);
+  async function saveDayLoss(e: FormEvent) {
+    e.preventDefault();
+    try { setRisk(await client!.setDayLoss(Number(dayLoss) || 0)); setMsg(Number(dayLoss) ? `Límite del día guardado: −${Number(dayLoss).toLocaleString("es-ES")} $ entre todas las cuentas.` : "Límite del día quitado."); }
+    catch (ex) { setMsg(ex instanceof Error ? ex.message : String(ex)); }
+  }
+  async function applyAuto() {
+    if (!autoInfo || !confirm(`¿Aplicar el perfil automático a ${autoInfo.pending.length} cuenta(s) sin límites?\n\nFirma por el nombre (o ${autoInfo.firm} por defecto), tamaño por el saldo, colchón ${autoInfo.buffer} $ y máximo ${autoInfo.max_contracts} contratos. Todo queda editable aquí.`)) return;
+    setBusy(true);
+    try { const r = await client!.autoRisk(); setRisk(await client!.risk()); setAutoInfo(await client!.autoRiskStatus()); setMsg(r.applied.length ? `Perfil aplicado a ${r.applied.map((a) => `${a.account_id} (${a.firm} ${a.size / 1000}K, ${a.contracts} contratos)`).join(", ")}.` : "No se pudo deducir el plan de ninguna (revisa los saldos)."); }
+    catch (ex) { setMsg(ex instanceof Error ? ex.message : String(ex)); } finally { setBusy(false); }
   }
   async function reopen() {
     if (!confirm("¿Levantar el bloqueo del cierre programado de hoy? Las copias se reanudan ahora.")) return;
@@ -155,6 +171,27 @@ export function Risk() {
           <div><strong>Sesión cerrada por horario</strong> ({risk.schedule.flatten_at}). No se copia nada hasta mañana.</div>
           <button className="ghost" onClick={() => void reopen()}>Reabrir hoy</button></div></Card>
       )}
+
+      {risk?.day_closed && (
+        <Card className="alert-card"><div className="kill" data-testid="day-closed">
+          <div><strong>DÍA CERRADO.</strong> La pérdida neta conjunta ({risk.day_total.toLocaleString("es-ES", { maximumFractionDigits: 0 })} $) alcanzó el límite de −{risk.day_loss_limit.toLocaleString("es-ES")} $: todo cerrado y bloqueado hasta mañana.</div>
+          <span className="muted small">Para levantarlo hoy, pulsa Reanudar en la barra de estado (no volverá a saltar hoy).</span></div></Card>
+      )}
+      <Card title="Red de seguridad para el día y para las cuentas nuevas">
+        <div className="an-two" data-testid="safety-net">
+          <form className="rule-form" onSubmit={saveDayLoss}>
+            <p className="muted small" style={{ margin: 0 }}><b>Pérdida máxima del día (todas las cuentas activas juntas).</b> Al alcanzarla el engine activa el kill switch, cierra todas las posiciones y bloquea entradas hasta mañana. Hoy llevas <b className={(risk?.day_total ?? 0) < 0 ? "bad" : "ok"}>{(risk?.day_total ?? 0).toLocaleString("es-ES", { maximumFractionDigits: 0 })} $</b>.</p>
+            <label>Límite en $ (0 = sin límite)<input inputMode="numeric" value={dayLoss} onChange={(e) => setDayLoss(e.target.value)} placeholder="p. ej. 3000" data-testid="day-loss-input" /></label>
+            <button className="primary" data-testid="day-loss-save">Guardar límite del día</button>
+          </form>
+          <div>
+            <p className="muted small" style={{ margin: 0 }}><b>Perfil automático.</b> {autoInfo?.enabled ? `Cuando aparece una cuenta APEX (o de otra firma reconocible) sin límites, el engine le aplica solo el plan (${autoInfo.plan}) por el saldo, con colchón ${autoInfo.buffer} $ y máximo ${autoInfo.max_contracts} contratos. ` : "Desactivado en engine\\.env (AUTO_RISK). "}
+              {autoInfo ? (autoInfo.pending.length ? `Ahora hay ${autoInfo.pending.length} cuenta(s) activas sin límites: ${autoInfo.pending.slice(0, 6).join(", ")}${autoInfo.pending.length > 6 ? "…" : ""}.` : "Todas las cuentas activas tienen límites.") : ""}</p>
+            <button className="ghost" disabled={busy || !autoInfo?.pending.length} onClick={() => void applyAuto()} data-testid="auto-risk-apply">Aplicar perfil a las {autoInfo?.pending.length ?? 0} sin límites</button>
+            <p className="muted small">Ajusta después en la tabla de límites si el tamaño no es el correcto (p. ej. una PA con saldo distinto). Cambia los valores por defecto en <code>engine\.env</code>: AUTO_RISK_MAX_CONTRACTS, AUTO_RISK_BUFFER, AUTO_RISK_PLAN.</p>
+          </div>
+        </div>
+      </Card>
 
       <Card title="Horario de copia y cierre programado">
         <p className="muted small">Hora local del PC donde corre el engine. Fuera de la ventana no se copia nada. A la hora de cierre se cancelan órdenes, se cierran posiciones y se bloquea hasta el día siguiente. Útil para la regla de las prop firms de estar plano al cierre.</p>

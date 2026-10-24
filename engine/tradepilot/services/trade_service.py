@@ -81,6 +81,10 @@ class TradeService:
             raise ValueError("la cantidad debe ser mayor que 0")
         if qty > self.settings.MANUAL_MAX_QTY and not req.get("closing"):
             raise ValueError(f"máximo {self.settings.MANUAL_MAX_QTY} contratos por orden desde la consola (MANUAL_MAX_QTY en engine/.env)")
+        if not req.get("closing"):
+            ok, why = self.risk.allows(account, qty, symbol, action)
+            if not ok:
+                raise ValueError(f"límite de riesgo: {why}")
         otype = str(req.get("order_type", "MARKET")).upper().replace("_", "").replace(" ", "")
         if otype == "STOP":
             otype = "STOPMARKET"

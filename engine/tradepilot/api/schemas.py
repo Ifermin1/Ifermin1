@@ -208,3 +208,15 @@ class TrailRequest(BaseModel):
     atr_k: float = Field(default=1.5, ge=0.3, le=5)
     min_ticks: int = Field(default=8, ge=1, le=2000)
     max_ticks: int = Field(default=200, ge=1, le=4000)
+
+
+class DayLossRequest(BaseModel):
+    limit: float = Field(ge=0)        # 0 = sin límite
+
+
+class AutoRiskRequest(BaseModel):
+    account_id: str = ""              # vacío = todas las cuentas activas sin límites
+    force: bool = False
+    firm: str = ""
+    plan: str = ""
+    size: int = 0

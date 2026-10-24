@@ -35,7 +35,10 @@ export type RiskLimit = { account_id: string; max_daily_loss: number; max_daily_
 export type Schedule = { enabled: boolean; window_start: string; flatten_at: string; include_master: boolean; last_flatten_day: string };
 export type Commissions = { enabled: boolean; default_per_side: number; rates: Record<string, number> };
 export type RiskState = { kill_switch: boolean; kill_switch_reason: string | null; kill_switch_at: string | null; limits: RiskLimit[];
-                          schedule: Schedule; session_closed: boolean; addon_silent: boolean; commissions: Commissions };
+                          schedule: Schedule; session_closed: boolean; addon_silent: boolean; commissions: Commissions;
+                          day_loss_limit: number; day_closed: boolean; day_total: number };
+export type AutoRiskStatus = { enabled: boolean; firm: string; plan: string; max_contracts: number; buffer: number; pending: string[];
+                               applied: { account_id: string; firm: string; plan: string; size: number; drawdown: number; drawdown_mode: string; buffer: number; contracts: number; target: number; daily_loss: number }[] };
 
 /** Calidad de ejecución: una orden del maestro copiada y el fill de cada seguidora (deslizamiento en ticks, positivo = peor). */
 export type ExecFollower = { name: string; expected: number; filled: number; price: number | null; slip: number | null; slip_ticks: number | null;
@@ -194,6 +197,9 @@ export function makeClient(s: Session) {
     deleteLimit: (id: string) => req<void>(`/api/risk/limits/${encodeURIComponent(id)}`, { method: "DELETE" }),
     /** Fija el máximo del drawdown (marca de agua) de una cuenta; null = reiniciarlo al valor actual. */
     setPeak: (id: string, peak: number | null) => req<Account>(`/api/accounts/${encodeURIComponent(id)}/peak`, { method: "PUT", body: JSON.stringify({ peak }) }),
+    setDayLoss: (limit: number) => req<RiskState>("/api/risk/day-loss", { method: "PUT", body: JSON.stringify({ limit }) }),
+    autoRiskStatus: () => req<AutoRiskStatus>("/api/risk/auto"),
+    autoRisk: (account_id = "", force = false) => req<{ applied: AutoRiskStatus["applied"]; skipped: number }>("/api/risk/auto", { method: "POST", body: JSON.stringify({ account_id, force }) }),
     setSchedule: (s: Omit<Schedule, "last_flatten_day">) => req<Schedule>("/api/risk/schedule", { method: "PUT", body: JSON.stringify(s) }),
     reopenSession: () => req<RiskState>("/api/risk/reopen", { method: "POST" }),
     setCommissions: (c: Commissions) => req<Commissions>("/api/risk/commissions", { method: "PUT", body: JSON.stringify(c) }),

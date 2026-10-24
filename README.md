@@ -86,6 +86,7 @@ Si *Cuentas* queda vacío, el addon no está respondiendo en 5557: revisa que Ni
 
 ## Protecciones
 
+- **Red de seguridad automática**: perfil de prop firm aplicado solo a las cuentas nuevas (drawdown, colchón, tope de contratos), tope de contratos también en Operar, y pérdida máxima del día para el conjunto de cuentas que cierra todo y bloquea hasta mañana.
 - **Cerrar todo**: en *Riesgo*, "Cerrar todas las seguidoras" o "Cerrar TODO (incluida la maestra)". El kill switch puede cerrar además de bloquear. En *Cuentas*, cada cuenta con posición tiene su botón *Cerrar*.
 - **Desincronización**: si una seguidora no tiene la posición de la maestra × multiplicador durante más de 6 s, aparece en rojo como DESINCRONIZADA, solo se le copian salidas, y el botón *Igualar a la maestra* manda la diferencia a mercado.
 - **Drawdown dinámico del prop firm**: el engine lleva el máximo que llegó a valer cada cuenta (con flotante, guardado entre reinicios) y el suelo que resulta de restarle el drawdown permitido. En *Riesgo* se ve para todas las cuentas; con *Drawdown máx.* configurado avisa al 80 % y pausa y cierra la cuenta cuando faltan los dólares del colchón, antes de que el prop firm la cierre.

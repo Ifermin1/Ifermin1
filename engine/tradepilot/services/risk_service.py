@@ -40,6 +40,9 @@ class RiskService:
         self.now = datetime.now                       # inyectable en pruebas
         bus.subscribe("risk.naked", self._on_naked)
         self.limits: dict[str, RiskLimit] = {l.account_id: l for l in store.get_risk_limits()}
+        self.day_loss_limit = float(store.get_kv("day_loss_limit", "0") or 0)       # pérdida neta conjunta del día que cierra todo
+        self.day_closed_day: str = store.get_kv("day_closed_day", "") or ""           # día en que saltó
+        self.day_ack_day: str = store.get_kv("day_ack_day", "") or ""                 # día en que el usuario reanudó a pesar de todo
         self.kill_switch = store.get_kv("kill_switch", "0") == "1"
         self.kill_switch_reason = store.get_kv("kill_switch_reason")
         ts = store.get_kv("kill_switch_at")
@@ -49,7 +52,48 @@ class RiskService:
         return RiskState(kill_switch=self.kill_switch, kill_switch_reason=self.kill_switch_reason,
                          kill_switch_at=self.kill_switch_at, limits=list(self.limits.values()),
                          schedule=self.schedule, session_closed=self.session_closed(), addon_silent=self.addon_silent,
-                         commissions=self.commissions.config if self.commissions is not None else Commissions())
+                         commissions=self.commissions.config if self.commissions is not None else Commissions(),
+                         day_loss_limit=self.day_loss_limit, day_closed=self.day_closed_day == self._today() and self.day_ack_day != self._today(), day_total=self.day_total())
+
+    def day_total(self) -> float:
+        """P&L neto del día sumado en las cuentas activas."""
+        if not self.accounts:
+            return 0.0
+        return round(sum(a.net_pnl for a in self.accounts.accounts.values() if a.enabled), 2)
+
+    def set_day_loss(self, limit: float) -> RiskState:
+        self.day_loss_limit = max(0.0, float(limit))
+        self.store.set_kv("day_loss_limit", str(self.day_loss_limit))
+        self.audit.log("DAY_LOSS_SET", f"Pérdida máxima del día para el conjunto de cuentas: {('-' + format(self.day_loss_limit, ',.0f') + ' $') if self.day_loss_limit else 'sin límite'}")
+        self.bus.publish_nowait(TOPIC_RISK, self.state().model_dump(mode="json"))
+        return self.state()
+
+    async def _check_day_loss(self) -> None:
+        """Día cerrado: si la pérdida neta conjunta alcanza el límite, kill switch + cierre de todo, hasta mañana (o hasta reanudar a mano)."""
+        if self.day_loss_limit <= 0 or not self.accounts:
+            return
+        today = self._today()
+        if self.day_closed_day == today or self.day_ack_day == today:
+            return
+        total = self.day_total()
+        if total > -self.day_loss_limit:
+            if total <= -0.8 * self.day_loss_limit and ("*", today, "day") not in self._warned_80:
+                self._warned_80.add(("*", today, "day"))
+                self.audit.log("DAY_LOSS_WARNING", f"Pérdida conjunta del día {total:,.2f} $, al 80 % del límite de -{self.day_loss_limit:,.0f} $")
+            return
+        self.day_closed_day = today
+        self.store.set_kv("day_closed_day", today)
+        self.audit.log("DAY_CLOSED", f"DÍA CERRADO: la pérdida neta conjunta {total:,.2f} $ alcanzó el límite de -{self.day_loss_limit:,.0f} $. "
+                       "Se cierra todo y no se copia ni se opera hasta mañana (Reanudar en la barra de estado lo levanta bajo tu responsabilidad).",
+                       details={"total": total, "limit": self.day_loss_limit})
+        self.set_kill_switch(True, f"día cerrado: pérdida conjunta {total:,.0f} $ ≥ límite {self.day_loss_limit:,.0f} $")
+        # todas las cuentas activas con posición u órdenes, estén o no vinculadas a la copia
+        for snap in list(self.accounts.accounts.values()):
+            if snap.enabled and (snap.open_positions or snap.working_orders):
+                try:
+                    await self.flatten(snap.account_id, reason="día cerrado")
+                except Exception as exc:
+                    logger.error(f"Día cerrado: no se pudo cerrar {snap.account_id}: {exc}")
 
     def set_commissions(self, cfg: Commissions) -> Commissions:
         if self.commissions is None:
@@ -102,6 +146,7 @@ class RiskService:
         await self._check_daily_limits()
         await self._check_drawdown()
         await self._check_schedule()
+        await self._check_day_loss()
 
     async def _check_heartbeat(self) -> None:
         if self.bridge is None or self.bridge.health.mode != "ninja":
@@ -322,6 +367,11 @@ class RiskService:
                            "No se copiará ninguna entrada hasta reanudar.")
 
     def set_kill_switch(self, active: bool, reason: str | None = None) -> RiskState:
+        if not active and self.day_closed_day == self._today():
+            # el usuario levanta el día cerrado: no volver a dispararlo hoy aunque la pérdida siga por encima del límite
+            self.day_ack_day = self._today()
+            self.store.set_kv("day_ack_day", self.day_ack_day)
+            self.audit.log("DAY_REOPENED", "Día cerrado levantado a mano: el límite conjunto no volverá a actuar hoy")
         self.kill_switch = active
         self.kill_switch_reason = reason if active else None
         self.kill_switch_at = datetime.now() if active else None

@@ -36,6 +36,7 @@ export function Dashboard({ onRoute }: { onRoute?: (r: Route) => void } = {}) {
   const newsAlerts = useNewsAlerts(client);
   const goNews = () => { onRoute?.("performance"); window.location.hash = "performance/news"; };
   const halted = (why: string) => (risk?.limits ?? []).filter((l) => l.trading_halted && l.halted_reason === why).map((l) => l.account_id);
+  if (risk?.day_closed) alerts.push({ id: "dayclosed", tone: "bad", title: `DÍA CERRADO: pérdida conjunta ${risk.day_total.toLocaleString("es-ES", { maximumFractionDigits: 0 })} $ (límite −${risk.day_loss_limit.toLocaleString("es-ES")} $)`, text: "Todas las cuentas cerradas y las entradas bloqueadas hasta mañana. Reanudar en la barra de estado lo levanta bajo tu responsabilidad.", go: "risk" });
   if (risk?.kill_switch) alerts.push({ id: "kill", tone: "bad", title: `COPIA DETENIDA (kill switch)${risk.kill_switch_at ? ` desde ${new Date(risk.kill_switch_at).toLocaleString("es-ES", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}` : ""}`,
     text: `${risk.kill_switch_reason ? `${risk.kill_switch_reason}. ` : ""}Ninguna entrada se replica: cada operación de la maestra queda como BLOCKED y las seguidoras se desincronizan. Pulsa Reanudar en la barra de estado.` });
   if (health?.addon_outdated) alerts.push({ id: "addon", tone: "bad", title: "Addon de NinjaTrader desactualizado", text: `${health.bridge.addon_version ? `v${health.bridge.addon_version}` : "sin versión"}; se requiere v${health.min_addon_version}. Las protecciones no funcionan hasta recompilarlo.` });

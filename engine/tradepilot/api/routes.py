@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from tradepilot.api.auth import require_token
-from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest, ProtectRequest, TrailRequest
+from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest, ProtectRequest, TrailRequest, DayLossRequest, AutoRiskRequest
 from tradepilot.container import Container
 from tradepilot.domain.risk import RiskLimit, Schedule
 
@@ -553,6 +553,38 @@ async def resync_account(account_id: str, request: Request):
 @router.put("/risk/schedule")
 def set_schedule(body: ScheduleRequest, request: Request):
     return _c(request).risk.set_schedule(Schedule(**body.model_dump()))
+
+
+@router.put("/risk/day-loss")
+def set_day_loss(body: DayLossRequest, request: Request):
+    """Pérdida máxima del día para el conjunto de cuentas activas: al alcanzarla, kill switch y cierre de todo hasta mañana."""
+    return _c(request).risk.set_day_loss(body.limit)
+
+
+@router.post("/risk/auto")
+async def auto_risk(body: AutoRiskRequest, request: Request):
+    """Aplica el perfil de prop firm automático (firma por el nombre, tamaño por el saldo) a una cuenta o a todas las activas sin límites."""
+    c = _c(request)
+    if c.auto_risk is None:
+        raise HTTPException(503, "riesgo automático no disponible")
+    try:
+        if body.account_id:
+            info = await c.auto_risk.apply(body.account_id, force=body.force, firm=body.firm or None, plan=body.plan or None, size=body.size or None)
+            return {"applied": [info] if info else [], "skipped": 0 if info else 1}
+        applied = await c.auto_risk.apply_missing()
+        return {"applied": applied, "skipped": 0}
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
+@router.get("/risk/auto")
+def auto_risk_status(request: Request):
+    c = _c(request)
+    if c.auto_risk is None:
+        raise HTTPException(503, "riesgo automático no disponible")
+    pending = [a.account_id for a in c.accounts.all() if c.auto_risk.needs(a.account_id)]
+    return {"enabled": c.auto_risk.enabled, "firm": c.settings.AUTO_RISK_FIRM, "plan": c.settings.AUTO_RISK_PLAN, "max_contracts": c.settings.AUTO_RISK_MAX_CONTRACTS,
+            "buffer": c.settings.AUTO_RISK_BUFFER, "pending": pending, "applied": c.auto_risk.applied[-50:]}
 
 
 @router.post("/risk/reopen")
