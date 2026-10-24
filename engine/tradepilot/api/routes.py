@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from tradepilot.api.auth import require_token
-from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest, ProtectRequest, TrailRequest, DayLossRequest, AutoRiskRequest, RiskPresets, ApplyPresetRequest, TagsRequest, OcoEntryRequest, TradeTemplates
+from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest, ProtectRequest, TrailRequest, DayLossRequest, AutoRiskRequest, RiskPresets, ApplyPresetRequest, TagsRequest, OcoEntryRequest, TradeTemplates, ReviewRequest, CheckEntryRequest, AskRequest
 from tradepilot.container import Container
 from tradepilot.domain.risk import RiskLimit, Schedule
 
@@ -532,6 +532,44 @@ def market_bars(symbol: str, request: Request, n: int = 120):
     snap = c.market.snapshot(symbol)
     snap["n_bars"] = snap.pop("bars", 0)
     return {**snap, "symbol": symbol, "bars": [b.as_dict() | {"m": b.minute} for b in c.market.recent_bars(symbol, max(10, min(n, 240)))]}
+
+
+# ---- coach IA ----
+def _coach(c: Container):
+    if c.coach is None:
+        raise HTTPException(503, "coach no disponible")
+    return c.coach
+
+
+@router.post("/ai/review")
+async def ai_review(body: ReviewRequest, request: Request):
+    """Revisión de la sesión: patrones que costaron dinero y reglas para mañana (IA, o por reglas sin clave). Se guarda por día."""
+    from datetime import date
+    if body.day:
+        try:
+            date.fromisoformat(body.day)
+        except ValueError:
+            raise HTTPException(400, "día inválido (AAAA-MM-DD)")
+    return await _coach(_c(request)).review(body.day or None, body.force)
+
+
+@router.post("/ai/check-entry")
+async def ai_check_entry(body: CheckEntryRequest, request: Request):
+    """Semáforo antes de entrar: verde / ámbar / rojo con los motivos (riesgo, racha, noticias, volatilidad, tamaño)."""
+    d = body.model_dump()
+    use_ai = d.pop("ai")
+    return await _coach(_c(request)).check_entry(d, use_ai)
+
+
+@router.post("/ai/ask")
+async def ai_ask(body: AskRequest, request: Request):
+    """Chat con tus datos: pregunta en lenguaje natural sobre tu historial (requiere ANTHROPIC_API_KEY)."""
+    try:
+        return await _coach(_c(request)).ask(body.question, body.days)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc))
 
 
 @router.get("/trade/trails")

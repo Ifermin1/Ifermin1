@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../lib/store";
-import type { ManualOrder, ManualOrderResult, TradeStatus, TradeTemplate, Trails, TrailSpec, WorkingOrder } from "../lib/api";
+import type { EntryCheck, ManualOrder, ManualOrderResult, TradeStatus, TradeTemplate, Trails, TrailSpec, WorkingOrder } from "../lib/api";
 import { CandleChart } from "../components/CandleChart";
 import { Card, Empty } from "../components/ui";
 import { Icon } from "../components/Icons";
@@ -145,8 +145,22 @@ export function Trade() {
       setSent((l) => l.map((s) => (s.cid === order.client_id ? { ...s, state: unconfirmed ? "unconfirmed" : "rejected", detail: text.replace(/^\d+:\s*/, "") } : s)));
     } finally { setBusy(null); }
   };
-  const submit = (action: "BUY" | "SELL") => {
+  const [check, setCheck] = useState<EntryCheck | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [checkAlways, setCheckAlways] = useState(() => load("tpx.trade.check", "1") === "1");
+  useEffect(() => { save("tpx.trade.check", checkAlways ? "1" : "0"); }, [checkAlways]);
+  const runCheck = async (action: "BUY" | "SELL"): Promise<EntryCheck | null> => {
+    if (!client || !account || !symbol) return null;
+    setChecking(true);
+    try { const c = await client.aiCheckEntry({ account, symbol, action, quantity: qty, order_type: type, sl_ticks: Number(sl) || 0, tp_ticks: Number(tp) || 0 }, false); setCheck(c); return c; }
+    catch { return null; } finally { setChecking(false); }
+  };
+  const submit = async (action: "BUY" | "SELL") => {
     if (!account || !symbol || !canTrade) return;
+    if (checkAlways) {
+      const c = await runCheck(action);
+      if (c && c.verdict === "red" && !confirm(`SEMÁFORO EN ROJO:\n\n${c.reasons.map((r) => "· " + r.text).join("\n")}\n\n¿Enviar igualmente?`)) return;
+    }
     const order: ManualOrder = { client_id: newId(), account, symbol, action, quantity: qty, order_type: type,
       limit_price: type === "LIMIT" || type === "STOPLIMIT" ? Number(limit) || 0 : 0, stop_price: type === "STOPMARKET" || type === "STOPLIMIT" ? Number(stop) || 0 : 0,
       sl_ticks: Number(sl) || 0, tp_ticks: Number(tp) || 0, trail: trailSpec() };
@@ -268,11 +282,17 @@ export function Trade() {
                 {trailMode && <span className="muted small">distancia inicial = el stop ({Number(sl) || 40} ticks); se ajusta luego en Proteger</span>}</div>
               <span className="muted small">{Number(sl) || Number(tp) ? `Por contrato: ${Number(sl) ? `riesgo ${ticksToText(Number(sl), symbol)}` : ""}${Number(sl) && Number(tp) ? " · " : ""}${Number(tp) ? `objetivo ${ticksToText(Number(tp), symbol)}` : ""}${Number(sl) && Number(tp) ? ` · ratio 1:${(Number(tp) / Number(sl)).toFixed(1)}` : ""} · ×${qty} contratos. Se crean como OCO al ejecutarse la entrada (también en límite y stop).` : "elige un importe rápido o escribe uno: se crean como OCO en cuanto se ejecute la entrada (también en límite y stop)"}</span>
             </div>}
+            <div className={`semaforo ${check?.verdict ?? ""}`} data-testid="semaforo">
+              <button className="chip-btn" disabled={checking || !account || !symbol} onClick={() => void runCheck("BUY")} data-testid="check-btn"><Icon name="shield" size={12} /> {checking ? "comprobando…" : "Semáforo"}</button>
+              <label className="inline small"><input type="checkbox" checked={checkAlways} onChange={(e) => setCheckAlways(e.target.checked)} /> comprobar antes de enviar</label>
+              {check && <span className={`light ${check.verdict}`} title={check.checked_at}>{check.verdict === "green" ? "VERDE" : check.verdict === "amber" ? "ÁMBAR" : "ROJO"}</span>}
+              {check && (check.reasons.length ? <span className="small">{check.reasons.map((r) => r.text).join(" · ")}</span> : <span className="small ok">sin señales en contra: riesgo, racha, noticias y volatilidad en orden</span>)}
+            </div>
             <div className="muted small">{last ? `último ${symbol}: ${fmtPx(last, symbol)}` : "sin precio en vivo de este instrumento"}{account === master ? ` · la orden va a la MAESTRA y se replica a ${followersOf(account)} seguidoras` : account ? " · solo esta cuenta (las seguidoras no la copian)" : ""}</div>
             {oco ? <div className="ticket-actions one"><button className="oco-btn" disabled={!canTrade || busy !== null || !symbol} onClick={() => void submitOco()} data-testid="t-oco-send">ENVIAR OCO {qty} (compra arriba / venta abajo)</button></div>
             : <div className="ticket-actions">
-              <button className="buy" disabled={!canTrade || busy !== null || !symbol} onClick={() => submit("BUY")} data-testid="t-buy">COMPRAR {qty}</button>
-              <button className="sell" disabled={!canTrade || busy !== null || !symbol} onClick={() => submit("SELL")} data-testid="t-sell">VENDER {qty}</button>
+              <button className="buy" disabled={!canTrade || busy !== null || !symbol} onClick={() => void submit("BUY")} data-testid="t-buy">COMPRAR {qty}</button>
+              <button className="sell" disabled={!canTrade || busy !== null || !symbol} onClick={() => void submit("SELL")} data-testid="t-sell">VENDER {qty}</button>
             </div>}
             {msg && <div className="small" data-testid="trade-msg">{msg}</div>}
           </div>

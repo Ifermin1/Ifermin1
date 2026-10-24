@@ -724,3 +724,11 @@ table.trades tbody tr.sel td { background: var(--hl); box-shadow: inset 0 0 0 1p
 .tpl { display: inline-flex; align-items: center; gap: 2px; }
 .oco-row { flex-direction: column; align-items: stretch; }
 .candle-box svg.dragging { cursor: ns-resize; }
+.semaforo { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 6px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel-2); }
+.semaforo.green { border-color: var(--ok); } .semaforo.amber { border-color: var(--warn); } .semaforo.red { border-color: var(--bad); background: rgba(248,113,113,.10); }
+.semaforo .light { font-weight: 800; padding: 2px 10px; border-radius: 999px; color: #0b1220; } .light.green { background: var(--ok); } .light.amber { background: var(--warn); } .light.red { background: var(--bad); }
+.review-summary { font-size: 14px; line-height: 1.5; } .review h4 { margin: 12px 0 6px; font-size: 13px; } .review-rules { margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.6; }
+.ask-form { display: flex; gap: 8px; } .ask-form input { flex: 1; }
+.chat { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.chat-q { font-weight: 600; font-size: 13px; display: flex; gap: 6px; align-items: center; } .chat-a { margin-top: 4px; padding: 8px 10px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); font-size: 13px; line-height: 1.5; }
+.chat-a ul { margin: 6px 0 0; padding-left: 18px; }

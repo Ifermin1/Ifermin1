@@ -105,6 +105,9 @@ Todas las rutas requieren `Authorization: Bearer <API_TOKEN>` (o `?token=` en el
 | GET | `/api/risk` | Kill switch + límites |
 | POST | `/api/risk/kill-switch` | `{active, reason}` |
 | PUT | `/api/risk/limits` | Límite por cuenta |
+| POST | `/api/ai/review` | `{day, force}` revisión de la sesión (IA si hay clave, si no por reglas), cacheada por día |
+| POST | `/api/ai/check-entry` | Semáforo de una orden: `{verdict: green|amber|red, reasons[]}` sin IA (ms); `ai: true` añade la opinión del modelo |
+| POST | `/api/ai/ask` | Pregunta en lenguaje natural sobre las operaciones de los últimos N días (requiere clave de IA) |
 | POST | `/api/mock/master-event` | Solo modo mock: simular operación del maestro |
 | WS | `/api/ws` | Eventos: `accounts.snapshot`, `broker.health`, `audit.event`, `risk.state` |
 

@@ -428,6 +428,22 @@ actualizar: NinjaScript Editor → F5).
   kill switch activo o con la cuenta pausada por riesgo, los botones COMPRAR/VENDER se desactivan y verás el motivo;
   cerrar y cancelar siguen disponibles mientras haya conexión. Todo queda en Auditoría y, si lo activas en Avisos al
   teléfono, los rechazos llegan por Telegram (`MANUAL_REJECTED`).
+- **Semáforo antes de entrar**: el botón *Semáforo* del ticket (y, con *comprobar antes de enviar* marcado, cada
+  COMPRAR/VENDER) pasa la orden por las mismas comprobaciones que haría un supervisor: kill switch, pérdida del día,
+  drawdown gastado, cuenta pausada, tope de contratos, si estás aumentando una posición, racha de pérdidas, noticia de
+  impacto en los próximos 10 minutos, precio viejo, volatilidad disparada y stop demasiado corto (< 0,5 ATR) o
+  inexistente. VERDE envía sin más, ÁMBAR envía y te deja ver las señales, ROJO pide una confirmación extra con la lista
+  de motivos. Nunca envía solo ni retrasa la orden más de lo que tarda la comprobación (milisegundos, sin IA).
+
+### Coach IA (pestaña Análisis → Coach IA)
+
+- **Revisión de la sesión**: elige el día y verás qué costó o dio dinero (stops en menos de un minuto, operaciones
+  pegadas a una noticia, rachas, horas malas, rechazos por riesgo), tres reglas concretas para mañana y una nota de
+  disciplina. Sin clave de IA la revisión es por reglas; con `ANTHROPIC_API_KEY` en `engine\.env`, Claude lee la sesión
+  completa (operaciones, avisos de riesgo, noticias del día) y la escribe él. Se guarda por día; *volver a revisar* la
+  rehace.
+- **Pregunta a tus datos**: escribe en lenguaje normal ("¿cómo me va los jueves después de las 10?") y la IA responde
+  con tus propios números de los últimos 90 días (por hora, día, símbolo, cuenta, lado). Necesita la clave de IA.
 
 ---
 

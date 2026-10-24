@@ -294,3 +294,24 @@ class AutoRiskRequest(BaseModel):
     firm: str = ""
     plan: str = ""
     size: int = 0
+
+
+class ReviewRequest(BaseModel):
+    day: str = ""          # AAAA-MM-DD; vacío = hoy
+    force: bool = False
+
+
+class CheckEntryRequest(BaseModel):
+    account: str
+    symbol: str
+    action: str = "BUY"
+    quantity: int = 1
+    order_type: str = "MARKET"
+    sl_ticks: int = 0
+    tp_ticks: int = 0
+    ai: bool = False
+
+
+class AskRequest(BaseModel):
+    question: str = Field(min_length=3, max_length=400)
+    days: int = Field(default=90, ge=7, le=365)

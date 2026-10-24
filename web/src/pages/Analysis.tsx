@@ -3,6 +3,7 @@ import { useStore } from "../lib/store";
 import type { AnalysisData, AnalysisDay, AnalysisParams, CashEvent, CashEventInput, Trade } from "../lib/api";
 import { Card, Empty, Kpi } from "../components/ui";
 import { Icon } from "../components/Icons";
+import { CoachTab } from "../components/CoachTab";
 import { useThrottled } from "../lib/hooks";
 import { EquityCurve, HistogramChart, SignedBars } from "../components/charts";
 import { byAccount, byHour, bySide, bySymbol, byWeekday, dayStats, histogram, tradeStats, type TradeLike } from "../lib/stats";
@@ -11,7 +12,7 @@ import { byAccount, byHour, bySide, bySymbol, byWeekday, dayStats, histogram, tr
  * pagos, balance con conciliación diaria y los criterios de cálculo. Todo sale de las operaciones reconstruidas por el
  * engine (fills de maestra y seguidoras), del P&L y saldo que reporta NinjaTrader y de los movimientos de caja anotados. */
 
-type Tab = "stats" | "duration" | "records" | "balance" | "criteria";
+type Tab = "stats" | "duration" | "records" | "balance" | "criteria" | "coach";
 type Range = "30" | "90" | "ytd" | "all";
 type Mode = "gross" | "net";
 type Kind = "gain" | "loss" | "be" | "none";
@@ -19,7 +20,7 @@ type Row = { t: Trade; gross: number; fee: number; net: number; value: number; d
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "stats", label: "Estadísticas" }, { id: "duration", label: "Duración y riesgo" }, { id: "records", label: "Pendientes y registros" },
-  { id: "balance", label: "Balance y retiros" }, { id: "criteria", label: "Datos y criterios" },
+  { id: "balance", label: "Balance y retiros" }, { id: "criteria", label: "Datos y criterios" }, { id: "coach", label: "Coach IA" },
 ];
 const DEFAULT_PARAMS: AnalysisParams = { commission_rt: 5, be_tolerance: 0, loss_reference: 250, short_seconds: 60, start_balance: null, use_engine_commissions: true };
 const KIND_LABEL: Record<Kind, string> = { gain: "Ganancia", loss: "Pérdida", be: "Breakeven", none: "Sin PNL" };
@@ -66,6 +67,8 @@ export function Analysis() {
   const [params, setParams] = useState<AnalysisParams>(DEFAULT_PARAMS);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
+  const [aiOn, setAiOn] = useState(false);
+  useEffect(() => { if (client) client.tradeStatus().then((s) => setAiOn(s.ai_enabled)).catch(() => {}); }, [client]);
   // los fills llegan por WebSocket: se recarga como mucho cada 2 s (una ráfaga continua no pospone la recarga)
   const lastFillId = useThrottled(audit.find((a) => a.event_type === "FOLLOWER_FILL" || a.event_type === "ACCOUNT_FILL" || a.event_type === "MASTER_RECEIVED")?.id ?? null, 2000);
   const from = rangeFrom(range);
@@ -148,6 +151,7 @@ export function Analysis() {
       {tab === "balance" && <BalanceTab days={days} rows={rows} cash={cash} params={params} account={account} label={label} />}
       {tab === "criteria" && <CriteriaTab params={params} onSave={async (p) => { const saved = await client.saveAnalysisParams(p); setParams(saved); }}
                                           data={data} rows={rows} account={account} label={label} />}
+      {tab === "coach" && <CoachTab client={client} aiEnabled={!!aiOn} />}
     </div>
   );
 }

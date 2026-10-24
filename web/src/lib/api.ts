@@ -85,6 +85,12 @@ export type RiskPreset = { id: string; name: string; multiplier: number; max_dai
 export type AdviceAction = { type: "preset" | "pause" | "resume" | "link" | "resync" | "flatten" | "multiplier" | "profile"; label: string; preset_id?: string; value?: number };
 export type Advice = { account_id: string; severity: "bad" | "warn" | "ok" | "info"; code: string; title: string; detail: string; actions: AdviceAction[] };
 export type AdviceList = { advice: Advice[]; counts: Record<"bad" | "warn" | "ok" | "info", number>; generated_at: string };
+export type ReviewResult = { day: string; source: "ia" | "regla"; model: string; ai_error?: string; generated_at: string;
+                             stats: { n: number; wins: number; losses: number; win_rate: number | null; net: number; pf: number | null; max_loss_streak: number };
+                             near_news: { trade: string; net: number; event: string; minutes_after: number }[]; quick_stops: string[];
+                             review: { summary: string; patterns: { title: string; evidence: string; cost_usd: number | null }[]; tomorrow: string[]; score: number; mood: "bien" | "regular" | "mal" } };
+export type AskResult = { question: string; answer: string; numbers: string[]; model: string | null; ms: number; context: { n_trades: number; period_days: number } };
+export type EntryCheck = { verdict: "green" | "amber" | "red"; reasons: { level: "red" | "amber"; text: string }[]; checked_at: string; ai: { verdict?: string; reason?: string; model?: string; error?: string } | null };
 export type TradeStatus = { ready: boolean; reason: string | null; max_qty: number; mode: string; symbols: string[]; addon_version: string | null; required_addon: string; ping_ms: number | null;
                             last_order_ms: number | null; heartbeat_age_s: number | null; master: string | null; trails: number; ai_enabled: boolean;
                             stats: { orders: number; rejected: number; cancels: number; modifies: number; unconfirmed: number } };
@@ -215,6 +221,10 @@ export function makeClient(s: Session) {
     savePresets: (presets: RiskPreset[]) => req<{ presets: RiskPreset[]; defaults: RiskPreset[] }>("/api/ui/risk-presets", { method: "PUT", body: JSON.stringify({ presets }) }),
     applyPreset: (preset_id: string, accounts: string[]) => req<{ applied: string[]; preset: RiskPreset }>("/api/risk/preset", { method: "POST", body: JSON.stringify({ preset_id, accounts }) }),
     advice: () => req<AdviceList>("/api/advice"),
+    aiReview: (day = "", force = false) => req<ReviewResult>("/api/ai/review", { method: "POST", body: JSON.stringify({ day, force }) }),
+    aiAsk: (question: string, days = 90) => req<AskResult>("/api/ai/ask", { method: "POST", body: JSON.stringify({ question, days }) }),
+    aiCheckEntry: (o: { account: string; symbol: string; action: string; quantity: number; order_type: string; sl_ticks: number; tp_ticks: number }, ai = false) =>
+      req<EntryCheck>("/api/ai/check-entry", { method: "POST", body: JSON.stringify({ ...o, ai }) }),
     setDayLoss: (limit: number) => req<RiskState>("/api/risk/day-loss", { method: "PUT", body: JSON.stringify({ limit }) }),
     autoRiskStatus: () => req<AutoRiskStatus>("/api/risk/auto"),
     autoRisk: (account_id = "", force = false) => req<{ applied: AutoRiskStatus["applied"]; skipped: number }>("/api/risk/auto", { method: "POST", body: JSON.stringify({ account_id, force }) }),
