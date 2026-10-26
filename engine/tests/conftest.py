@@ -1,3 +1,6 @@
+import asyncio
+import sys
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -8,6 +11,10 @@ from tradepilot.core.events import EventBus
 from tradepilot.infrastructure.brokers.mock import MockBridge
 
 TOKEN = "test-token"
+
+# Windows: pyzmq (asyncio) necesita el bucle Selector, igual que tradepilot.main; el Proactor por defecto rompe el puente real
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 
 @pytest.fixture

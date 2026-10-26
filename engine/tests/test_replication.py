@@ -466,6 +466,7 @@ async def test_out_of_order_seq_is_neither_restart_nor_gap(container):
     rep.seq_grace = 0.0
     await rep.process_master_event({"msg_type": "HEARTBEAT", "account": "Sim101", "seq": 107})
     assert rep.stats["seq_gaps"] == 0            # todavía dentro del plazo (se evalúa en el siguiente mensaje)
+    await asyncio.sleep(0.03)                    # el reloj monotónico de Windows avanza a saltos de ~15 ms
     await rep.process_master_event({"msg_type": "HEARTBEAT", "account": "Sim101", "seq": 108})
     assert rep.stats["seq_gaps"] == 2 and container.audit.recent(1)[0].event_type == "GAP"
     # seq que vuelve a empezar: reinicio
