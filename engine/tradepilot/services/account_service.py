@@ -70,7 +70,12 @@ class AccountService:
             self._task.cancel()
 
     async def sync_once(self) -> None:
+        import time as _time
+        _t0 = _time.monotonic()
         data = await self.bridge.get_accounts()
+        m = getattr(self, "metrics", None)
+        if m is not None:
+            m.observe("sync_ms", round((_time.monotonic() - _t0) * 1000, 1))
         now = datetime.now()
         reported = {a.account_id for a in data}
         new_hidden = 0

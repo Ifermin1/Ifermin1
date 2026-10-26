@@ -5,7 +5,7 @@ import { Icon, type IconName } from "./Icons";
 import { livePnl } from "./AccountPanel";
 import { signedMoney } from "../lib/format";
 
-export type Route = "dashboard" | "trade" | "performance" | "analysis" | "accounts" | "risk" | "audit" | "pocket";
+export type Route = "dashboard" | "trade" | "performance" | "analysis" | "accounts" | "risk" | "audit" | "health" | "pocket";
 
 const NAV: { id: Route; label: string; icon: IconName }[] = [
   { id: "dashboard", label: "Inicio", icon: "home" },
@@ -15,6 +15,7 @@ const NAV: { id: Route; label: string; icon: IconName }[] = [
   { id: "accounts", label: "Cuentas", icon: "users" },
   { id: "risk", label: "Riesgo", icon: "shield" },
   { id: "audit", label: "Auditoría", icon: "list" },
+  { id: "health", label: "Salud", icon: "activity" },
 ];
 
 /** Resumen siempre visible: P&L del día de las cuentas en juego, cuántas copian y el kill switch. */

@@ -385,6 +385,25 @@ def stats_analysis(request: Request, day_from: str | None = None, day_to: str | 
     return c.performance.analysis(d0, d1, account or None)
 
 
+@router.get("/metrics/summary")
+def metrics_summary(request: Request, hours: int = 168):
+    """Salud: latencias y contadores por hora (hasta 30 días), por día, hora en curso, totales desde el arranque y estado actual."""
+    c = _c(request)
+    if c.metrics is None:
+        raise HTTPException(503, "métricas no disponibles")
+    return c.metrics.summary(min(max(1, hours), 24 * 30))
+
+
+@router.get("/metrics")
+def metrics_prometheus(request: Request):
+    """Formato Prometheus (scrape con `authorization: credentials: <API_TOKEN>` o `?token=`)."""
+    from fastapi.responses import PlainTextResponse
+    c = _c(request)
+    if c.metrics is None:
+        raise HTTPException(503, "métricas no disponibles")
+    return PlainTextResponse(c.metrics.prometheus(), media_type="text/plain; version=0.0.4; charset=utf-8")
+
+
 @router.get("/doctor")
 def doctor_checks(request: Request):
     """Revisión de la instalación (lo mismo que `python -m tradepilot.doctor`): nivel ok/warn/bad/info por comprobación."""

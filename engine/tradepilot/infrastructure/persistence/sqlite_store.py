@@ -89,6 +89,9 @@ class SQLiteStore:
                     client_id TEXT PRIMARY KEY, account TEXT, symbol TEXT, action TEXT, quantity INTEGER, order_type TEXT, status TEXT,
                     order_id TEXT, request TEXT, result TEXT, created_at TEXT, updated_at TEXT
                 );
+                CREATE TABLE IF NOT EXISTS metrics_hourly (
+                    hour TEXT, metric TEXT, n INTEGER, sum REAL, min REAL, max REAL, p50 REAL, p95 REAL, PRIMARY KEY (hour, metric)
+                );
                 CREATE TABLE IF NOT EXISTS hub_outbox (
                     id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, payload TEXT, created_at TEXT, attempts INTEGER DEFAULT 0, last_error TEXT
                 );
@@ -491,6 +494,20 @@ class SQLiteStore:
         with self._lock:
             rows = self._conn.execute("SELECT * FROM manual_orders WHERE status IN ('sending', 'unconfirmed') ORDER BY created_at").fetchall()
         return [dict(r) for r in rows]
+
+    # ---- métricas por hora ----
+    def metrics_upsert(self, rows: list[tuple]) -> None:
+        with self._lock, self._conn:
+            self._conn.executemany("INSERT OR REPLACE INTO metrics_hourly (hour, metric, n, sum, min, max, p50, p95) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", rows)
+
+    def metrics_range(self, since_hour: str) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute("SELECT * FROM metrics_hourly WHERE hour >= ? ORDER BY hour", (since_hour,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def metrics_prune(self, before_hour: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM metrics_hourly WHERE hour < ?", (before_hour,))
 
     # ---- hub: cola de salida (lo que aún no se ha podido enviar al hub) ----
     def get_trades_since(self, last_id: int, limit: int = 200) -> list[dict]:

@@ -45,6 +45,7 @@ class TradeService:
         self._cancelled_by_us: OrderedDict[str, float] = OrderedDict()   # orderKey -> cuándo: para no auditar dos veces la cancelación
         self._pending_trails: dict[tuple[str, str], dict] = {}            # (cuenta, símbolo) -> trailing a activar cuando exista la posición
         self.trail = None                                                  # TrailService (lo fija el contenedor)
+        self.metrics = None                                                # MetricsService (lo fija el contenedor)
         self._load_state()
 
     # ---- estado que sobrevive a un reinicio (salidas propias y trailings pendientes) ----
@@ -265,6 +266,8 @@ class TradeService:
         ms = round((time.monotonic() - t0) * 1000)
         self.bridge.health.last_order_ms = ms
         self.stats["orders"] += 1
+        if getattr(self, "metrics", None) is not None:
+            self.metrics.observe("manual_order_ms", ms)
         parts = reply.split("|")
         result = {"client_id": cid, "order_id": parts[1] if len(parts) > 1 else "", "status": parts[2] if len(parts) > 2 else "accepted",
                   "detail": reply, "ms": ms, "account": order["account"], "symbol": order["symbol"], "action": order["action"], "quantity": order["quantity"],

@@ -62,6 +62,11 @@ export type NotifyState = { enabled: boolean; bot_token: string; chat_id: string
 export type NotifyConfig = Pick<NotifyState, "enabled" | "bot_token" | "chat_id" | "events">;
 export type HubState = { enabled: boolean; url: string; node: string; interval_s: number; queued: number; last_trade_id: number;
                          stats: { sent: number; batches: number; errors: number; last_error: string | null; last_ok_at: number | null; dropped: number } };
+export type MetricAgg = { n: number; sum: number; min: number; max: number; p50: number; p95: number };
+export type MetricsSummary = { since: string; gauges: { connected: boolean; addon_version: string | null; ping_ms: number | null; last_order_ms: number | null; kill_switch: boolean; day_closed: boolean;
+                                                       accounts_enabled: number; positions: number; day_total: number; hub_queued: number; degraded: boolean; no_ticks: boolean; loop_lag_ms: number; uptime_s: number };
+                               current: { hour: string; histograms: Record<string, MetricAgg>; counters: Record<string, number> }; totals: Record<string, number>;
+                               hourly: ({ hour: string } & Record<string, MetricAgg | string>)[]; daily: ({ day: string } & Record<string, number | string>)[] };
 export type DoctorCheck = { level: "ok" | "warn" | "bad" | "info"; title: string; detail: string };
 export type BackupState = { available: boolean; dir: string | null; keep: number; interval_h: number; integrity: string | null; last_at: string | null; last_error: string | null;
                             files: { name: string; size: number; at: string }[] };
@@ -190,6 +195,7 @@ export function makeClient(s: Session) {
     execution: (limit = 40) => req<Execution[]>(`/api/execution?limit=${limit}`),
     notifications: () => req<NotifyState>("/api/notifications"),
     setNotifications: (c: NotifyConfig) => req<NotifyState>("/api/notifications", { method: "PUT", body: JSON.stringify(c) }),
+    metricsSummary: (hours = 168) => req<MetricsSummary>(`/api/metrics/summary?hours=${hours}`),
     doctor: () => req<{ checks: DoctorCheck[]; counts: Record<string, number> }>("/api/doctor"),
     diagnosticsZip: () => raw("/api/diagnostics.zip"),
     backup: () => req<BackupState>("/api/backup"),

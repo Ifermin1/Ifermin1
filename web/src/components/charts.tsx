@@ -132,3 +132,34 @@ export function Sparkline({ values, height = 36, width = 120 }: { values: number
   const last = values[values.length - 1];
   return <svg width={width} height={height} className="spark" aria-hidden="true"><line x1={0} x2={width} y1={y(0)} y2={y(0)} className="zero" /><path d={d} className={last >= 0 ? "ok" : "bad"} /></svg>;
 }
+
+/** Barras simples por tramo de tiempo (hora o día) con umbral de color: latencias, errores, desconexiones. */
+export function TimeBars({ data, height = 160, unit = "", warn, bad, testId, label = "" }: { data: { key: string; label: string; value: number; sub?: string }[]; height?: number; unit?: string; warn?: number; bad?: number; testId?: string; label?: string }) {
+  const [box, W] = useWidth<HTMLDivElement>();
+  const [hov, setHov] = useState<number | null>(null);
+  const M = { l: 44, r: 8, t: 10, b: 24 }, H = height, iw = W - M.l - M.r, ih = H - M.t - M.b;
+  const hi = Math.max(1, ...data.map((d) => d.value)) * 1.08;
+  const y = (v: number) => M.t + (1 - v / hi) * ih;
+  const bw = Math.max(2, Math.min(36, (iw / Math.max(1, data.length)) * 0.7));
+  const x = (i: number) => M.l + ((i + 0.5) / Math.max(1, data.length)) * iw;
+  const step = Math.max(1, Math.ceil(data.length / Math.max(2, Math.floor(iw / 48))));
+  const cls = (v: number) => (bad !== undefined && v >= bad ? "neg" : warn !== undefined && v >= warn ? "warn" : "pos");
+  const h = hov !== null ? data[hov] : null;
+  return (
+    <div ref={box} className="chart-box" data-testid={testId}>
+      {data.length === 0 ? <p className="empty">Sin datos todavía.</p> : (
+        <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="chart" role="img" aria-label={label}>
+          {niceTicks(0, hi, 3).map((v) => <g key={v}><line x1={M.l} x2={W - M.r} y1={y(v)} y2={y(v)} className="grid" /><text x={M.l - 6} y={y(v) + 4} textAnchor="end" className="tick">{v.toLocaleString("es-ES", { maximumFractionDigits: 0 })}</text></g>)}
+          {data.map((d, i) => (
+            <g key={d.key} onPointerEnter={() => setHov(i)} onPointerLeave={() => setHov(null)}>
+              <rect x={x(i) - bw / 2} y={y(d.value)} width={bw} height={Math.max(d.value > 0 ? 2 : 0, y(0) - y(d.value))} rx={2} className={`bar ${cls(d.value)} ${hov === i ? "hov" : ""}`} />
+              <rect x={x(i) - (iw / Math.max(1, data.length)) / 2} y={M.t} width={iw / Math.max(1, data.length)} height={ih} fill="transparent" />
+              {i % step === 0 && <text x={x(i)} y={H - 7} textAnchor="middle" className="tick">{d.label}</text>}
+            </g>
+          ))}
+        </svg>
+      )}
+      {h && <Tip x={x(hov!)} y={y(h.value) - 56} w={W}><b>{h.label}</b><span>{h.value.toLocaleString("es-ES", { maximumFractionDigits: 1 })} {unit}</span>{h.sub && <span className="muted">{h.sub}</span>}</Tip>}
+    </div>
+  );
+}

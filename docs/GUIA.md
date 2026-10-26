@@ -480,6 +480,15 @@ actualizar: NinjaScript Editor → F5).
 - Por API: `GET /api/report/weekly?day=AAAA-MM-DD&account=&tag=&format=html|json` y
   `GET /api/trades.csv?day_from=&day_to=&account=&tag=`, con el token en la cabecera.
 
+### Salud: latencias, desconexiones y errores (pestaña Salud)
+
+Cómo va el engine por dentro, con historial de 7 días (hasta 30): estado del puente, ping al addon, ida y vuelta de la
+consola, última orden; **latencia de la copia** por hora (p95 del fill de la maestra al fill de la seguidora, y del envío
+al addon), órdenes desde la consola y sincronización; **incidencias por día** (desconexiones del addon, errores, rechazos,
+copias bloqueadas, episodios de modo degradado y de mercado sin datos) y fills por día; y una tabla hora a hora de las
+últimas 24 h. Los datos se consolidan cada hora en la base (`metrics_hourly`, 30 días). Para Prometheus/Grafana:
+`GET /api/metrics` con el token (`tradepilot_*`).
+
 ### Diagnóstico en un clic y doctor (Riesgo → Revisión de la instalación)
 
 - **Doctor**: revisa la instalación y dice qué está mal y cómo arreglarlo: versión de Python, `.env`, modo, fuerza del

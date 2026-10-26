@@ -89,6 +89,7 @@ class ReplicationService:
         self.seq_grace = 2.0                       # s que se espera un seq atrasado antes de contarlo como perdido
         self.suppress_master_until: float = 0.0   # tras un FLATTEN de la maestra, sus fills no se copian
         self.rules: list[ReplicationRule] = store.get_all_rules()
+        self.metrics = None                                   # MetricsService (lo fija el contenedor)
         self.stats = {"events_in": 0, "orders_out": 0, "blocked": 0, "errors": 0, "rejected": 0, "fills": 0, "duplicates": 0,
                       "latency_ms_last": None, "latency_ms_avg": None, "slippage_last": None, "slippage_avg": None,
                       "seq_gaps": 0, "addon_restarts": 0, "flattens": 0, "fanout_ms_last": None, "broker_ms_last": None}
@@ -421,6 +422,8 @@ class ReplicationService:
         f["slip_ticks"] = round(worse / rec["tick"], 2)
         if latency_ms is not None:
             f["latency_ms"] = latency_ms
+            if getattr(self, "metrics", None) is not None:
+                self.metrics.observe("copy_fill_ms", latency_ms)
         if broker_ms is not None:
             f["broker_ms"] = broker_ms
 
@@ -505,6 +508,10 @@ class ReplicationService:
         dispatch_ms = round((time.monotonic() - t0) * 1000)
         engine_ms = round((t0 - getattr(self, "_recv_at", t0)) * 1000)
         self.stats["fanout_ms_last"] = dispatch_ms
+        if getattr(self, "metrics", None) is not None:
+            self.metrics.observe("copy_engine_ms", engine_ms)
+            self.metrics.observe("copy_dispatch_ms", dispatch_ms)
+            self.metrics.inc("orders_out", len(prepared))
         for (task, rule, symbol, kw, entry), reply in zip(prepared, replies):
             self._remember(self._timing, (task.target_account.lower(), task.master_order_id), (engine_ms, dispatch_ms))
             self._after_reply(task, symbol, entry, reply, dispatch_ms)

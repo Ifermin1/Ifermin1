@@ -9,10 +9,11 @@ import { Analysis } from "./pages/Analysis";
 import { Accounts } from "./pages/Accounts";
 import { Risk } from "./pages/Risk";
 import { Audit } from "./pages/Audit";
+import { Health } from "./pages/Health";
 import { Pocket } from "./pages/Pocket";
 import { LockOverlay } from "./components/LockOverlay";
 
-const ROUTES: Route[] = ["dashboard", "trade", "performance", "analysis", "accounts", "risk", "audit", "pocket"];
+const ROUTES: Route[] = ["dashboard", "trade", "performance", "analysis", "accounts", "risk", "audit", "health", "pocket"];
 const fromHash = (): Route => { const h = window.location.hash.replace("#", "").split("/")[0] as Route; return ROUTES.includes(h) ? h : "dashboard"; };
 
 function Inner() {
@@ -37,6 +38,7 @@ function Inner() {
       {route === "accounts" && <Accounts />}
       {route === "risk" && <Risk />}
       {route === "audit" && <Audit />}
+      {route === "health" && <Health />}
     </Shell>
   );
 }
