@@ -384,6 +384,32 @@ def stats_analysis(request: Request, day_from: str | None = None, day_to: str | 
     return c.performance.analysis(d0, d1, account or None)
 
 
+@router.get("/reconcile")
+async def reconcile_last(request: Request):
+    """Último informe de reconciliación (al arrancar o a petición): órdenes a medias, posiciones sin stop, entradas
+    pendientes, seguidoras desincronizadas, trailings sin posición."""
+    c = _c(request)
+    if c.reconcile is None:
+        raise HTTPException(503, "reconciliación no disponible")
+    return c.reconcile.last or {"ran_at": None, "reason": None, "findings": [], "counts": {}, "accounts": 0}
+
+
+@router.post("/reconcile/run")
+async def reconcile_run(request: Request):
+    c = _c(request)
+    if c.reconcile is None:
+        raise HTTPException(503, "reconciliación no disponible")
+    await c.accounts.sync_once()
+    return await c.reconcile.run("manual")
+
+
+@router.get("/trade/orders")
+def trade_orders(request: Request, limit: int = 50, today: bool = True):
+    """Órdenes manuales guardadas (sobreviven a un reinicio): estado, respuesta y petición original."""
+    from datetime import date
+    return _trade(_c(request)).recent_orders(min(max(1, limit), 500), date.today().isoformat() if today else None)
+
+
 @router.get("/hub")
 def hub_state(request: Request):
     """Estado del reporter del hub: configurado o no, cola pendiente, último envío y errores."""

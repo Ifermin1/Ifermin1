@@ -53,6 +53,18 @@ export function Trade() {
   const [ocoDown, setOcoDown] = useState("");
   const [templates, setTemplates] = useState<TradeTemplate[]>([]);
   useEffect(() => { if (client) client.templates().then((r) => setTemplates(r.templates)).catch(() => {}); }, [client]);
+  // las órdenes de hoy guardadas en el engine: la lista "Enviadas" sobrevive a recargar la consola o reiniciar el engine
+  useEffect(() => {
+    if (!client) return;
+    client.tradeOrders(30).then((rows) => setSent((cur) => {
+      const known = new Set(cur.map((s) => s.cid));
+      const map = (st: string): Sent["state"] => st === "filled" ? "filled" : st === "accepted" || st === "working" ? "accepted" : st === "rejected" || st === "cancelled" ? "rejected" : "unconfirmed";
+      const extra: Sent[] = rows.filter((r) => !known.has(r.client_id) && r.request && r.request.account).map((r) => ({
+        cid: r.client_id, order: { ...r.request, client_id: r.client_id }, state: map(r.status), ms: r.result?.ms, orderId: r.order_id || undefined,
+        detail: r.status === "sending" || r.status === "unconfirmed" ? "sin confirmar al reiniciar el engine: comprueba en NinjaTrader" : r.result?.detail ?? r.result?.error, at: Date.parse(r.created_at) || Date.now() }));
+      return [...cur, ...extra].slice(0, 30);
+    })).catch(() => {});
+  }, [client]);
   const trailSpec = (): TrailSpec | null => (trailMode ? { mode: trailMode, distance_ticks: Number(sl) || 40, step_ticks: 2, atr_k: 1.5, min_ticks: Math.max(2, Math.round((Number(sl) || 40) / 5)), max_ticks: Math.max((Number(sl) || 40) * 4, 40) } : null);
   const applyTemplate = (t: TradeTemplate) => { if (t.symbol) setSymbol(t.symbol); setQty(t.quantity); setType(t.order_type); setSl(t.sl_ticks ? String(t.sl_ticks) : ""); setTp(t.tp_ticks ? String(t.tp_ticks) : ""); setTrailMode(t.trail?.mode ?? ""); setOco(false); setMsg(`Plantilla ${t.name} cargada: revisa y pulsa COMPRAR o VENDER.`); };
   const saveTemplate = async () => {

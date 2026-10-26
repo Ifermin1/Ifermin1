@@ -480,6 +480,23 @@ actualizar: NinjaScript Editor → F5).
 - Por API: `GET /api/report/weekly?day=AAAA-MM-DD&account=&tag=&format=html|json` y
   `GET /api/trades.csv?day_from=&day_to=&account=&tag=`, con el token en la cabecera.
 
+### Reconciliación: qué pasa cuando el engine arranca
+
+Nada más sincronizar con NinjaTrader por primera vez (y cuando pulses *Volver a comprobar* en la tarjeta **Reconciliación**
+de Inicio), el engine contrasta lo que recuerda con lo que el bróker reporta y lista lo que no cuadra, con el botón que lo
+resuelve:
+
+- **Orden sin confirmar**: una orden enviada desde la consola que quedó a medias cuando el engine se apagó. Compruébala en
+  NinjaTrader; aparece también en *Operar → Enviadas* como "sin confirmar al reiniciar". Reenviarla con el mismo id nunca
+  duplica: el engine guarda cada orden manual en su base de datos y, si ya se aceptó, devuelve la respuesta guardada.
+- **Posición sin stop** → *Proteger en Operar*.
+- **Desincronizada** (una seguidora no tiene lo que la maestra implica) → *Igualar*.
+- **Entrada pendiente** y **trailing sin posición**: informativos (ocultos por defecto).
+
+Las salidas que crea el engine (stops y objetivos de Proteger o de los brackets) y los trailings pendientes también se
+guardan: tras un reinicio sigue cancelando un stop huérfano cuando su posición ya cerró. Todo queda en Auditoría como
+`RECONCILE`.
+
 ### Seguridad de la consola: PIN y token de solo lectura
 
 - **PIN local** (*Riesgo → Seguridad de la consola*): un PIN de 4 a 8 dígitos guardado solo en ese navegador. Bloquea la

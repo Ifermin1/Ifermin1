@@ -95,6 +95,11 @@ export type ReviewResult = { day: string; source: "ia" | "regla"; model: string;
                              review: { summary: string; patterns: { title: string; evidence: string; cost_usd: number | null }[]; tomorrow: string[]; score: number; mood: "bien" | "regular" | "mal" } };
 export type AskResult = { question: string; answer: string; numbers: string[]; model: string | null; ms: number; context: { n_trades: number; period_days: number } };
 export type EntryCheck = { verdict: "green" | "amber" | "red"; reasons: { level: "red" | "amber"; text: string }[]; checked_at: string; ai: { verdict?: string; reason?: string; model?: string; error?: string } | null };
+export type ReconcileFinding = { kind: "unconfirmed_order" | "naked_position" | "pending_entry" | "desync" | "trail_without_position"; severity: "bad" | "warn" | "info";
+                                 account: string; symbol: string; detail: string; action: "protect" | "resync" | "review"; client_id?: string; order_id?: string };
+export type ReconcileReport = { ran_at: string | null; reason: string | null; findings: ReconcileFinding[]; counts: Record<string, number>; accounts: number };
+export type StoredOrder = { client_id: string; account: string; symbol: string; action: string; quantity: number; order_type: string; status: string; order_id: string;
+                            request: ManualOrder; result: { ms?: number; detail?: string; error?: string; status?: string }; created_at: string; updated_at: string };
 export type TradeStatus = { ready: boolean; reason: string | null; max_qty: number; mode: string; symbols: string[]; addon_version: string | null; required_addon: string; ping_ms: number | null;
                             last_order_ms: number | null; heartbeat_age_s: number | null; master: string | null; trails: number; ai_enabled: boolean;
                             stats: { orders: number; rejected: number; cancels: number; modifies: number; unconfirmed: number } };
@@ -202,6 +207,9 @@ export function makeClient(s: Session) {
     saveAnalysisParams: (p: AnalysisParams) => req<AnalysisParams>("/api/ui/analysis", { method: "PUT", body: JSON.stringify(p) }),
     news: (days = 7, countries = "", minImpact = "low") => req<NewsFeed>(`/api/news?days=${days}${countries ? `&countries=${encodeURIComponent(countries)}` : ""}&min_impact=${minImpact}`),
     tradeStatus: () => req<TradeStatus>("/api/trade/status"),
+    tradeOrders: (limit = 50) => req<StoredOrder[]>(`/api/trade/orders?limit=${limit}`),
+    reconcile: () => req<ReconcileReport>("/api/reconcile"),
+    reconcileRun: () => req<ReconcileReport>("/api/reconcile/run", { method: "POST" }),
     tradeOrder: (o: ManualOrder) => req<ManualOrderResult>("/api/trade/order", { method: "POST", body: JSON.stringify(o) }),
     tradeCancel: (account: string, order_id: string) => req<{ ms: number; detail: string }>("/api/trade/cancel", { method: "POST", body: JSON.stringify({ account, order_id }) }),
     tradeModify: (account: string, order_id: string, quantity: number, limit_price: number, stop_price: number) =>

@@ -28,6 +28,7 @@ from tradepilot.services.advisor_service import AdvisorService
 from tradepilot.services.coach_service import CoachService
 from tradepilot.services.report_service import ReportService
 from tradepilot.services.hub_reporter import HubReporter
+from tradepilot.services.reconcile_service import ReconcileService
 from tradepilot.services.sync_service import SyncService
 
 
@@ -56,6 +57,7 @@ class Container:
     push: PushService | None = None
     report: ReportService | None = None
     hub: HubReporter | None = None
+    reconcile: ReconcileService | None = None
 
     async def start(self) -> None:
         if self.advisor is not None:
@@ -161,7 +163,7 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
             performance.seed_demo(list(getattr(bridge, "accounts", {}).keys()) or ["Sim101", "Sim102"], end_balances=getattr(bridge, "accounts", None))
         except Exception as exc:
             logger.warning(f"No se pudo generar el histórico de demostración: {exc}")
-    trade = TradeService(bridge, accounts, risk, audit, cfg)
+    trade = TradeService(bridge, accounts, risk, audit, cfg, store)
     replication.on_manual_status = trade.on_manual_status
     market = MarketService(bus)
     auto_risk = AutoRiskService(risk, accounts, audit, cfg)
@@ -172,15 +174,16 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
     trade.trail = trail
     push = PushService(store, bus, notify, subject=cfg.PUSH_SUBJECT)
     report = ReportService(store, accounts, coach, performance)
+    reconcile = ReconcileService(accounts, sync, trade, trail, audit, bridge)
     hub = HubReporter(store, bus, cfg.HUB_URL, cfg.HUB_TOKEN, cfg.HUB_NODE, cfg.HUB_INTERVAL_S, accounts, risk, bridge, mode=cfg.ENGINE_MODE)
     notify.commands = TelegramCommands(notify, accounts, risk, trade, market, bridge)
 
     async def _after_sync() -> None:
         # independientes: un fallo en una vigilancia no debe apagar la otra
-        for name, fn in (("sincronización", sync.check), ("riesgo", risk.check), ("salidas huérfanas", trade.sweep_orphans), ("trailing pendiente", trade.apply_pending_trails)):
+        for name, fn in (("sincronización", sync.check), ("riesgo", risk.check), ("salidas huérfanas", trade.sweep_orphans), ("trailing pendiente", trade.apply_pending_trails), ("reconciliación", reconcile.after_sync)):
             try:
                 await fn()
             except Exception as exc:
                 logger.exception(f"Error en vigilancia de {name}: {exc}")
     accounts.after_sync = _after_sync
-    return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal, commissions, performance, notify, news, trade, market, trail, auto_risk, advisor, coach, push, report, hub)
+    return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal, commissions, performance, notify, news, trade, market, trail, auto_risk, advisor, coach, push, report, hub, reconcile)

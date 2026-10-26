@@ -85,6 +85,10 @@ class SQLiteStore:
                     event_id TEXT, symbol TEXT, px_before REAL, px_5m REAL, px_15m REAL, px_30m REAL, high REAL, low REAL,
                     updated_at TEXT, PRIMARY KEY (event_id, symbol)
                 );
+                CREATE TABLE IF NOT EXISTS manual_orders (
+                    client_id TEXT PRIMARY KEY, account TEXT, symbol TEXT, action TEXT, quantity INTEGER, order_type TEXT, status TEXT,
+                    order_id TEXT, request TEXT, result TEXT, created_at TEXT, updated_at TEXT
+                );
                 CREATE TABLE IF NOT EXISTS hub_outbox (
                     id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, payload TEXT, created_at TEXT, attempts INTEGER DEFAULT 0, last_error TEXT
                 );
@@ -456,6 +460,36 @@ class SQLiteStore:
         with self._lock:
             rows = self._conn.execute("SELECT r.*, e.time, e.impact, e.title, e.country, e.forecast, e.actual FROM news_reaction r JOIN news_events e ON e.id = r.event_id "
                                       "WHERE e.time >= ? AND e.time <= ? ORDER BY e.time", (from_iso, to_iso)).fetchall()
+        return [dict(r) for r in rows]
+
+    # ---- órdenes manuales (idempotencia y estado que sobreviven a un reinicio) ----
+    def manual_order_upsert(self, d: dict) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("INSERT INTO manual_orders (client_id, account, symbol, action, quantity, order_type, status, order_id, request, result, created_at, updated_at) "
+                               "VALUES (:client_id, :account, :symbol, :action, :quantity, :order_type, :status, :order_id, :request, :result, :created_at, :updated_at) "
+                               "ON CONFLICT(client_id) DO UPDATE SET status = excluded.status, order_id = excluded.order_id, result = excluded.result, updated_at = excluded.updated_at", d)
+
+    def manual_order_set_status(self, client_id: str, status: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("UPDATE manual_orders SET status = ?, updated_at = ? WHERE client_id = ?", (status, datetime.now().astimezone().isoformat(timespec="seconds"), client_id))
+
+    def manual_order_get(self, client_id: str) -> dict | None:
+        with self._lock:
+            r = self._conn.execute("SELECT * FROM manual_orders WHERE client_id = ?", (client_id,)).fetchone()
+        return dict(r) if r else None
+
+    def manual_orders_recent(self, limit: int = 50, since: str | None = None) -> list[dict]:
+        sql, args = "SELECT * FROM manual_orders", []
+        if since:
+            sql += " WHERE created_at >= ?"
+            args.append(since)
+        with self._lock:
+            rows = self._conn.execute(sql + " ORDER BY created_at DESC LIMIT ?", args + [int(limit)]).fetchall()
+        return [dict(r) for r in rows]
+
+    def manual_orders_inflight(self) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute("SELECT * FROM manual_orders WHERE status IN ('sending', 'unconfirmed') ORDER BY created_at").fetchall()
         return [dict(r) for r in rows]
 
     # ---- hub: cola de salida (lo que aún no se ha podido enviar al hub) ----

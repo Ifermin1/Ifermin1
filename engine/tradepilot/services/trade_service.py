@@ -10,6 +10,7 @@ Diseñado para que un retraso o un corte nunca cueste dinero:
   cuentas pausadas por riesgo (solo se permite cerrar), addon con versión suficiente;
 - cada acción queda en la auditoría (MANUAL_ORDER / MANUAL_CANCEL / MANUAL_MODIFY / MANUAL_REJECTED) con la latencia medida.
 """
+import json
 import time
 from collections import OrderedDict
 from datetime import datetime
@@ -30,19 +31,65 @@ def _ver(v: str) -> tuple:
 
 
 class TradeService:
-    def __init__(self, bridge, accounts, risk, audit, settings) -> None:
+    def __init__(self, bridge, accounts, risk, audit, settings, store=None) -> None:
         self.bridge = bridge
         self.accounts = accounts
         self.risk = risk
         self.audit = audit
         self.settings = settings
-        self._done: OrderedDict[str, dict] = OrderedDict()     # client_id -> respuesta (idempotencia)
+        self.store = store
+        self._done: OrderedDict[str, dict] = OrderedDict()     # client_id -> respuesta (idempotencia en memoria; la tabla manual_orders la hace sobrevivir a un reinicio)
         self._inflight: set[str] = set()
         self.stats = {"orders": 0, "rejected": 0, "cancels": 0, "modifies": 0, "unconfirmed": 0, "protects": 0, "orphans": 0}
-        self._exits: dict[tuple[str, str], str] = {}
+        self._exits: dict[tuple[str, str], str] = {}                      # (cuenta, orderKey) -> símbolo: salidas creadas por Proteger/brackets, para cancelarlas si la posición ya cerró
         self._cancelled_by_us: OrderedDict[str, float] = OrderedDict()   # orderKey -> cuándo: para no auditar dos veces la cancelación
         self._pending_trails: dict[tuple[str, str], dict] = {}            # (cuenta, símbolo) -> trailing a activar cuando exista la posición
-        self.trail = None                                                  # TrailService (lo fija el contenedor)     # (cuenta, orderKey) -> símbolo: salidas creadas por Proteger, para cancelarlas si la posición ya cerró
+        self.trail = None                                                  # TrailService (lo fija el contenedor)
+        self._load_state()
+
+    # ---- estado que sobrevive a un reinicio (salidas propias y trailings pendientes) ----
+    def _load_state(self) -> None:
+        if self.store is None:
+            return
+        try:
+            for acc, oid, sym in json.loads(self.store.get_kv("trade.exits") or "[]"):
+                self._exits[(acc, oid)] = sym
+            now = time.time()
+            for d in json.loads(self.store.get_kv("trade.pending_trails") or "[]"):
+                if d.get("expires_at", 0) > now:
+                    self._pending_trails[(d["account"].lower(), d["symbol"].lower())] = {**d, "expires": time.monotonic() + (d["expires_at"] - now)}
+        except (ValueError, KeyError, TypeError) as exc:
+            logger.warning(f"Estado de órdenes guardado ilegible, se ignora: {exc}")
+
+    def _save_state(self) -> None:
+        if self.store is None:
+            return
+        self.store.set_kv("trade.exits", json.dumps([[acc, oid, sym] for (acc, oid), sym in self._exits.items()]))
+        now = time.time()
+        self.store.set_kv("trade.pending_trails", json.dumps([{**{k: v for k, v in d.items() if k != "expires"}, "expires_at": now + max(0.0, d["expires"] - time.monotonic())}
+                                                             for d in self._pending_trails.values()]))
+
+    def _persist_order(self, cid: str, order: dict | None, status: str, result: dict | None = None, order_id: str = "") -> None:
+        if self.store is None or not cid:
+            return
+        now = datetime.now().astimezone().isoformat(timespec="seconds")
+        o = order or {}
+        self.store.manual_order_upsert({"client_id": cid, "account": o.get("account", ""), "symbol": o.get("symbol", ""), "action": o.get("action", ""), "quantity": int(o.get("quantity") or 0),
+                                        "order_type": o.get("order_type", ""), "status": status, "order_id": order_id, "request": json.dumps(o, default=str), "result": json.dumps(result or {}, default=str),
+                                        "created_at": now, "updated_at": now})
+
+    def recent_orders(self, limit: int = 50, since: str | None = None) -> list[dict]:
+        if self.store is None:
+            return []
+        out = []
+        for r in self.store.manual_orders_recent(limit, since):
+            try:
+                r["request"] = json.loads(r.get("request") or "{}")
+                r["result"] = json.loads(r.get("result") or "{}")
+            except ValueError:
+                pass
+            out.append(r)
+        return out
 
     # ---- comprobaciones ----
     def _check_addon(self) -> None:
@@ -118,15 +165,34 @@ class TradeService:
             self._done.popitem(last=False)
         return result
 
+    def _stored_result(self, cid: str) -> dict | None:
+        """Respuesta guardada de una orden ya enviada (también de antes de un reinicio); None si no consta o quedó a medias."""
+        if cid in self._done:
+            return self._done[cid]
+        if self.store is None or not cid:
+            return None
+        row = self.store.manual_order_get(cid)
+        if row and row.get("status") in ("accepted", "filled", "working"):
+            try:
+                res = json.loads(row.get("result") or "{}")
+            except ValueError:
+                res = {}
+            if res:
+                self._done[cid] = res
+                return res
+        return None
+
     async def place(self, req: dict) -> dict:
         cid = str(req.get("client_id", "")).strip()
-        if cid and cid in self._done:
-            return {**self._done[cid], "duplicate": True}
+        done = self._stored_result(cid) if cid else None
+        if done is not None:
+            return {**done, "duplicate": True}
         trail_req = req.pop("trail", None) if isinstance(req, dict) else None
         result = await self._place(req)
         if trail_req and isinstance(trail_req, dict) and trail_req.get("mode") and not result.get("duplicate"):
             # el trailing arranca solo cuando la posición exista (al ejecutarse la entrada): lo revisa apply_pending_trails tras cada sincronización
             self._pending_trails[(result["account"].lower(), result["symbol"].lower())] = {**trail_req, "account": result["account"], "symbol": result["symbol"], "expires": time.monotonic() + 6 * 3600}
+            self._save_state()
             result["trail_pending"] = True
             if self.trail is not None:
                 await self.apply_pending_trails()
@@ -169,8 +235,9 @@ class TradeService:
 
     async def _place(self, req: dict) -> dict:
         cid = str(req.get("client_id", "")).strip()
-        if cid and cid in self._done:
-            return {**self._done[cid], "duplicate": True}
+        done = self._stored_result(cid) if cid else None
+        if done is not None:
+            return {**done, "duplicate": True}
         if cid and cid in self._inflight:
             raise ValueError("esa orden ya se está enviando; espera la confirmación")
         try:
@@ -181,12 +248,15 @@ class TradeService:
             self.audit.log("MANUAL_REJECTED", f"Orden desde la consola rechazada: {exc}", target=str(req.get("account") or ""), details={"request": req})
             raise
         self._inflight.add(cid)
+        self._persist_order(cid, order, "sending")
         t0 = time.monotonic()
         try:
             reply = await self.bridge.manual_order(order)
         except Exception as exc:
             ms = round((time.monotonic() - t0) * 1000)
-            self.stats["unconfirmed" if "no confirmó" in str(exc) else "rejected"] += 1
+            unconfirmed = "no confirmó" in str(exc)
+            self._persist_order(cid, order, "unconfirmed" if unconfirmed else "rejected", {"error": str(exc)[:200], "ms": ms})
+            self.stats["unconfirmed" if unconfirmed else "rejected"] += 1
             self.audit.log("MANUAL_REJECTED", f"{order['account']}: {order['action']} {order['quantity']} {order['symbol']} {order['order_type']} NO aceptada ({ms} ms): {exc}",
                            target=order["account"], details={"client_id": cid, "order": order, "ms": ms})
             raise RuntimeError(str(exc))
@@ -205,6 +275,7 @@ class TradeService:
         self.audit.log("MANUAL_ORDER", f"{order['account']}: {order['action']} {order['quantity']} {order['symbol']} {order['order_type']}{price}{brackets} "
                        f"aceptada por NinjaTrader en {ms} ms{' · es la maestra: se replica a las seguidoras' if master else ''}{' · ' + order['note'] if order['note'] else ''}",
                        target=order["account"], details={"client_id": cid, "reply": reply, "ms": ms, "order": order})
+        self._persist_order(cid, order, "filled" if result["status"] == "filled" else "accepted", result, result["order_id"])
         return self._remember(cid, result)
 
     async def cancel(self, account: str, order_id: str) -> dict:
@@ -363,6 +434,7 @@ class TradeService:
                 oid = parts[1] if len(parts) > 1 else ""
                 if oid:
                     self._exits[(acc, oid)] = pos.symbol
+                    self._save_state()
                 self.stats["orders"] += 1
                 out[kind] = {"action": "created", "order_id": oid, "price": price, "detail": reply}
         ms = round((time.monotonic() - t0) * 1000)
@@ -386,6 +458,14 @@ class TradeService:
         enlazó en OCO). Así un objetivo no se convierte en una entrada nueva cuando el stop ya cerró la posición."""
         if not self._exits:
             return
+        before = len(self._exits)
+        try:
+            await self._sweep()
+        finally:
+            if len(self._exits) != before:
+                self._save_state()
+
+    async def _sweep(self) -> None:
         for (acc, oid), symbol in list(self._exits.items()):
             snap = self.accounts.find(acc)
             if snap is None:
@@ -421,6 +501,11 @@ class TradeService:
         mid, oid = str(data.get("manual_id") or ""), str(data.get("order_id") or "")
         if oid and (mid.endswith("-SL") or mid.endswith("-TP")) and state.lower() in ("accepted", "working"):
             self._exits[(acc, oid)] = str(data.get("symbol") or "")    # stop/objetivo automáticos del addon: se cancelan si la posición desaparece
+            self._save_state()
+        if mid and self.store is not None and not (mid.endswith("-SL") or mid.endswith("-TP")):
+            st = state.lower()
+            if st in ("filled", "rejected", "cancelled"):
+                self.store.manual_order_set_status(mid, st)
         if err or state.lower() == "rejected":
             self.stats["rejected"] += 1
             self.audit.log("MANUAL_REJECTED", f"{acc}: {what} rechazada por el bróker: {err or state} {data.get('native_error') or ''}".strip(),
