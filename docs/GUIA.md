@@ -480,6 +480,19 @@ actualizar: NinjaScript Editor → F5).
 - Por API: `GET /api/report/weekly?day=AAAA-MM-DD&account=&tag=&format=html|json` y
   `GET /api/trades.csv?day_from=&day_to=&account=&tag=`, con el token en la cabecera.
 
+### Copias de seguridad y configuración (Riesgo → Copias de seguridad y configuración)
+
+- **Copias de la base de datos**: el engine hace una copia consistente al día (y al arrancar si la última tiene más de un
+  día) en `engine\data\backups\tradepilot-AAAAMMDD-HHMMSS.db`, conserva las últimas 14 (`BACKUP_KEEP`) y al arrancar
+  comprueba la integridad de la base (`DB_CORRUPT` en Auditoría y aviso si falla). *Copia ahora* la hace al momento;
+  *descargar* baja una copia al teléfono o PC (solo con el token completo: la base guarda el token del bot de Telegram).
+  **Restaurar**: parar el engine, copiar el archivo elegido sobre `engine\data\tradepilot.db` y arrancar.
+- **Exportar configuración**: un JSON con reglas, límites, presets, horario, comisiones, pérdida del día, alias y
+  etiquetas de cuentas, plantillas, parámetros de análisis y qué avisos mandar. **Sin tokens ni claves**: el `.env` no
+  se exporta nunca. **Importar…** lo aplica en otro PC o tras reinstalar: las reglas que ya existen se actualizan (no se
+  duplican) salvo que marques *borrar las reglas actuales antes*. Pide el PIN y confirmación, y queda en Auditoría
+  (`CONFIG_IMPORTED`).
+
 ### Vigilante: suspensión, modo degradado y mercado sin datos
 
 El engine se vigila a sí mismo cada 10 segundos:

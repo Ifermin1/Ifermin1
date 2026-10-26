@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from tradepilot.api.auth import require_token
-from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest, ProtectRequest, TrailRequest, DayLossRequest, AutoRiskRequest, RiskPresets, ApplyPresetRequest, TagsRequest, OcoEntryRequest, TradeTemplates, ReviewRequest, CheckEntryRequest, AskRequest, PushSubscribeRequest, PushUnsubscribeRequest
+from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest, ProtectRequest, TrailRequest, DayLossRequest, AutoRiskRequest, RiskPresets, ApplyPresetRequest, TagsRequest, OcoEntryRequest, TradeTemplates, ReviewRequest, CheckEntryRequest, AskRequest, PushSubscribeRequest, PushUnsubscribeRequest, ConfigImportRequest
 from tradepilot.container import Container
 from tradepilot.domain.risk import RiskLimit, Schedule
 
@@ -383,6 +383,61 @@ def stats_analysis(request: Request, day_from: str | None = None, day_to: str | 
     if d1 < d0:
         raise HTTPException(400, "el fin del periodo es anterior al inicio")
     return c.performance.analysis(d0, d1, account or None)
+
+
+@router.get("/backup")
+def backup_state(request: Request):
+    """Copias de seguridad de la base de datos: lista, última, integridad."""
+    c = _c(request)
+    if c.backup is None:
+        raise HTTPException(503, "copias no disponibles")
+    return c.backup.state()
+
+
+@router.post("/backup/run")
+def backup_run(request: Request):
+    c = _c(request)
+    if c.backup is None:
+        raise HTTPException(503, "copias no disponibles")
+    try:
+        return c.backup.backup_now("manual")
+    except RuntimeError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.get("/backup/download")
+def backup_download(name: str, request: Request):
+    """Descarga una copia (solo con el token completo: la base contiene el token del bot de Telegram y las suscripciones push)."""
+    from fastapi.responses import FileResponse
+    c = _c(request)
+    if getattr(request.state, "role", "full") != "full":
+        raise HTTPException(403, "Token de solo lectura: esta descarga no está permitida")
+    p = c.backup.path_of(name) if c.backup is not None else None
+    if p is None:
+        raise HTTPException(404, "copia no encontrada")
+    return FileResponse(str(p), media_type="application/octet-stream", filename=name)
+
+
+@router.get("/config/export")
+def config_export(request: Request):
+    """Configuración sin secretos (reglas, límites, presets, horario, comisiones, cuentas, plantillas, avisos) para llevarla a otro PC."""
+    from fastapi.responses import JSONResponse
+    c = _c(request)
+    if c.backup is None:
+        raise HTTPException(503, "no disponible")
+    data = c.backup.export_config()
+    return JSONResponse(data, headers={"Content-Disposition": f"attachment; filename=tradepilotx-config-{data['exported_at'][:10]}.json"})
+
+
+@router.post("/config/import")
+async def config_import(body: ConfigImportRequest, request: Request):
+    c = _c(request)
+    if c.backup is None:
+        raise HTTPException(503, "no disponible")
+    try:
+        return await c.backup.import_config(body.data, body.replace_rules)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
 
 
 @router.get("/reconcile")

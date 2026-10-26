@@ -30,6 +30,7 @@ from tradepilot.services.report_service import ReportService
 from tradepilot.services.hub_reporter import HubReporter
 from tradepilot.services.reconcile_service import ReconcileService
 from tradepilot.services.watchdog_service import WatchdogService
+from tradepilot.services.backup_service import BackupService
 from tradepilot.services.sync_service import SyncService
 
 
@@ -60,6 +61,7 @@ class Container:
     hub: HubReporter | None = None
     reconcile: ReconcileService | None = None
     watchdog: WatchdogService | None = None
+    backup: BackupService | None = None
 
     async def start(self) -> None:
         if self.advisor is not None:
@@ -78,6 +80,8 @@ class Container:
             await self.hub.start()
         if self.watchdog is not None:
             await self.watchdog.start()
+        if self.backup is not None:
+            await self.backup.start()
         self.audit.log("ENGINE_START", f"Engine iniciado en modo {self.settings.ENGINE_MODE}")
         if self.news is not None and not self.news.ai.enabled:
             logger.info("Calendario: sin ANTHROPIC_API_KEY, los avisos de noticias llevan un análisis por reglas (pon la clave en engine/.env para usar la IA)")
@@ -100,6 +104,8 @@ class Container:
             logger.warning("API_TOKEN sigue siendo el valor por defecto; cámbialo en engine/.env antes de exponer el engine")
 
     async def stop(self) -> None:
+        if self.backup is not None:
+            await self.backup.stop()
         if self.watchdog is not None:
             await self.watchdog.stop()
         if self.hub is not None:
@@ -183,6 +189,7 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
     reconcile = ReconcileService(accounts, sync, trade, trail, audit, bridge)
     watchdog = WatchdogService(accounts, risk, bridge, audit, bus, market, reconcile, mode=cfg.ENGINE_MODE, degraded_after_s=cfg.WATCHDOG_DEGRADED_AFTER_S,
                                no_ticks_after_s=cfg.WATCHDOG_NO_TICKS_AFTER_S, remind_s=cfg.WATCHDOG_REMIND_S)
+    backup = BackupService(store, audit, cfg.DB_PATH, keep=cfg.BACKUP_KEEP, interval_h=cfg.BACKUP_INTERVAL_H, accounts=accounts, risk=risk, replication=replication, notify=notify)
     hub = HubReporter(store, bus, cfg.HUB_URL, cfg.HUB_TOKEN, cfg.HUB_NODE, cfg.HUB_INTERVAL_S, accounts, risk, bridge, mode=cfg.ENGINE_MODE)
     notify.commands = TelegramCommands(notify, accounts, risk, trade, market, bridge)
 
@@ -194,4 +201,4 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
             except Exception as exc:
                 logger.exception(f"Error en vigilancia de {name}: {exc}")
     accounts.after_sync = _after_sync
-    return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal, commissions, performance, notify, news, trade, market, trail, auto_risk, advisor, coach, push, report, hub, reconcile, watchdog)
+    return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal, commissions, performance, notify, news, trade, market, trail, auto_risk, advisor, coach, push, report, hub, reconcile, watchdog, backup)

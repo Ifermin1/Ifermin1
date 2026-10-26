@@ -35,6 +35,11 @@ class PushUnsubscribeRequest(BaseModel):
     endpoint: str
 
 
+class ConfigImportRequest(BaseModel):
+    data: dict
+    replace_rules: bool = False
+
+
 class DiscoverChatRequest(BaseModel):
     bot_token: Optional[str] = None
 

@@ -110,6 +110,8 @@ resto responde 403. `/api/health` devuelve `role` para que la consola se ponga e
 | POST | `/api/ai/review` | `{day, force}` revisión de la sesión (IA si hay clave, si no por reglas), cacheada por día |
 | POST | `/api/ai/check-entry` | Semáforo de una orden: `{verdict: green|amber|red, reasons[]}` sin IA (ms); `ai: true` añade la opinión del modelo |
 | POST | `/api/ai/ask` | Pregunta en lenguaje natural sobre las operaciones de los últimos N días (requiere clave de IA) |
+| GET/POST | `/api/backup` · `/api/backup/run` · `/api/backup/download?name=` | Copias de la base (lista, integridad, copia ahora, descarga solo con token completo) |
+| GET/POST | `/api/config/export` · `/api/config/import` | Configuración sin secretos, exportar e importar |
 | GET/POST | `/api/reconcile` · `/api/reconcile/run` | Informe de reconciliación (órdenes a medias, posiciones sin stop, entradas pendientes, desincronización, trailing sin posición) |
 | GET | `/api/trade/orders?limit=&today=` | Órdenes manuales guardadas (tabla `manual_orders`: idempotencia y estado que sobreviven a un reinicio) |
 | GET/POST | `/api/hub` · `/api/hub/flush` | Estado del reporter del hub (cola, último envío) y envío forzado |
