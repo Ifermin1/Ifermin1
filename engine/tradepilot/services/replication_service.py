@@ -198,6 +198,24 @@ class ReplicationService:
                 self.bridge.note_addon_version(str(data["version"]))
             if data.get("boot"):
                 self.bridge.health.addon_boot = str(data["boot"])
+            h = self.bridge.health
+            try:
+                if data.get("engine_silent_s") is not None:
+                    silent = int(data["engine_silent_s"])
+                    # el addon estuvo solo (engine apagado o colgado): avisar una vez al reencontrarse
+                    if silent >= 60 and (h.addon_engine_silent_s or 0) < 60:
+                        self.audit.log("ADDON_ALONE", f"El addon de NinjaTrader estuvo {silent // 60} min sin el engine: durante ese tiempo no se copió ni se vigilaron los límites; "
+                                       "revisa posiciones (la reconciliación de arranque lo hace sola)", details={"silent_s": silent})
+                    h.addon_engine_silent_s = silent
+                if data.get("uptime_s") is not None:
+                    h.addon_uptime_s = int(data["uptime_s"])
+                if data.get("restarts") is not None:
+                    r = int(data["restarts"])
+                    if h.addon_self_restarts is not None and r > h.addon_self_restarts:
+                        self.audit.log("ADDON_SELF_RESTART", f"El addon reconstruyó sus sockets por su cuenta ({r} veces desde que arrancó): el bucle interno se había detenido")
+                    h.addon_self_restarts = r
+            except (TypeError, ValueError):
+                pass
             return []
         if msg_type == MSG_PRICE:
             await self.bus.publish(TOPIC_PRICE, data)

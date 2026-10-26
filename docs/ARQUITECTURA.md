@@ -198,6 +198,13 @@ hub no responde la cola se conserva y se reintenta (tope 5000 elementos). El hub
 y una página mínima con el P&L del día de cada nodo, cuentas, kill switch, operaciones de la semana y últimos avisos. La
 fase 2 (órdenes desde el hub, usuarios) queda abierta.
 
+## 6b2. Addon 3.0: defensas propias
+
+`MaxOrderQty` (tope duro por orden) y validación de esquema en `HandleFollowerMessage`/`HandleManual`; `NoteEngine()` anota
+cada petición del engine y `CheckEngineSilence()` avisa en el Output a los `EngineSilentWarnS`; `CheckPoller()` (timer de
+10 s) reconstruye los sockets si el `NetMQPoller` dejó de correr; `HEARTBEAT` añade `engine_silent_s`, `uptime_s`,
+`restarts` y `PING` responde `PONG|boot|seq|version|silent`. El engine audita `ADDON_ALONE` y `ADDON_SELF_RESTART`.
+
 ## 6c. Pruebas: unitarias, propiedades, escenarios y caos
 
 - `engine/tests`: unitarias y de API con el simulador (`ENGINE_MODE=mock`), más **tests de propiedades** (hypothesis) de la

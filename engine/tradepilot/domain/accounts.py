@@ -13,6 +13,9 @@ class BridgeHealth(DomainModel):
     last_heartbeat: Optional[datetime] = None
     master_account: Optional[str] = None   # la publica el addon en cada HEARTBEAT
     addon_version: Optional[str] = None    # >= 1.1 anuncia versión en el HEARTBEAT
+    addon_engine_silent_s: Optional[int] = None   # >= 3.0: segundos que el addon llevaba sin peticiones del engine (en el HEARTBEAT)
+    addon_uptime_s: Optional[int] = None          # >= 3.0: segundos desde que arrancó el addon
+    addon_self_restarts: Optional[int] = None     # >= 3.0: veces que el addon reconstruyó sus sockets por su cuenta
     addon_boot: Optional[str] = None       # id de arranque del addon visto por el canal de eventos (>= 1.8)
     addon_boot_req: Optional[str] = None   # id de arranque según el canal de comandos (PING)
     addon_seq_req: Optional[int] = None    # último seq publicado según el canal de comandos (PING)

@@ -480,6 +480,23 @@ actualizar: NinjaScript Editor → F5).
 - Por API: `GET /api/report/weekly?day=AAAA-MM-DD&account=&tag=&format=html|json` y
   `GET /api/trades.csv?day_from=&day_to=&account=&tag=`, con el token en la cabecera.
 
+### Addon 3.0: lo que el addon hace por su cuenta
+
+El addon de NinjaTrader (`ninjatrader\TradePilotXBridge.cs`, recompilar con F5 tras actualizar) se vigila a sí mismo:
+
+- **Tope duro de contratos** (`MaxOrderQty`, 50 por defecto, en `Documents\NinjaTrader 8\TradePilotX\config.json`): rechaza
+  cualquier orden, copiada o manual, que lo supere, aunque el engine o alguien con el token la mande. Es la última red.
+- **Validación de cada mensaje**: campos obligatorios y cantidades fuera de rango se responden con `ERROR|…` en vez de
+  intentarse.
+- **Aviso sin engine** (`EngineSilentWarnS`, 60 s): si el engine deja de hablarle, lo escribe en el *Output* de NinjaTrader
+  cada minuto con las posiciones abiertas, y cuando el engine vuelve se lo cuenta en el heartbeat; el engine lo audita
+  (`ADDON_ALONE`) para que sepas cuánto tiempo estuviste sin copia ni límites.
+- **Se reconstruye solo**: si el bucle interno de NetMQ se detiene por un error, el addon rehace sus sockets en 10 s y lo
+  dice (`ADDON_SELF_RESTART` en Auditoría). Antes parecía vivo pero no respondía hasta recompilar.
+- `PING` responde también con la versión y los segundos sin engine; el heartbeat lleva `engine_silent_s`, `uptime_s` y
+  `restarts`. Los engines antiguos ignoran los campos nuevos; el engine sigue aceptando addons desde la 2.6 (2.7 para
+  operar desde la consola).
+
 ### Salud: latencias, desconexiones y errores (pestaña Salud)
 
 Cómo va el engine por dentro, con historial de 7 días (hasta 30): estado del puente, ping al addon, ida y vuelta de la

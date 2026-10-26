@@ -1,7 +1,20 @@
 """Robustez 3: vigilante (suspensión, modo degradado, sin datos de mercado)."""
 from datetime import datetime, timezone
 
-from tradepilot.services.watchdog_service import cme_open
+from datetime import timedelta, timezone
+
+from tradepilot.services.watchdog_service import _us_dst, cme_open, to_ny
+
+
+def test_ny_by_rule_matches_zoneinfo_when_available():
+    import tradepilot.services.watchdog_service as w
+    for d in (datetime(2026, 1, 15, 12, tzinfo=timezone.utc), datetime(2026, 7, 15, 12, tzinfo=timezone.utc),
+              datetime(2026, 3, 8, 6, 59, tzinfo=timezone.utc), datetime(2026, 3, 8, 7, 1, tzinfo=timezone.utc),
+              datetime(2026, 11, 1, 5, 59, tzinfo=timezone.utc), datetime(2026, 11, 1, 6, 1, tzinfo=timezone.utc)):
+        by_rule = d.astimezone(timezone(timedelta(hours=-4 if _us_dst(d) else -5)))
+        if w.NY is not None:
+            assert by_rule.hour == d.astimezone(w.NY).hour and by_rule.day == d.astimezone(w.NY).day, d
+        assert to_ny(d).hour == by_rule.hour
 
 
 def test_cme_hours():

@@ -13,17 +13,37 @@ Cada pocos segundos comprueba:
 """
 import asyncio
 import time
-from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
+from datetime import datetime, timedelta, timezone
 
 from loguru import logger
 
-NY = ZoneInfo("America/New_York")
+try:
+    from zoneinfo import ZoneInfo
+    NY = ZoneInfo("America/New_York")
+except Exception:          # Windows sin el paquete tzdata: no hay base de zonas horarias
+    NY = None
+
+
+def _us_dst(d_utc: datetime) -> bool:
+    """Horario de verano de EE. UU.: del segundo domingo de marzo al primer domingo de noviembre (2:00 locales)."""
+    y = d_utc.year
+    march = datetime(y, 3, 1, tzinfo=timezone.utc)
+    start = march + timedelta(days=(6 - march.weekday()) % 7 + 7, hours=7)       # 2:00 EST = 7:00 UTC
+    nov = datetime(y, 11, 1, tzinfo=timezone.utc)
+    end = nov + timedelta(days=(6 - nov.weekday()) % 7, hours=6)                  # 2:00 EDT = 6:00 UTC
+    return start <= d_utc < end
+
+
+def to_ny(d_utc: datetime) -> datetime:
+    """Hora de Nueva York; sin base de zonas horarias se calcula el desfase por regla (−4 h en verano, −5 h en invierno)."""
+    if NY is not None:
+        return d_utc.astimezone(NY)
+    return d_utc.astimezone(timezone(timedelta(hours=-4 if _us_dst(d_utc) else -5)))
 
 
 def cme_open(now_utc: datetime | None = None) -> bool:
     """Horario de los futuros de CME (ES/NQ/CL/GC…): domingo 18:00 → viernes 17:00 ET, con pausa diaria 17:00-18:00 ET."""
-    d = (now_utc or datetime.now(timezone.utc)).astimezone(NY)
+    d = to_ny(now_utc or datetime.now(timezone.utc))
     wd, h, m = d.weekday(), d.hour, d.minute
     minutes = h * 60 + m
     if wd == 5:                        # sábado

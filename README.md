@@ -87,6 +87,7 @@ Si *Cuentas* queda vacío, el addon no está respondiendo en 5557: revisa que Ni
 ## Protecciones
 
 - **Grupos y presets**: etiquetas por cuenta (50K, PA…) con filtro y acciones en bloque, presets de riesgo (Conservador/Moderado/Agresivo, editables) y una tarjeta de *Recomendaciones* en Inicio con la acción de un clic (pausar, pasar a conservador, igualar, cerrar, poner perfil).
+- **Addon 3.0 endurecido**: tope duro de contratos y validación de mensajes en NinjaTrader, aviso cuando se queda sin engine, reconstrucción automática de sus sockets y heartbeat con autoinforme (`engine_silent_s`, `uptime_s`, `restarts`).
 - **Pruebas de caos y CI en Windows**: fills duplicados, ráfagas, reinicio del addon, NinjaTrader colgado, engine matado y arrancado; tests de propiedades de la copia; la suite corre también en Windows.
 - **Salud**: métricas por hora (latencia de copia p50/p95, órdenes, sincronización, ping) y por día (desconexiones, errores, rechazos, fills), 30 días en la base, pestaña Salud y `/api/metrics` para Prometheus.
 - **Diagnóstico**: doctor de la instalación (consola y `python -m tradepilot.doctor`) y zip de diagnóstico con logs, auditoría y salud, con tokens y claves tachados.

@@ -207,7 +207,7 @@ while True:
                 rep.send_string("OK|" + ",".join(ids))
             elif msg == "REBOOT":           # gancho de caos: el addon se reinicia (boot nuevo, seq desde 0, posiciones intactas)
                 BOOT = uuid.uuid4().hex[:8]; SEQ = 0; ORDERS.clear()
-                send({"msg_type": "HEARTBEAT", "account": MASTER, "version": "2.9", "boot": BOOT, "timestamp": now()})
+                send({"msg_type": "HEARTBEAT", "account": MASTER, "version": "3.0", "boot": BOOT, "timestamp": now()})
                 print("REBOOT: boot", BOOT); rep.send_string("OK|" + BOOT)
             elif msg.startswith("SLEEP|"):  # gancho de caos: NinjaTrader deja de responder N s
                 SLEEP_UNTIL = time.time() + float(msg.split("|", 1)[1]); rep.send_string("OK"); print("SLEEP hasta", SLEEP_UNTIL)
@@ -230,7 +230,7 @@ while True:
                 new = msg.split("|", 1)[1]
                 if new in ACCOUNTS or new in OFFLINE:
                     MASTER = new; print("MASTER CAMBIADA A", MASTER)
-                    send({"msg_type": "HEARTBEAT", "account": MASTER, "version": ("1.2" if "--old-addon" in sys.argv else "2.9"), "boot": BOOT, "timestamp": now()})
+                    send({"msg_type": "HEARTBEAT", "account": MASTER, "version": ("1.2" if "--old-addon" in sys.argv else "3.0"), "boot": BOOT, "timestamp": now()})
                     rep.send_string("OK|" + new)
                 else:
                     rep.send_string("ERROR|cuenta desconocida: " + new)
@@ -248,7 +248,7 @@ while True:
               "ask": round(price + 0.25, 2), "timestamp": now()})
         next_price = t + 0.25
     if t >= next_hb:
-        send({"msg_type": "HEARTBEAT", "account": MASTER, "version": ("1.2" if "--old-addon" in sys.argv else "2.9"), "boot": BOOT, "timestamp": now()}); next_hb = t + 5
+        send({"msg_type": "HEARTBEAT", "account": MASTER, "version": ("1.2" if "--old-addon" in sys.argv else "3.0"), "boot": BOOT, "timestamp": now()}); next_hb = t + 5
     if t >= next_emit and not manual:
         oid = uuid.uuid4().hex[:8]; action = random.choice(["BUY", "SELL"])
         send({"msg_type": "EXECUTION", "account": MASTER, "action": action, "symbol": SYMBOL, "quantity": 1,

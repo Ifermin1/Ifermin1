@@ -53,7 +53,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 {
     public class TradePilotXBridge : AddOnBase
     {
-        private const string BridgeVersion = "2.9";
+        private const string BridgeVersion = "3.0";
 
         // ---- configuración ------------------------------------------------
         private class BridgeConfig
@@ -80,6 +80,11 @@ namespace NinjaTrader.NinjaScript.AddOns
             // cancelarla y mandar el resto a mercado. 17/9: los stops de las seguidoras saltaban a la vez que el del
             // master; mandar 1 a mercado "para seguirle" ejecutaba las dos cosas y la cuenta quedaba invertida.
             public int ReconcileGraceMs = 750;
+            // v3.0: tope duro de contratos por orden que el addon acepta del engine o de la consola, pase lo que pase arriba.
+            // Última red: si el engine (o alguien con el token) manda 200 contratos por error, aquí se rechaza.
+            public int MaxOrderQty = 50;
+            // v3.0: segundos sin ninguna petición del engine (sincroniza cada 2 s) antes de avisar en el Output de NinjaTrader.
+            public int EngineSilentWarnS = 60;
         }
 
         private static readonly string ConfigDir = Path.Combine(Core.Globals.UserDataDir, "TradePilotX");
@@ -150,6 +155,14 @@ namespace NinjaTrader.NinjaScript.AddOns
         // id único de cada arranque del bridge: el engine lo compara entre el canal de eventos y el de comandos
         // para detectar en segundos que se reinició el addon y sus eventos ya no le llegan
         private string bootId = "";
+        // v3.0: cuándo habló el engine por última vez (cualquier petición por 5557 o mensaje por 5556) y cuándo arrancó el bridge
+        private DateTime lastEngineRequest = DateTime.MinValue;
+        private DateTime lastEngineWarn = DateTime.MinValue;
+        private DateTime startedAt = DateTime.MinValue;
+        private bool engineWasSilent;
+        // v3.0: vigilante del poller: si el bucle de NetMQ muere por una excepción, se reconstruyen los sockets
+        private System.Threading.Timer healthTimer;
+        private int restarts;
 
         // ===================================================================
         protected override void OnStateChange()
@@ -211,13 +224,18 @@ namespace NinjaTrader.NinjaScript.AddOns
                     heartbeatTimer = new NetMQTimer(TimeSpan.FromMilliseconds(Math.Max(1000, cfg.HeartbeatMs)));
                     heartbeatTimer.Elapsed += (s, e) =>
                     {
-                        Publish(Json.Obj("msg_type", "HEARTBEAT", "account", cfg.MasterAccount, "version", BridgeVersion, "boot", bootId, "timestamp", Now()));
+                        Publish(Json.Obj("msg_type", "HEARTBEAT", "account", cfg.MasterAccount, "version", BridgeVersion, "boot", bootId,
+                            "engine_silent_s", EngineSilentSeconds(), "uptime_s", (int)(DateTime.UtcNow - startedAt).TotalSeconds, "restarts", restarts, "timestamp", Now()));
                         CheckSilentFeeds();
+                        CheckEngineSilence();
                     };
 
                     poller = new NetMQPoller { sub, rep, outbox, priceTimer, heartbeatTimer };
                     poller.RunAsync();
                     running = true;
+                    if (startedAt == DateTime.MinValue) startedAt = DateTime.UtcNow;
+                    lastEngineRequest = DateTime.UtcNow;
+                    if (healthTimer == null) healthTimer = new System.Threading.Timer(_ => CheckPoller(), null, 10000, 10000);
 
                     bootId = Guid.NewGuid().ToString("N").Substring(0, 8);
                     Account.AccountStatusUpdate += OnAccountStatusUpdate;
@@ -257,6 +275,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                 }
                 marketFeeds.Clear();
 
+                try { if (healthTimer != null) { healthTimer.Dispose(); healthTimer = null; } } catch { }
                 try { if (poller != null) { poller.Stop(); poller.Dispose(); } } catch { }
                 foreach (IDisposable d in new IDisposable[] { sub, rep, pub, outbox })
                 {
@@ -547,6 +566,7 @@ namespace NinjaTrader.NinjaScript.AddOns
             string raw = null;
             try { raw = e.Socket.ReceiveFrameString(); }
             catch (Exception ex) { Error("OnFollowerMessage: " + ex.Message); return; }
+            NoteEngine();
             HandleFollowerMessage(raw);
         }
 
@@ -594,6 +614,11 @@ namespace NinjaTrader.NinjaScript.AddOns
                 string masterOrderId = Get(m, "master_order_id");
                 int qty = (int)Num(m, "quantity");
                 double price = Num(m, "price");
+                // v3.0: validación de esquema antes de tocar nada: campos obligatorios y tope duro de contratos
+                if (string.IsNullOrEmpty(msgType) || string.IsNullOrEmpty(accountName) || string.IsNullOrEmpty(symbol) || string.IsNullOrEmpty(masterOrderId))
+                    return "ERROR|mensaje incompleto (msg_type, account, symbol, master_order_id)";
+                if (qty < 0 || qty > cfg.MaxOrderQty)
+                    return "ERROR|cantidad " + qty + " fuera del tope del addon (MaxOrderQty=" + cfg.MaxOrderQty + " en config.json)";
 
                 Account account;
                 lock (Account.All)
@@ -1230,6 +1255,8 @@ namespace NinjaTrader.NinjaScript.AddOns
                 Account account = FindAccount(accountName);
                 if (account == null) return "ERROR|cuenta desconocida: " + accountName;
                 if (qty <= 0) return "ERROR|cantidad inválida";
+                if (qty > cfg.MaxOrderQty) return "ERROR|cantidad " + qty + " fuera del tope del addon (MaxOrderQty=" + cfg.MaxOrderQty + " en config.json)";
+                if (string.IsNullOrEmpty(symbol)) return "ERROR|falta el instrumento";
                 Instrument instrument = GetInstrumentCached(symbol);
                 if (instrument == null) return "ERROR|instrumento desconocido en NinjaTrader: " + symbol;
                 OrderType type = ParseType(Get(m, "order_type"));
@@ -1428,6 +1455,7 @@ namespace NinjaTrader.NinjaScript.AddOns
             try
             {
                 request = e.Socket.ReceiveFrameString();
+                NoteEngine();
                 string reply;
                 if (request == "GET_ACCOUNTS")
                 {
@@ -1521,7 +1549,9 @@ namespace NinjaTrader.NinjaScript.AddOns
                 else if (request == "PING")
                 {
                     // v1.8: arranque y último seq publicado, para que el engine sepa si se está perdiendo eventos
-                    reply = "PONG|" + bootId + "|" + System.Threading.Interlocked.Read(ref seq).ToString(CultureInfo.InvariantCulture);
+                    // v3.0: además la versión del addon y los segundos que llevaba sin engine (el engine los ignora si no los conoce)
+                    reply = "PONG|" + bootId + "|" + System.Threading.Interlocked.Read(ref seq).ToString(CultureInfo.InvariantCulture)
+                        + "|" + BridgeVersion + "|" + EngineSilentSeconds().ToString(CultureInfo.InvariantCulture);
                 }
                 else
                 {
@@ -1548,6 +1578,60 @@ namespace NinjaTrader.NinjaScript.AddOns
         }
 
         private static string Now() { return DateTime.Now.ToString("o"); }
+
+        // ===================================================================
+        // v3.0: vigilancia del engine y del propio bridge
+        // ===================================================================
+        private void NoteEngine()
+        {
+            DateTime now = DateTime.UtcNow;
+            if (engineWasSilent)
+            {
+                engineWasSilent = false;
+                Info("Engine de vuelta tras " + (int)(now - lastEngineRequest).TotalSeconds + " s sin peticiones");
+            }
+            lastEngineRequest = now;
+        }
+
+        private int EngineSilentSeconds()
+        {
+            if (lastEngineRequest == DateTime.MinValue) return 0;
+            return (int)(DateTime.UtcNow - lastEngineRequest).TotalSeconds;
+        }
+
+        private void CheckEngineSilence()
+        {
+            try
+            {
+                int silent = EngineSilentSeconds();
+                if (silent < cfg.EngineSilentWarnS) return;
+                engineWasSilent = true;
+                if ((DateTime.UtcNow - lastEngineWarn).TotalSeconds < 60) return;
+                lastEngineWarn = DateTime.UtcNow;
+                int open = 0;
+                try { lock (Account.All) foreach (Account a in Account.All) foreach (Position p in a.Positions) if (p.Quantity != 0) open++; } catch { }
+                Warn("Sin engine de TradePilot X desde hace " + silent + " s: no se copia nada ni se vigilan los límites"
+                    + (open > 0 ? " (hay " + open + " posiciones abiertas)" : "") + ". Arranca el engine (scripts\\run_engine.ps1) o revisa que no se haya cerrado.");
+            }
+            catch (Exception ex) { Error("CheckEngineSilence: " + ex.Message); }
+        }
+
+        /// <summary>Si el bucle de NetMQ murió (excepción no capturada en un manejador), se reconstruyen los sockets.
+        /// Sin esto el addon parecía vivo (NinjaTrader abierto) pero no respondía a nada hasta recompilar.</summary>
+        private void CheckPoller()
+        {
+            try
+            {
+                if (!running) return;
+                NetMQPoller p = poller;
+                if (p != null && p.IsRunning) return;
+                restarts++;
+                Error("El bucle del bridge se detuvo: reconstruyendo sockets (reinicio " + restarts + ")");
+                Stop();
+                Start();
+            }
+            catch (Exception ex) { Error("CheckPoller: " + ex.Message); }
+        }
 
         private static string OrderKey(Order o)
         {
@@ -1700,6 +1784,8 @@ namespace NinjaTrader.NinjaScript.AddOns
                 if (m.ContainsKey("ParallelSubmit")) c.ParallelSubmit = Get(m, "ParallelSubmit").ToLowerInvariant() != "false";
                 if (m.ContainsKey("VerboseOutput")) c.VerboseOutput = Get(m, "VerboseOutput").ToLowerInvariant() == "true";
                 if (m.ContainsKey("ReconcileGraceMs")) c.ReconcileGraceMs = (int)Num(m, "ReconcileGraceMs");
+                if (m.ContainsKey("MaxOrderQty")) c.MaxOrderQty = Math.Max(1, (int)Num(m, "MaxOrderQty"));
+                if (m.ContainsKey("EngineSilentWarnS")) c.EngineSilentWarnS = Math.Max(10, (int)Num(m, "EngineSilentWarnS"));
                 Info("Config cargada: " + ConfigPath);
             }
             catch (Exception ex) { Error("No se pudo leer config.json, usando defaults: " + ex.Message); }
@@ -1742,7 +1828,9 @@ namespace NinjaTrader.NinjaScript.AddOns
                 + "  \"AccountFilter\": " + JsonList(c.AccountFilter) + ",\n"
                 + "  \"ParallelSubmit\": " + (c.ParallelSubmit ? "true" : "false") + ",\n"
                 + "  \"VerboseOutput\": " + (c.VerboseOutput ? "true" : "false") + ",\n"
-                + "  \"ReconcileGraceMs\": " + c.ReconcileGraceMs + "\n"
+                + "  \"ReconcileGraceMs\": " + c.ReconcileGraceMs + ",\n"
+                + "  \"MaxOrderQty\": " + c.MaxOrderQty + ",\n"
+                + "  \"EngineSilentWarnS\": " + c.EngineSilentWarnS + "\n"
                 + "}\n";
         }
 
