@@ -9,7 +9,7 @@ import type { Route } from "../components/Shell";
 const newId = () => "pk" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
 export function Pocket({ onRoute }: { onRoute: (r: Route) => void }) {
-  const { client, accounts, risk, health, prices, wsStatus, refresh, setRisk, logout } = useStore();
+  const { client, accounts, risk, health, prices, wsStatus, refresh, setRisk, logout, guard, readOnly } = useStore();
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const active = accounts.filter((a) => a.enabled);
@@ -22,11 +22,11 @@ export function Pocket({ onRoute }: { onRoute: (r: Route) => void }) {
     try { setMsg(await fn()); await refresh(); } catch (ex) { setMsg((ex instanceof Error ? ex.message : String(ex)).replace(/^\d+:\s*/, "")); } finally { setBusy(null); }
   };
   const lastOf = (symbol: string) => prices[symbol.split(" ")[0].toUpperCase()]?.last ?? 0;
-  const be = (acc: string, sym: string) => run(`be${acc}${sym}`, async () => { const r = await client!.tradeProtect({ client_id: newId(), account: acc, symbol: sym, breakeven: true, last_price: lastOf(sym) }); return `${acc} ${sym}: stop en ${r.avg_price} (${r.ms} ms).`; });
-  const close = (acc: string, sym: string, q: number) => { if (!confirm(`¿Cerrar ${Math.abs(q)} ${sym} en ${acc} a mercado?`)) return; void run(`cl${acc}${sym}`, async () => { const r = await client!.tradeClose(newId(), acc, sym); return `${acc} ${sym}: cierre ${r.status} en ${r.ms} ms.`; }); };
-  const closeAll = () => { if (!confirm("¿CERRAR TODO?\n\nSe cancelan las órdenes y se cierran a mercado todas las posiciones de todas las cuentas. La copia queda detenida.")) return; void run("all", async () => { setRisk(await client!.killSwitch(true, "desde la vista de bolsillo", true, true)); return "Cierre total enviado y copia detenida."; }); };
-  const toggleKill = () => { const on = !risk?.kill_switch; if (on && !confirm("¿Detener la copia? No se copiará ni se operará hasta reanudar (las posiciones se quedan como están).")) return; void run("kill", async () => { setRisk(await client!.killSwitch(on, on ? "desde la vista de bolsillo" : undefined, false, false)); return on ? "Copia detenida." : "Copia reanudada."; }); };
-  const live = wsStatus === "open";
+  const be = async (acc: string, sym: string) => { if (!(await guard())) return; await run(`be${acc}${sym}`, async () => { const r = await client!.tradeProtect({ client_id: newId(), account: acc, symbol: sym, breakeven: true, last_price: lastOf(sym) }); return `${acc} ${sym}: stop en ${r.avg_price} (${r.ms} ms).`; }); };
+  const close = async (acc: string, sym: string, q: number) => { if (!(await guard())) return; if (!confirm(`¿Cerrar ${Math.abs(q)} ${sym} en ${acc} a mercado?`)) return; void run(`cl${acc}${sym}`, async () => { const r = await client!.tradeClose(newId(), acc, sym); return `${acc} ${sym}: cierre ${r.status} en ${r.ms} ms.`; }); };
+  const closeAll = async () => { if (!(await guard())) return; if (!confirm("¿CERRAR TODO?\n\nSe cancelan las órdenes y se cierran a mercado todas las posiciones de todas las cuentas. La copia queda detenida.")) return; void run("all", async () => { setRisk(await client!.killSwitch(true, "desde la vista de bolsillo", true, true)); return "Cierre total enviado y copia detenida."; }); };
+  const toggleKill = async () => { if (!(await guard())) return; const on = !risk?.kill_switch; if (on && !confirm("¿Detener la copia? No se copiará ni se operará hasta reanudar (las posiciones se quedan como están).")) return; void run("kill", async () => { setRisk(await client!.killSwitch(on, on ? "desde la vista de bolsillo" : undefined, false, false)); return on ? "Copia detenida." : "Copia reanudada."; }); };
+  const live = wsStatus === "open" && !readOnly;
   return (
     <div className="pocket" data-testid="pocket">
       <header className="pocket-head">
@@ -40,6 +40,7 @@ export function Pocket({ onRoute }: { onRoute: (r: Route) => void }) {
         <b className={`num ${total > 0 ? "ok" : total < 0 ? "bad" : ""}`} data-testid="pocket-pnl">{est && "≈ "}{signedMoney(total)}</b>
         {risk?.kill_switch && <span className="badge bad">copia detenida{risk.kill_switch_reason ? ` · ${risk.kill_switch_reason}` : ""}</span>}
         {risk?.day_closed && <span className="badge bad">día cerrado</span>}
+        {readOnly && <span className="badge">solo lectura</span>}
       </div>
       <section>
         <h3>Posiciones · {positions.length}</h3>
@@ -54,7 +55,7 @@ export function Pocket({ onRoute }: { onRoute: (r: Route) => void }) {
                 </div>
                 <div className="pocket-pos-btns">
                   <button className="small-btn" disabled={busy !== null || !live} onClick={() => void be(a.account_id, p.symbol)}>{busy === `be${a.account_id}${p.symbol}` ? "…" : "Breakeven"}</button>
-                  <button className="small-btn danger" disabled={busy !== null || !live} onClick={() => close(a.account_id, p.symbol, p.quantity)}>{busy === `cl${a.account_id}${p.symbol}` ? "…" : "Cerrar"}</button>
+                  <button className="small-btn danger" disabled={busy !== null || !live} onClick={() => void close(a.account_id, p.symbol, p.quantity)}>{busy === `cl${a.account_id}${p.symbol}` ? "…" : "Cerrar"}</button>
                 </div>
               </li>
             ))}
@@ -62,8 +63,8 @@ export function Pocket({ onRoute }: { onRoute: (r: Route) => void }) {
         )}
       </section>
       <div className="pocket-actions">
-        <button className={risk?.kill_switch ? "primary" : ""} disabled={busy !== null || !client} onClick={toggleKill} data-testid="pocket-kill">{risk?.kill_switch ? "REANUDAR COPIA" : "PAUSAR COPIA"}</button>
-        <button className="danger-solid" disabled={busy !== null || !client} onClick={closeAll} data-testid="pocket-closeall">CERRAR TODO</button>
+        <button className={risk?.kill_switch ? "primary" : ""} disabled={busy !== null || !client || readOnly} onClick={() => void toggleKill()} data-testid="pocket-kill">{risk?.kill_switch ? "REANUDAR COPIA" : "PAUSAR COPIA"}</button>
+        <button className="danger-solid" disabled={busy !== null || !client || readOnly} onClick={() => void closeAll()} data-testid="pocket-closeall">CERRAR TODO</button>
       </div>
       {msg && <p className="small pocket-msg" data-testid="pocket-msg">{msg}</p>}
       <footer className="muted tiny">

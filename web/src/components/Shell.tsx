@@ -19,7 +19,7 @@ const NAV: { id: Route; label: string; icon: IconName }[] = [
 
 /** Resumen siempre visible: P&L del día de las cuentas en juego, cuántas copian y el kill switch. */
 export function StatusStrip({ className = "" }: { className?: string }) {
-  const { client, accounts, rules, risk, health, prices, setRisk } = useStore();
+  const { client, accounts, rules, risk, health, prices, setRisk, guard, readOnly } = useStore();
   const [busy, setBusy] = useState(false);
   const master = health?.bridge.master_account ?? null;
   const copying = accounts.filter((a) => a.enabled && a.account_id !== master && rules.some((r) => r.enabled && r.follower_account.toLowerCase() === a.account_id.toLowerCase()));
@@ -31,6 +31,7 @@ export function StatusStrip({ className = "" }: { className?: string }) {
   async function toggleKill() {
     if (!client) return;
     const active = !risk?.kill_switch;
+    if (!(await guard())) return;
     if (active && !confirm("¿KILL SWITCH? Se bloquean todas las réplicas y se cierran a mercado las posiciones de todas las cuentas.")) return;
     setBusy(true);
     try { setRisk(await client.killSwitch(active, active ? "desde la barra de estado" : undefined, active, true)); }
@@ -44,7 +45,7 @@ export function StatusStrip({ className = "" }: { className?: string }) {
       </div>
       <div className="strip-item"><span className="stat-label">Copiando</span><b>{copying.length}</b></div>
       <div className="strip-item"><span className="stat-label">Posiciones</span><b className={open ? "warn" : ""}>{open}</b></div>
-      <button className={risk?.kill_switch ? "primary small-btn" : "danger-solid small-btn"} disabled={busy || !client} onClick={() => void toggleKill()}>
+      <button className={risk?.kill_switch ? "primary small-btn" : "danger-solid small-btn"} disabled={busy || !client || readOnly} onClick={() => void toggleKill()} title={readOnly ? "token de solo lectura" : undefined}>
         {risk?.kill_switch ? "Reanudar" : "DETENER"}
       </button>
     </div>

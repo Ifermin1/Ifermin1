@@ -6,12 +6,13 @@ import { Card, Empty } from "../components/ui";
 import type { Commissions, RiskLimit } from "../lib/api";
 import { NotifyCard } from "../components/NotifyCard";
 import { HubCard } from "../components/HubCard";
+import { SecurityCard } from "../components/SecurityCard";
 import { DrawdownMeter, ddTone } from "../components/AccountPanel";
 
 const MODE_LABEL: Record<string, string> = { intraday: "dinámico", eod: "EOD", closed: "cerrado", static: "estático" };
 
 export function Risk() {
-  const { client, risk, setRisk, accounts } = useStore();
+  const { client, risk, setRisk, accounts, guard } = useStore();
   const [account, setAccount] = useState("");
   const [maxLoss, setMaxLoss] = useState("0");
   const [maxProfit, setMaxProfit] = useState("0");
@@ -45,6 +46,7 @@ export function Risk() {
   const [msg, setMsg] = useState<string | null>(null);
   async function toggleKill() {
     const active = !risk?.kill_switch;
+    if (!(await guard())) return;
     if (active && !confirm(flattenOnKill
       ? `¿KILL SWITCH? Se bloquean todas las réplicas Y SE CIERRAN a mercado las posiciones de las seguidoras${flattenMaster ? " y de la maestra" : ""}.`
       : "¿KILL SWITCH? Se bloquean todas las réplicas (las posiciones abiertas se quedan).")) return;
@@ -53,6 +55,7 @@ export function Risk() {
     try { setRisk(await client!.killSwitch(active, reason, active && flattenOnKill, flattenMaster)); } finally { setBusy(false); }
   }
   async function flattenAll(includeMaster: boolean) {
+    if (!(await guard())) return;
     if (!confirm(includeMaster ? "¿CERRAR TODO, incluida la maestra? Cancela órdenes y cierra posiciones a mercado en todas las cuentas."
                                : "¿Cerrar todas las seguidoras? Cancela sus órdenes y cierra sus posiciones a mercado.")) return;
     setBusy(true); setMsg(null);
@@ -283,6 +286,8 @@ export function Risk() {
           <button className="primary">Guardar comisiones</button>
         </form>
       </Card>
+
+      <SecurityCard />
 
       <NotifyCard client={client} />
 

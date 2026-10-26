@@ -480,6 +480,18 @@ actualizar: NinjaScript Editor → F5).
 - Por API: `GET /api/report/weekly?day=AAAA-MM-DD&account=&tag=&format=html|json` y
   `GET /api/trades.csv?day_from=&day_to=&account=&tag=`, con el token en la cabecera.
 
+### Seguridad de la consola: PIN y token de solo lectura
+
+- **PIN local** (*Riesgo → Seguridad de la consola*): un PIN de 4 a 8 dígitos guardado solo en ese navegador. Bloquea la
+  consola tras los minutos sin uso que elijas y, con *pedir PIN antes de operar, cerrar o detener* marcado, lo pide antes
+  de cualquier botón que mueva dinero (COMPRAR/VENDER, cerrar, Cerrar todo, DETENER, igualar, breakeven desde el bolsillo).
+  Evita el toque accidental en el teléfono y que alguien use una consola abierta. Ponlo en cada teléfono o PC; no sustituye
+  al token.
+- **Token de solo lectura**: añade `API_READ_TOKEN=<otro token largo>` en `engine\.env` y reinicia el engine. Quien entre
+  con ese token ve todo (Inicio, Cuentas, Análisis, Auditoría, Coach IA) pero el engine rechaza cualquier orden, cierre o
+  cambio de configuración, y la consola lo avisa con una franja "Modo solo lectura" y los botones de operar desactivados.
+  Es el token que hay que dar a un asistente o a quien solo tenga que mirar.
+
 ### Hub: varios PCs o firmas en un solo sitio (opcional)
 
 Si tienes más de un PC de trading (o quieres el histórico de todas las cuentas junto), arranca el **hub** en cualquier

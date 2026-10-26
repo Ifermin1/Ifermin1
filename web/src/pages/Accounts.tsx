@@ -34,7 +34,7 @@ function Meter({ value, of, done, invert, text }: { value: number; of: number; d
 }
 
 export function Accounts() {
-  const { client, accounts, rules, setRules, risk, setRisk, health, audit, prices, refresh } = useStore();
+  const { client, accounts, rules, setRules, risk, setRisk, health, audit, prices, refresh, guard: pinGuard } = useStore();
   const detected = health?.bridge.master_account ?? null;
   const master = detected ?? "";
   const [q, setQ] = useState("");
@@ -116,6 +116,7 @@ export function Accounts() {
   }, enabled ? "Copia reanudada en las marcadas." : "Copia pausada en las marcadas (no se cierran posiciones).");
   const pauseAll = () => guard("__kill", async () => {
     const active = !risk?.kill_switch;
+    if (!(await pinGuard())) return;
     if (active && !confirm("¿Pausar la copia de TODAS las cuentas? No se cierra ninguna posición; ninguna entrada nueva se replica hasta reanudar.")) return;
     setRisk(await client!.killSwitch(active, active ? "pausa desde Cuentas" : undefined, false, false));
   });
@@ -181,17 +182,20 @@ export function Accounts() {
     await client!.setMaster(acc);
   });
   const flatten = (acc: string) => guard(acc, async () => {
+    if (!(await pinGuard())) return;
     if (!confirm(`¿CERRAR ${acc}?\n\nSe cancelan todas sus órdenes y se cierra la posición a mercado.`)) return;
     await client!.flatten(acc, "manual desde Cuentas");
   });
   const flattenMany = (ids: string[]) => guard("__bulk", async () => {
     const targets = ids.filter((id) => accounts.find((a) => a.account_id === id)?.open_positions.length);
     if (!targets.length) { setMsg("Ninguna de las marcadas tiene posición abierta."); return; }
+    if (!(await pinGuard())) return;
     if (!confirm(`¿CERRAR ${targets.length} cuentas a mercado?\n\n${targets.join(", ")}`)) return;
     const errors = await each(targets, async (id) => { await client!.flatten(id, "manual desde Cuentas (lote)"); });
     if (errors.length) throw new Error(errors.join("; "));
   }, "Posiciones cerradas.");
   const resync = (acc: string) => guard(acc, async () => {
+    if (!(await pinGuard())) return;
     if (!confirm(`¿Igualar ${acc} a la maestra?\n\nSe manda a mercado la diferencia de contratos.`)) return;
     const r = await client!.resync(acc);
     if (r.sent.length === 0) setMsg("Ya coincide con la maestra.");

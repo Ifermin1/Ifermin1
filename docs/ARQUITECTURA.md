@@ -93,7 +93,9 @@ scripts/                    Arranque en Windows
 
 ## 5. API
 
-Todas las rutas requieren `Authorization: Bearer <API_TOKEN>` (o `?token=` en el WebSocket).
+Todas las rutas requieren `Authorization: Bearer <API_TOKEN>` (o `?token=` en el WebSocket). Con `API_READ_TOKEN` (opcional)
+el mismo esquema da un rol de **solo lectura**: pasan los GET y las consultas de IA (`/api/ai/review|check-entry|ask`); el
+resto responde 403. `/api/health` devuelve `role` para que la consola se ponga en modo lectura.
 
 | Método | Ruta | Descripción |
 |---|---|---|

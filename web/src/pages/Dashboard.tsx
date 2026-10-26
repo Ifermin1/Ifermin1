@@ -12,7 +12,7 @@ import type { Route } from "../components/Shell";
 
 /** Inicio = sala de control: alertas, P&L del día, cuentas en juego y estado del puente. */
 export function Dashboard({ onRoute }: { onRoute?: (r: Route) => void } = {}) {
-  const { client, health, accounts, rules, audit, risk, prices, density, setRules } = useStore();
+  const { client, health, accounts, rules, audit, risk, prices, density, setRules, guard } = useStore();
   const [busy, setBusy] = useState<string | null>(null);
   const b = health?.bridge;
   const master = b?.master_account ?? null;
@@ -25,7 +25,8 @@ export function Dashboard({ onRoute }: { onRoute?: (r: Route) => void } = {}) {
   const lastFill = (acc: string) => audit.find((a) => a.event_type === "FOLLOWER_FILL" && a.target_account === acc);
   const lastReject = (acc: string) => audit.find((a) => a.event_type === "FOLLOWER_REJECTED" && a.target_account === acc);
   const flatten = async (acc: string) => {
-    if (!client || !confirm(`¿CERRAR ${acc}?\n\nSe cancelan todas sus órdenes y se cierra la posición a mercado.`)) return;
+    if (!client || !(await guard())) return;
+    if (!confirm(`¿CERRAR ${acc}?\n\nSe cancelan todas sus órdenes y se cierra la posición a mercado.`)) return;
     setBusy(acc);
     try { await client.flatten(acc, "manual desde inicio"); } catch (ex) { alert(ex instanceof Error ? ex.message : String(ex)); } finally { setBusy(null); }
   };

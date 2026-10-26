@@ -22,7 +22,7 @@ const fmtPx = (p: number, symbol: string) => { const t = tickSize(symbol); const
 const hhmmss = (t: number) => new Date(t).toLocaleTimeString("es-ES", { hour12: false });
 
 export function Trade() {
-  const { client, accounts, health, rules, prices, wsStatus, wsRtt, wsLastAt, audit, risk } = useStore();
+  const { client, accounts, health, rules, prices, wsStatus, wsRtt, wsLastAt, audit, risk, guard, readOnly } = useStore();
   const master = health?.bridge.master_account ?? null;
   const [status, setStatus] = useState<TradeStatus | null>(null);
   const [trails, setTrails] = useState<Trails | null>(null);
@@ -67,6 +67,7 @@ export function Trade() {
     if (!client || !account || !symbol || !canTrade) return;
     const up = Number(ocoUp) || 0, down = Number(ocoDown) || 0;
     if (!up || !down || up <= down) { setMsg("Indica el stop de compra por encima y el de venta por debajo del precio."); return; }
+    if (!(await guard())) return;
     if (confirmFirst && !confirm(`¿Enviar OCO de entrada en ${account}?\n\nCOMPRA ${qty} ${symbol} stop ${up} / VENTA ${qty} ${symbol} stop ${down}${Number(sl) ? ` · SL ${sl} ticks` : ""}${Number(tp) ? ` · TP ${tp} ticks` : ""}${trailMode ? ` · trailing ${trailMode}` : ""}\nLa que ejecute cancela la otra.`)) return;
     setBusy("oco"); setMsg(null);
     try {
@@ -122,9 +123,9 @@ export function Trade() {
   const last = prices[root(symbol)]?.last ?? null;
   const tick = tickSize(symbol || "ES");
   const stale = wsStatus !== "open" || (wsLastAt > 0 && now - wsLastAt > 20000);
-  const canTrade = !!client && !stale && !!status?.ready;
-  const canClose = !!client && !stale && !!status && (status.ready || /kill switch/i.test(status.reason ?? ""));
-  const blockReason = !client ? "sin sesión" : wsStatus !== "open" ? "sin conexión en vivo con el engine (reconectando…)" : stale ? "el engine no envía datos desde hace más de 20 s" : status?.reason ?? null;
+  const canTrade = !!client && !stale && !!status?.ready && !readOnly;
+  const canClose = !!client && !stale && !!status && (status.ready || /kill switch/i.test(status.reason ?? "")) && !readOnly;
+  const blockReason = !client ? "sin sesión" : readOnly ? "token de solo lectura: esta sesión no puede operar" : wsStatus !== "open" ? "sin conexión en vivo con el engine (reconectando…)" : stale ? "el engine no envía datos desde hace más de 20 s" : status?.reason ?? null;
 
   const bump = (v: string, dir: number, setter: (s: string) => void) => { const base = Number(v) || last || 0; setter(fmtPx(Math.round((base + dir * tick) / tick) * tick, symbol)); };
   const track = (s: Sent) => setSent((l) => [s, ...l.filter((x) => x.cid !== s.cid)].slice(0, 30));
@@ -157,6 +158,7 @@ export function Trade() {
   };
   const submit = async (action: "BUY" | "SELL") => {
     if (!account || !symbol || !canTrade) return;
+    if (!(await guard())) return;
     if (checkAlways) {
       const c = await runCheck(action);
       if (c && c.verdict === "red" && !confirm(`SEMÁFORO EN ROJO:\n\n${c.reasons.map((r) => "· " + r.text).join("\n")}\n\n¿Enviar igualmente?`)) return;
@@ -171,14 +173,16 @@ export function Trade() {
     void send(order);
   };
   const retry = (s: Sent) => void send(s.order, s.order.note === "close");
-  const closePos = (acc: string, sym: string, q: number, part?: number) => {
+  const closePos = async (acc: string, sym: string, q: number, part?: number) => {
     const n = part && part > 0 && part < Math.abs(q) ? part : Math.abs(q);
-    if (!canClose || !confirm(n < Math.abs(q) ? `¿Cerrar ${n} de ${Math.abs(q)} ${sym} en ${acc} a mercado? El stop y el objetivo se ajustan a los ${Math.abs(q) - n} que quedan.` : `¿Cerrar ${Math.abs(q)} ${sym} en ${acc} a mercado? Se cancelan su stop y su objetivo.`)) return;
+    if (!canClose || !(await guard())) return;
+    if (!confirm(n < Math.abs(q) ? `¿Cerrar ${n} de ${Math.abs(q)} ${sym} en ${acc} a mercado? El stop y el objetivo se ajustan a los ${Math.abs(q) - n} que quedan.` : `¿Cerrar ${Math.abs(q)} ${sym} en ${acc} a mercado? Se cancelan su stop y su objetivo.`)) return;
     void send({ client_id: newId(), account: acc, symbol: sym, action: q > 0 ? "SELL" : "BUY", quantity: n, order_type: "MARKET", note: "close" }, true);
   };
-  const closeAsk = (acc: string, sym: string, q: number) => { const v = prompt(`¿Cuántos contratos cerrar de ${Math.abs(q)} ${sym}?`, String(Math.max(1, Math.floor(Math.abs(q) / 2)))); const n = Number(v); if (n > 0) closePos(acc, sym, q, n); };
+  const closeAsk = (acc: string, sym: string, q: number) => { const v = prompt(`¿Cuántos contratos cerrar de ${Math.abs(q)} ${sym}?`, String(Math.max(1, Math.floor(Math.abs(q) / 2)))); const n = Number(v); if (n > 0) void closePos(acc, sym, q, n); };
   const flattenAcc = async (acc: string) => {
-    if (!client || !confirm(`¿CERRAR TODO en ${acc}?\n\nSe cancelan sus órdenes y se cierran todas sus posiciones a mercado.`)) return;
+    if (!client || !(await guard())) return;
+    if (!confirm(`¿CERRAR TODO en ${acc}?\n\nSe cancelan sus órdenes y se cierran todas sus posiciones a mercado.`)) return;
     setBusy("flat-" + acc);
     try { await client.flatten(acc, "desde Operar"); setMsg(`${acc}: cierre enviado.`); } catch (ex) { setMsg(ex instanceof Error ? ex.message : String(ex)); } finally { setBusy(null); }
   };

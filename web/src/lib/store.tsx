@@ -3,6 +3,7 @@ import { show as notifyShow } from "./notify";
 import { ApiError, makeClient, loadSession, saveSession, type Account, type AuditEvent, type Client, type Health, type Price,
          type RiskState, type Rule, type Session } from "./api";
 import { root } from "./format";
+import { hashPin, loadLock, saveLock, type LockConfig } from "./lock";
 
 type WsStatus = "connecting" | "open" | "closed";
 export type Density = "cozy" | "compact";
@@ -18,6 +19,11 @@ type Store = {
   density: Density; setDensity: (d: Density) => void;
   theme: Theme; setTheme: (t: Theme) => void;
   refresh: () => Promise<void>; setRules: (r: Rule[]) => void; setRisk: (r: RiskState) => void;
+  readOnly: boolean;                           // sesión con el token de solo lectura: el engine rechaza cualquier acción
+  lock: { config: LockConfig; locked: boolean; asking: boolean };
+  setLock: (c: LockConfig) => void;
+  unlock: (pin: string | null) => Promise<boolean>;   // null = cancelar la petición de PIN
+  guard: () => Promise<boolean>;               // antes de una acción con dinero: pide el PIN si está configurado; false = no seguir
 };
 
 const Ctx = createContext<Store | null>(null);
@@ -51,6 +57,36 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return !!msg;
   };
   const [density, setDensityState] = useState<Density>(loadDensity);
+  // ---- candado (PIN local) ----
+  const [lockCfg, setLockCfg] = useState<LockConfig>(loadLock);
+  const [locked, setLocked] = useState(false);
+  const [asking, setAsking] = useState(false);
+  const askRef = useRef<((ok: boolean) => void) | null>(null);
+  const lastActivity = useRef(Date.now());
+  const lockRef = useRef(lockCfg); lockRef.current = lockCfg;
+  const setLock = useCallback((c: LockConfig) => { setLockCfg(c); saveLock(c); if (!c.hash) setLocked(false); }, []);
+  useEffect(() => {
+    const touch = () => { lastActivity.current = Date.now(); };
+    for (const ev of ["pointerdown", "keydown", "touchstart"]) window.addEventListener(ev, touch, { passive: true });
+    const t = window.setInterval(() => {
+      const c = lockRef.current;
+      if (c.hash && c.minutes > 0 && Date.now() - lastActivity.current > c.minutes * 60000) setLocked(true);
+    }, 5000);
+    return () => { for (const ev of ["pointerdown", "keydown", "touchstart"]) window.removeEventListener(ev, touch); window.clearInterval(t); };
+  }, []);
+  const unlock = useCallback(async (pin: string | null) => {
+    const c = lockRef.current;
+    if (pin === null) { setAsking(false); askRef.current?.(false); askRef.current = null; return false; }
+    const ok = !!c.hash && (await hashPin(pin, c.salt)) === c.hash;
+    if (ok) { lastActivity.current = Date.now(); setLocked(false); setAsking(false); askRef.current?.(true); askRef.current = null; }
+    return ok;
+  }, []);
+  const guard = useCallback(() => {
+    const c = lockRef.current;
+    if (!c.hash || !c.requirePin) return Promise.resolve(true);
+    askRef.current?.(false);
+    return new Promise<boolean>((resolve) => { askRef.current = resolve; setAsking(true); });
+  }, []);
   const wsRef = useRef<WebSocket | null>(null);
   const priceBuf = useRef<PriceMap>({});   // los ticks llegan varias veces por segundo: se vuelcan al estado cada 400 ms
 
@@ -119,7 +155,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [client, refresh]);
 
   const value: Store = { session, client, login, logout, health, accounts, rules, audit, risk, prices, wsStatus, error, wsRtt, wsLastAt, authError,
-                         density, setDensity, theme, setTheme, refresh, setRules, setRisk };
+                         density, setDensity, theme, setTheme, refresh, setRules, setRisk,
+                         readOnly: health?.role === "read", lock: { config: lockCfg, locked, asking }, setLock, unlock, guard };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

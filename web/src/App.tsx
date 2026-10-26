@@ -10,19 +10,22 @@ import { Accounts } from "./pages/Accounts";
 import { Risk } from "./pages/Risk";
 import { Audit } from "./pages/Audit";
 import { Pocket } from "./pages/Pocket";
+import { LockOverlay } from "./components/LockOverlay";
 
 const ROUTES: Route[] = ["dashboard", "trade", "performance", "analysis", "accounts", "risk", "audit", "pocket"];
 const fromHash = (): Route => { const h = window.location.hash.replace("#", "").split("/")[0] as Route; return ROUTES.includes(h) ? h : "dashboard"; };
 
 function Inner() {
-  const { session, error, authError, logout } = useStore();
+  const { session, error, authError, logout, readOnly } = useStore();
   const [route, setRoute] = useState<Route>(fromHash);
   useEffect(() => { const f = () => setRoute(fromHash()); window.addEventListener("hashchange", f); return () => window.removeEventListener("hashchange", f); }, []);
   const go = (r: Route) => { window.location.hash = r; setRoute(r); };
   if (!session) return <Login />;
-  if (route === "pocket") return <Pocket onRoute={go} />;
+  if (route === "pocket") return <><LockOverlay /><Pocket onRoute={go} /></>;
   return (
     <Shell route={route} onRoute={go}>
+      <LockOverlay />
+      {readOnly && <div className="banner warn" data-testid="readonly-banner">Modo <b>solo lectura</b>: has entrado con el token de lectura. Puedes ver todo, pero el engine rechazará cualquier orden, cierre o cambio de configuración.</div>}
       {authError && <div className="banner bad" data-testid="auth-error" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}><span>{authError}</span><button className="chip-btn" onClick={logout} style={{ marginLeft: "auto" }}>Salir y volver a entrar</button></div>}
       {error && !authError && <div className="banner bad">Sin conexión con el engine: {error}</div>}
       {route === "dashboard" && <Dashboard onRoute={go} />}

@@ -73,6 +73,8 @@ def health(request: Request):
         "web_build": web_build,          # cuándo se compiló la consola que sirve el engine (para detectar cachés viejas)
         "public_url": public_url(c),     # URL del túnel (scripts/publish.ps1) o PUBLIC_URL; None si no está publicada
         "token_weak": weak_token(c.settings.API_TOKEN),
+        "role": getattr(request.state, "role", "full"),      # "read" = token de solo lectura: la consola se pone en modo lectura
+        "read_token_set": bool(c.settings.API_READ_TOKEN),
         "addon_outdated": outdated,
         "min_addon_version": c.settings.MIN_ADDON_VERSION,
         "bridge": c.accounts.health(),

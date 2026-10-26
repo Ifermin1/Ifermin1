@@ -87,6 +87,7 @@ Si *Cuentas* queda vacío, el addon no está respondiendo en 5557: revisa que Ni
 ## Protecciones
 
 - **Grupos y presets**: etiquetas por cuenta (50K, PA…) con filtro y acciones en bloque, presets de riesgo (Conservador/Moderado/Agresivo, editables) y una tarjeta de *Recomendaciones* en Inicio con la acción de un clic (pausar, pasar a conservador, igualar, cerrar, poner perfil).
+- **Seguridad**: PIN local en la consola (bloqueo por inactividad y antes de operar) y token de solo lectura (`API_READ_TOKEN`) para mirar sin poder operar.
 - **Hub (opcional)**: servidor central `hub/` que reúne varios engines (operaciones, estado, avisos) con cola local y reintentos en cada engine; página y API de resumen de solo lectura.
 - **Informe semanal y CSV**: informe imprimible (PDF desde el navegador) por cuenta, grupo o conjunto con resultado, por día e instrumento, retiros y pagos de la semana y reglas del coach; exportación CSV lista para Excel.
 - **Móvil**: avisos push al teléfono con la consola cerrada (Web Push, sin Telegram), órdenes por Telegram (`/estado`, `/posiciones`, `/breakeven`, `/pausar`, `/reanudar`, `/cerrar` con confirmación) y vista de bolsillo `#pocket` con P&L, posiciones y los botones de cortar.

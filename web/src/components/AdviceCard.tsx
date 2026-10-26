@@ -10,7 +10,7 @@ import type { Route } from "./Shell";
 const TONE: Record<Advice["severity"], string> = { bad: "bad", warn: "warn", ok: "ok", info: "info" };
 
 export function AdviceCard({ onRoute }: { onRoute?: (r: Route) => void }) {
-  const { client, rules, health, refresh, setRisk } = useStore();
+  const { client, rules, health, refresh, setRisk, guard } = useStore();
   const [data, setData] = useState<AdviceList | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -29,7 +29,7 @@ export function AdviceCard({ onRoute }: { onRoute?: (r: Route) => void }) {
       else if (act.type === "link" && master) { await client.link(a.account_id, master, 1, true); setMsg(`${a.account_id}: vinculada a ${master}.`); }
       else if (act.type === "multiplier" && master) { await client.link(a.account_id, master, act.value ?? 1, link?.enabled ?? true); setMsg(`${a.account_id}: multiplicador ×${act.value ?? 1}.`); }
       else if (act.type === "resync") { await client.resync(a.account_id); setMsg(`${a.account_id}: orden de igualar enviada.`); }
-      else if (act.type === "flatten") { if (!confirm(`¿Cerrar ${a.account_id}? Se cancelan sus órdenes y se cierra a mercado.`)) return; await client.flatten(a.account_id, "recomendación"); setMsg(`${a.account_id}: cierre enviado.`); }
+      else if (act.type === "flatten") { if (!(await guard())) return; if (!confirm(`¿Cerrar ${a.account_id}? Se cancelan sus órdenes y se cierra a mercado.`)) return; await client.flatten(a.account_id, "recomendación"); setMsg(`${a.account_id}: cierre enviado.`); }
       else if (act.type === "profile") { const r = await client.autoRisk(a.account_id, true); setMsg(r.applied.length ? `${a.account_id}: perfil ${r.applied[0].firm} ${r.applied[0].size / 1000}K aplicado (${r.applied[0].contracts} contratos).` : `${a.account_id}: no se pudo deducir el plan; ponlo en Cuentas → Prop firm.`); setRisk(await client.risk()); }
       else if (act.type === "resume") { onRoute?.("risk"); return; }
       await refresh(); await load();

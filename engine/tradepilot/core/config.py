@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000
     API_TOKEN: str = "cambiame"
+    # Token de SOLO LECTURA (opcional): permite ver todo (salud, cuentas, auditoría, análisis, IA de consulta) pero el engine
+    # rechaza con él cualquier orden, cierre o cambio de configuración. Para asistentes o para mirar desde el teléfono sin riesgo.
+    API_READ_TOKEN: str = ""
     CORS_ORIGINS: str = "*"
     # URL pública de la consola (túnel). Si está vacía se lee de PUBLIC_URL_FILE, que escribe scripts/publish.ps1.
     PUBLIC_URL: str = ""

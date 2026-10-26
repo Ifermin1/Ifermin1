@@ -37,6 +37,19 @@ def _valid(token: str | None, expected: str) -> bool:
     return bool(token) and secrets.compare_digest(token, expected)
 
 
+def role_of(token: str | None, settings) -> str | None:
+    """'full' con API_TOKEN, 'read' con API_READ_TOKEN (si está definido), None si no vale."""
+    if _valid(token, settings.API_TOKEN):
+        return "full"
+    if settings.API_READ_TOKEN and _valid(token, settings.API_READ_TOKEN):
+        return "read"
+    return None
+
+
+# Con el token de solo lectura solo pasan los GET y estas consultas que van por POST porque llevan cuerpo (no cambian nada).
+READ_ONLY_POSTS = {"/api/ai/review", "/api/ai/check-entry", "/api/ai/ask"}
+
+
 def _note(req, ok: bool, token: str | None = None) -> str | None:
     """Devuelve None si se puede seguir; si no, el motivo ("locked" o "invalid")."""
     ip = client_ip(req)
@@ -69,11 +82,15 @@ def _note(req, ok: bool, token: str | None = None) -> str | None:
 
 async def require_token(request: Request, creds: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> None:
     token = creds.credentials if creds else request.query_params.get("token")
-    why = _note(request, _valid(token, _expected(request)), token)
+    role = role_of(token, request.app.state.container.settings)
+    why = _note(request, role is not None, token)
     if why == "locked":
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Demasiados intentos: espera unos minutos")
     if why == "invalid":
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token inválido")
+    request.state.role = role
+    if role == "read" and request.method != "GET" and request.url.path not in READ_ONLY_POSTS:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Token de solo lectura: esta acción no está permitida")
 
 
 def ws_token_ok(ws: WebSocket) -> bool:
@@ -81,4 +98,4 @@ def ws_token_ok(ws: WebSocket) -> bool:
     if not token:
         auth = ws.headers.get("authorization", "")
         token = auth.removeprefix("Bearer ").strip() or None
-    return _note(ws, _valid(token, _expected(ws)), token) is None
+    return _note(ws, role_of(token, ws.app.state.container.settings) is not None, token) is None
