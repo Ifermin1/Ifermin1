@@ -87,6 +87,7 @@ Si *Cuentas* queda vacío, el addon no está respondiendo en 5557: revisa que Ni
 ## Protecciones
 
 - **Grupos y presets**: etiquetas por cuenta (50K, PA…) con filtro y acciones en bloque, presets de riesgo (Conservador/Moderado/Agresivo, editables) y una tarjeta de *Recomendaciones* en Inicio con la acción de un clic (pausar, pasar a conservador, igualar, cerrar, poner perfil).
+- **Diagnóstico**: doctor de la instalación (consola y `python -m tradepilot.doctor`) y zip de diagnóstico con logs, auditoría y salud, con tokens y claves tachados.
 - **Copias y configuración**: copia diaria de la base con rotación e integridad al arrancar; exportar/importar la configuración (sin secretos) para otro PC o tras reinstalar.
 - **Vigilante**: detecta PC suspendido o reloj cambiado (resincroniza y reconcilia), modo degradado sin addon con recordatorios al teléfono, mercado abierto sin datos de precio; el engine se reinicia solo si muere.
 - **Reconciliación**: al arrancar y a petición, contrasta engine y bróker (órdenes a medias, posiciones sin stop, desincronización) y lo ofrece con botón; las órdenes manuales, las salidas propias y los trailings pendientes sobreviven a un reinicio.

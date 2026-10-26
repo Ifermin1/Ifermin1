@@ -480,6 +480,20 @@ actualizar: NinjaScript Editor → F5).
 - Por API: `GET /api/report/weekly?day=AAAA-MM-DD&account=&tag=&format=html|json` y
   `GET /api/trades.csv?day_from=&day_to=&account=&tag=`, con el token en la cabecera.
 
+### Diagnóstico en un clic y doctor (Riesgo → Revisión de la instalación)
+
+- **Doctor**: revisa la instalación y dice qué está mal y cómo arreglarlo: versión de Python, `.env`, modo, fuerza del
+  token, engine y addon escuchando en sus puertos, consola compilada y su antigüedad, base de datos íntegra, copias de
+  seguridad, espacio en disco, tamaño de los logs, librerías opcionales, clave de IA, reglas que apuntan a cuentas que
+  NinjaTrader nunca reportó y seguidoras sin límites. También desde el PC, sin consola:
+  `cd engine; .\.venv\Scripts\python -m tradepilot.doctor`.
+- **Guardar diagnóstico (zip)**: un archivo con logs (últimos 2 MB de los dos últimos días), auditoría de 24 h, salud del
+  puente, riesgo, vigilante, copias, hub, última reconciliación, cuentas, reglas, órdenes manuales del día, el informe del
+  doctor y las claves del `.env` **con los valores de tokens y claves tachados** (`***`). Es lo que hay que mandar cuando
+  pides ayuda. Solo con el token completo; queda en Auditoría (`DIAGNOSTICS`).
+- Los logs del engine están en `engine\logs` (un fichero por día, se rotan a 100 MB y se conservan 10 días) y los
+  reinicios del supervisor en `engine\logs\supervisor.log`.
+
 ### Copias de seguridad y configuración (Riesgo → Copias de seguridad y configuración)
 
 - **Copias de la base de datos**: el engine hace una copia consistente al día (y al arrancar si la última tiene más de un

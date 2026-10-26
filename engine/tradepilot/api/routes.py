@@ -385,6 +385,29 @@ def stats_analysis(request: Request, day_from: str | None = None, day_to: str | 
     return c.performance.analysis(d0, d1, account or None)
 
 
+@router.get("/doctor")
+def doctor_checks(request: Request):
+    """Revisión de la instalación (lo mismo que `python -m tradepilot.doctor`): nivel ok/warn/bad/info por comprobación."""
+    from tradepilot import doctor
+    c = _c(request)
+    checks = doctor.run_checks(c.settings, store=c.store, accounts=c.accounts, replication=c.replication, risk=c.risk, in_engine=True)
+    return {"checks": checks, "counts": doctor.summary(checks)}
+
+
+@router.get("/diagnostics.zip")
+def diagnostics_zip(request: Request):
+    """Zip de diagnóstico sin secretos (solo con el token completo)."""
+    from fastapi.responses import Response
+    from tradepilot.services.diagnostics import build_zip
+    c = _c(request)
+    if getattr(request.state, "role", "full") != "full":
+        raise HTTPException(403, "Token de solo lectura: esta descarga no está permitida")
+    from datetime import datetime
+    data = build_zip(c)
+    c.audit.log("DIAGNOSTICS", f"Zip de diagnóstico generado ({len(data) // 1024} KB)")
+    return Response(data, media_type="application/zip", headers={"Content-Disposition": f"attachment; filename=tradepilotx-diagnostico-{datetime.now():%Y%m%d-%H%M}.zip"})
+
+
 @router.get("/backup")
 def backup_state(request: Request):
     """Copias de seguridad de la base de datos: lista, última, integridad."""

@@ -752,3 +752,6 @@ table.trades tbody tr.sel td { background: var(--hl); box-shadow: inset 0 0 0 1p
 .lock-card input { font-size: 24px; letter-spacing: 8px; text-align: center; padding: 10px; }
 
 .backup-list { list-style: none; margin: 8px 0 0; padding: 0; font-size: 12px; } .backup-list li { display: flex; gap: 12px; padding: 3px 0; border-bottom: 1px solid var(--line); } .backup-list li .link { margin-left: auto; }
+
+.doctor-list { list-style: none; margin: 0; padding: 0; font-size: 13px; display: flex; flex-direction: column; gap: 4px; } .doctor-list li { display: flex; gap: 8px; align-items: baseline; }
+.doctor-icon { width: 16px; text-align: center; font-weight: 800; } .doctor-list li.bad .doctor-icon { color: var(--bad); } .doctor-list li.warn .doctor-icon { color: var(--warn); } .doctor-list li.ok .doctor-icon { color: var(--ok); }

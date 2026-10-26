@@ -110,6 +110,7 @@ resto responde 403. `/api/health` devuelve `role` para que la consola se ponga e
 | POST | `/api/ai/review` | `{day, force}` revisión de la sesión (IA si hay clave, si no por reglas), cacheada por día |
 | POST | `/api/ai/check-entry` | Semáforo de una orden: `{verdict: green|amber|red, reasons[]}` sin IA (ms); `ai: true` añade la opinión del modelo |
 | POST | `/api/ai/ask` | Pregunta en lenguaje natural sobre las operaciones de los últimos N días (requiere clave de IA) |
+| GET | `/api/doctor` · `/api/diagnostics.zip` | Revisión de la instalación y zip de diagnóstico sin secretos (zip solo con token completo) |
 | GET/POST | `/api/backup` · `/api/backup/run` · `/api/backup/download?name=` | Copias de la base (lista, integridad, copia ahora, descarga solo con token completo) |
 | GET/POST | `/api/config/export` · `/api/config/import` | Configuración sin secretos, exportar e importar |
 | GET/POST | `/api/reconcile` · `/api/reconcile/run` | Informe de reconciliación (órdenes a medias, posiciones sin stop, entradas pendientes, desincronización, trailing sin posición) |

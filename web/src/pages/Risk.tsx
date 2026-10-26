@@ -8,6 +8,7 @@ import { NotifyCard } from "../components/NotifyCard";
 import { HubCard } from "../components/HubCard";
 import { SecurityCard } from "../components/SecurityCard";
 import { MaintenanceCard } from "../components/MaintenanceCard";
+import { DoctorCard } from "../components/DoctorCard";
 import { DrawdownMeter, ddTone } from "../components/AccountPanel";
 
 const MODE_LABEL: Record<string, string> = { intraday: "dinámico", eod: "EOD", closed: "cerrado", static: "estático" };
@@ -295,6 +296,8 @@ export function Risk() {
       <HubCard client={client} />
 
       <MaintenanceCard client={client} />
+
+      <DoctorCard client={client} />
 
       <Card title="Límites por cuenta">
         <form className="rule-form" id="limit-form" onSubmit={save}>
