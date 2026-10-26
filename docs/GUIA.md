@@ -480,6 +480,24 @@ actualizar: NinjaScript Editor → F5).
 - Por API: `GET /api/report/weekly?day=AAAA-MM-DD&account=&tag=&format=html|json` y
   `GET /api/trades.csv?day_from=&day_to=&account=&tag=`, con el token en la cabecera.
 
+### Vigilante: suspensión, modo degradado y mercado sin datos
+
+El engine se vigila a sí mismo cada 10 segundos:
+
+- **PC suspendido o reloj cambiado** (`ENGINE_RESUMED`): si el reloj avanzó mucho más que el tiempo que el engine estuvo
+  despierto (el portátil durmió, hibernó, o alguien cambió la hora), vuelve a sincronizar con NinjaTrader y reconcilia.
+- **Modo degradado** (`DEGRADED_ON` / `DEGRADED_OFF`): en modo NinjaTrader, si el addon deja de latir o el puente cae más
+  de 30 s, la consola muestra una franja roja. En ese estado no se copia ni se puede operar o cerrar desde la consola
+  (sin addon no hay camino al bróker): hay que ir a NinjaTrader. Cada 10 minutos (`ADDON_STILL_DOWN`) te recuerda por
+  Telegram/push que sigue caído y qué posiciones quedan sin vigilancia.
+- **Sin datos de mercado** (`NO_TICKS` / `TICKS_BACK`): con NinjaTrader conectado y el mercado abierto (futuros CME:
+  domingo 18:00 a viernes 17:00, hora de Nueva York, con pausa diaria 17:00-18:00), si no llega ningún precio en 3
+  minutos avisa: casi siempre es NinjaTrader desconectado del proveedor de datos (*Control Center → Connections*).
+- **Reinicio automático**: `scripts\run_engine.ps1` (y la tarea programada) reinician el engine a los 5 s si muere por un
+  error, y lo anotan en `engine\logs\supervisor.log`. Ctrl+C lo para de verdad.
+
+Los tiempos se ajustan en `engine\.env`: `WATCHDOG_DEGRADED_AFTER_S`, `WATCHDOG_NO_TICKS_AFTER_S`, `WATCHDOG_REMIND_S`.
+
 ### Reconciliación: qué pasa cuando el engine arranca
 
 Nada más sincronizar con NinjaTrader por primera vez (y cuando pulses *Volver a comprobar* en la tarjeta **Reconciliación**

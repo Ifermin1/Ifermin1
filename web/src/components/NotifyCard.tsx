@@ -8,7 +8,7 @@ import * as push from "../lib/push";
 const GROUPS: { label: string; hint: string; types: string[] }[] = [
   { label: "Límites y protecciones", hint: "pérdida diaria, objetivo, drawdown, kill switch, cierres", types: ["DAILY_LOSS_LIMIT", "DAILY_LOSS_WARNING", "DAILY_PROFIT_TARGET", "DAILY_PROFIT_WARNING", "DRAWDOWN_LIMIT", "DRAWDOWN_WARNING", "KILL_SWITCH_ON", "KILL_SWITCH_OFF", "FLATTEN", "SCHEDULED_FLATTEN", "NAKED_CLOSE"] },
   { label: "Problemas de copia", hint: "rechazos, cuenta bloqueada, desincronización, entradas perdidas", types: ["FOLLOWER_REJECTED", "ACCOUNT_LOCKED", "DESYNC", "RESYNC", "OVERCLOSE_FIX", "ENTRY_MISSED", "BLOCKED", "TRIMMED"] },
-  { label: "Addon y conexión", hint: "sin heartbeat, addon caído o reiniciado, mensajes perdidos, errores", types: ["ADDON_SILENT", "ADDON_DOWN", "ADDON_BACK", "ADDON_RESTART", "GAP", "ERROR"] },
+  { label: "Addon y conexión", hint: "sin heartbeat, addon caído o reiniciado, mensajes perdidos, errores", types: ["ADDON_SILENT", "ADDON_DOWN", "ADDON_BACK", "ADDON_RESTART", "GAP", "ERROR", "DEGRADED_ON", "DEGRADED_OFF", "ADDON_STILL_DOWN", "NO_TICKS", "TICKS_BACK", "ENGINE_RESUMED"] },
   { label: "Cada operación", hint: "cada fill de una seguidora y cada operación del maestro (muchos mensajes)", types: ["FOLLOWER_FILL", "MASTER_RECEIVED"] },
 ];
 

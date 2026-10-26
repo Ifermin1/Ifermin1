@@ -4,6 +4,7 @@
 export type Health = {
   app: string; mode: "mock" | "ninja"; addon_outdated: boolean; min_addon_version: string; web_build: string | null;
   public_url: string | null; token_weak: boolean; role?: "full" | "read"; read_token_set?: boolean;
+  watchdog?: { degraded: boolean; degraded_since: string | null; no_ticks: boolean; market_open: boolean; last_tick_age_s: number | null; last_resume: { at: string; kind: string; gap_s: number } | null; loop_lag_ms: number } | null;
   bridge: { mode: string; connected: boolean; last_msg_in: string | null; last_msg_out: string | null;
             last_sync: string | null; last_heartbeat: string | null; master_account: string | null; addon_version: string | null; error_count: number; master_feed_up: boolean; follower_feed_up: boolean; sync_up: boolean };
   risk: RiskState; stats: { events_in: number; orders_out: number; blocked: number; errors: number; rejected: number; fills: number; duplicates: number;

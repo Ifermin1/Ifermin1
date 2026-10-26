@@ -46,4 +46,17 @@ if (-not (Get-NetFirewallRule -DisplayName "TradePilot X" -ErrorAction SilentlyC
     }
 }
 
-.\.venv\Scripts\python -m tradepilot.main
+# Supervisor: si el engine muere por un error (código de salida distinto de 0) se reinicia a los 5 s y se anota en engine\logs.
+# Ctrl+C o un cierre limpio (código 0) lo paran de verdad.
+$crashes = 0
+while ($true) {
+    .\.venv\Scripts\python -m tradepilot.main
+    $code = $LASTEXITCODE
+    if ($code -eq 0 -or $null -eq $code) { break }
+    $crashes++
+    $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    New-Item -ItemType Directory -Force -Path "logs" | Out-Null
+    Add-Content -Path "logs\supervisor.log" -Value "$stamp engine terminó con código $code (caída $crashes): reinicio en 5 s"
+    Write-Host "El engine se cayó (código $code). Reiniciando en 5 s... (Ctrl+C para parar)" -ForegroundColor Red
+    Start-Sleep -Seconds 5
+}

@@ -79,6 +79,7 @@ def health(request: Request):
         "min_addon_version": c.settings.MIN_ADDON_VERSION,
         "bridge": c.accounts.health(),
         "risk": c.risk.state(),
+        "watchdog": c.watchdog.state() if c.watchdog is not None else None,
         "stats": c.replication.stats,
         "ws_clients": request.app.state.ws_hub.count,
     }

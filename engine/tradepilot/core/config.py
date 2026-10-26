@@ -70,6 +70,10 @@ class Settings(BaseSettings):
     HUB_TOKEN: str = ""
     HUB_NODE: str = ""                      # nombre de este engine en el hub; vacío = nombre del PC
     HUB_INTERVAL_S: int = 30
+    # Vigilante: modo degradado tras N s sin addon, aviso sin datos de mercado tras N s con el mercado abierto, recordatorio cada N s
+    WATCHDOG_DEGRADED_AFTER_S: int = 30
+    WATCHDOG_NO_TICKS_AFTER_S: int = 180
+    WATCHDOG_REMIND_S: int = 600
     MOCK_DEMO_HISTORY: bool = True          # simulador: genera un mes de operaciones inventadas para el calendario (no en :memory:)
 
 

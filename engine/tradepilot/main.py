@@ -19,8 +19,15 @@ def run() -> None:
     server = uvicorn.Server(config)
     if sys.platform == "win32":
         logger.info("Windows: usando SelectorEventLoop (requerido por ZMQ)")
-    with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop) as runner:
-        runner.run(server.serve())
+    try:
+        with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop) as runner:
+            runner.run(server.serve())
+    except KeyboardInterrupt:
+        logger.info("Engine detenido a mano")
+    except Exception as exc:
+        # el supervisor (scripts/run_engine.ps1) reinicia el engine cuando el código de salida no es 0
+        logger.exception(f"El engine se ha caído: {exc}")
+        sys.exit(3)
 
 
 if __name__ == "__main__":

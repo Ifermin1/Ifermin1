@@ -99,7 +99,7 @@ resto responde 403. `/api/health` devuelve `role` para que la consola se ponga e
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| GET | `/api/health` | Modo, salud del puente, estado de riesgo, contadores |
+| GET | `/api/health` | Modo, salud del puente, estado de riesgo, contadores, rol del token y estado del vigilante (`watchdog`) |
 | GET | `/api/accounts` | Cuentas sincronizadas |
 | GET/POST | `/api/rules` | Listar / crear reglas |
 | PATCH/DELETE | `/api/rules/{id}` | Editar (activar, multiplicador…) / borrar |
