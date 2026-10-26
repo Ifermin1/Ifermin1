@@ -198,6 +198,17 @@ hub no responde la cola se conserva y se reintenta (tope 5000 elementos). El hub
 y una página mínima con el P&L del día de cada nodo, cuentas, kill switch, operaciones de la semana y últimos avisos. La
 fase 2 (órdenes desde el hub, usuarios) queda abierta.
 
+## 6c. Pruebas: unitarias, propiedades, escenarios y caos
+
+- `engine/tests`: unitarias y de API con el simulador (`ENGINE_MODE=mock`), más **tests de propiedades** (hypothesis) de la
+  matemática de la copia (escalado por multiplicador, tope de contratos) y de las estadísticas.
+- `scripts/ci_scenarios.py`: escenarios de protección contra `scripts/fake_ninja.py` (NinjaTrader falso por ZeroMQ, modo
+  `ninja`): copia, bloqueo por tamaño, desincronización e igualado, límites, canal atascado, kill switch.
+- `scripts/ci_chaos.py`: **caos**: fill duplicado, ráfaga de cinco fills, orden manual repetida, reinicio del addon
+  (`REBOOT`), NinjaTrader colgado 25 s (`SLEEP`: modo degradado y vuelta con reconciliación) y el engine matado y
+  arrancado de nuevo (idempotencia persistida, reconciliación de arranque, posiciones intactas).
+- CI (`.github/workflows/ci.yml`): pytest en Linux **y en Windows**, build de la consola, escenarios y caos.
+
 ## 7. Próximos pasos sugeridos
 
 1. **Probar con NinjaTrader real**: `ENGINE_MODE=ninja` en el PC de trading y verificar que el addon ZMQ sigue enviando el mismo JSON (el protocolo no ha cambiado).

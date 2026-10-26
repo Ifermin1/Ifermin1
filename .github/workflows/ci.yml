@@ -44,3 +44,28 @@ jobs:
           python scripts/ci_scenarios.py
       - if: failure()
         run: tail -50 engine.log fake.log
+
+  chaos:
+    name: Caos contra NinjaTrader simulado
+    runs-on: ubuntu-latest
+    needs: [engine]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -e "engine[dev]" pyzmq
+      - name: Fills duplicados, ráfagas, reinicio del addon, NinjaTrader colgado, engine matado
+        run: python scripts/ci_chaos.py
+      - if: failure()
+        run: tail -80 engine-chaos.log fake-chaos.log
+
+  engine-windows:
+    name: Engine en Windows (pytest)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -e "engine[dev]"
+      - run: cd engine; python -m pytest -q -p no:cacheprovider
+        shell: pwsh
