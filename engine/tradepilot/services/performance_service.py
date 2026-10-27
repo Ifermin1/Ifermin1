@@ -102,6 +102,13 @@ class PerformanceService:
                 trade["id"] = self.store.save_trade(trade)
             except Exception as exc:
                 logger.warning(f"No se pudo guardar la operación de {account}: {exc}")
+        cb = getattr(self, "on_trade_closed", None)
+        if cb is not None:
+            try:
+                import asyncio
+                asyncio.get_running_loop().create_task(cb(dict(trade)))
+            except RuntimeError:
+                pass        # sin bucle (pruebas síncronas): no hay a quién avisar
         return trade
 
     def open_positions(self) -> dict[tuple[str, str], dict]:

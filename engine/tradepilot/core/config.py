@@ -77,6 +77,8 @@ class Settings(BaseSettings):
     # Copias de seguridad de la base de datos (data/backups): cuántas conservar y cada cuántas horas
     # Copiloto en vivo: cada cuántos segundos revisa las posiciones abiertas y cada cuánto repite el mismo aviso
     # Resúmenes automáticos (hora local del PC): briefing de la mañana y cierre de sesión al teléfono
+    # Detector de tilt: minutos de pausa automática de la cuenta al detectarlo (0 = solo avisar)
+    TILT_AUTO_PAUSE_MIN: int = 0
     MORNING_BRIEF_TIME: str = "08:00"
     SESSION_REVIEW_TIME: str = "17:05"
     COPILOT_INTERVAL_S: int = 300

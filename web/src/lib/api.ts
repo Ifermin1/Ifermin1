@@ -104,6 +104,8 @@ export type ReviewResult = { day: string; source: "ia" | "regla"; model: string;
                              review: { summary: string; patterns: { title: string; evidence: string; cost_usd: number | null }[]; tomorrow: string[]; score: number; mood: "bien" | "regular" | "mal" } };
 export type AskResult = { question: string; answer: string; numbers: string[]; model: string | null; ms: number; context: { n_trades: number; period_days: number } };
 export type EntryCheck = { verdict: "green" | "amber" | "red"; reasons: { level: "red" | "amber"; text: string }[]; checked_at: string; ai: { verdict?: "green" | "amber" | "red"; reason?: string; suggestion?: string; model?: string; ms?: number; error?: string } | null };
+export type TiltState = { config: { enabled: boolean; streak: number; reentry_s: number; max_per_hour: number; day_drop_usd: number; auto_pause_min: number }; ai: boolean;
+                          accounts: Record<string, { at: string; signals: { kind: string; text: string; weight: number }[]; score: number; day: string }>; paused: Record<string, string> };
 export type DigestState = { config: { enabled: boolean; brief_time: string; review_time: string; weekdays_only: boolean }; brief: { day: string; at: string; text: string } | null; review: { day: string; at: string; text: string } | null; ai: boolean };
 export type AssistantPlan = { id: string; actions: { kind: string; account?: string; symbol?: string; quantity?: number; price?: number; description: string }[]; expires_at: string; channel: string; text: string; summary: string };
 export type AssistantReply = { reply: string; source: "ia" | "regla"; plan: AssistantPlan | null };
@@ -232,6 +234,9 @@ export function makeClient(s: Session) {
     news: (days = 7, countries = "", minImpact = "low") => req<NewsFeed>(`/api/news?days=${days}${countries ? `&countries=${encodeURIComponent(countries)}` : ""}&min_impact=${minImpact}`),
     tradeStatus: () => req<TradeStatus>("/api/trade/status"),
     tradeOrders: (limit = 50) => req<StoredOrder[]>(`/api/trade/orders?limit=${limit}`),
+    tilt: () => req<TiltState>("/api/tilt"),
+    tiltConfig: (c: Partial<TiltState["config"]>) => req<TiltState>("/api/tilt", { method: "PUT", body: JSON.stringify(c) }),
+    tiltResume: (account: string) => req<TiltState & { resumed: boolean }>("/api/tilt/resume", { method: "POST", body: JSON.stringify({ account }) }),
     digest: () => req<DigestState>("/api/digest"),
     digestConfig: (c: Partial<DigestState["config"]>) => req<DigestState>("/api/digest", { method: "PUT", body: JSON.stringify(c) }),
     digestRun: (kind: "brief" | "review") => req<{ day: string; text: string; source: string }>("/api/digest/run", { method: "POST", body: JSON.stringify({ kind }) }),

@@ -35,6 +35,19 @@ class PushUnsubscribeRequest(BaseModel):
     endpoint: str
 
 
+class TiltConfigRequest(BaseModel):
+    enabled: Optional[bool] = None
+    streak: Optional[int] = Field(default=None, ge=2, le=10)
+    reentry_s: Optional[int] = Field(default=None, ge=10, le=600)
+    max_per_hour: Optional[int] = Field(default=None, ge=3, le=100)
+    day_drop_usd: Optional[float] = Field(default=None, ge=0)
+    auto_pause_min: Optional[int] = Field(default=None, ge=0, le=240)
+
+
+class TiltResumeRequest(BaseModel):
+    account: str = Field(min_length=1)
+
+
 class DigestConfigRequest(BaseModel):
     enabled: Optional[bool] = None
     brief_time: Optional[str] = Field(default=None, pattern=r"^\d{2}:\d{2}$")

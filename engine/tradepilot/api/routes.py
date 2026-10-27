@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from tradepilot.api.auth import require_token
-from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest, ProtectRequest, TrailRequest, DayLossRequest, AutoRiskRequest, RiskPresets, ApplyPresetRequest, TagsRequest, OcoEntryRequest, TradeTemplates, ReviewRequest, CheckEntryRequest, AskRequest, PushSubscribeRequest, PushUnsubscribeRequest, ConfigImportRequest, AssistantRequest, PlanRequest, DigestConfigRequest, DigestRunRequest
+from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest, ProtectRequest, TrailRequest, DayLossRequest, AutoRiskRequest, RiskPresets, ApplyPresetRequest, TagsRequest, OcoEntryRequest, TradeTemplates, ReviewRequest, CheckEntryRequest, AskRequest, PushSubscribeRequest, PushUnsubscribeRequest, ConfigImportRequest, AssistantRequest, PlanRequest, DigestConfigRequest, DigestRunRequest, TiltConfigRequest, TiltResumeRequest
 from tradepilot.container import Container
 from tradepilot.domain.risk import RiskLimit, Schedule
 
@@ -383,6 +383,33 @@ def stats_analysis(request: Request, day_from: str | None = None, day_to: str | 
     if d1 < d0:
         raise HTTPException(400, "el fin del periodo es anterior al inicio")
     return c.performance.analysis(d0, d1, account or None)
+
+
+@router.get("/tilt")
+def tilt_state(request: Request):
+    """Detector de tilt: configuración, señales por cuenta y pausas activas."""
+    c = _c(request)
+    if c.tilt is None:
+        raise HTTPException(503, "tilt no disponible")
+    return c.tilt.state()
+
+
+@router.put("/tilt")
+def tilt_config(body: TiltConfigRequest, request: Request):
+    c = _c(request)
+    if c.tilt is None:
+        raise HTTPException(503, "tilt no disponible")
+    c.tilt.set_config(**body.model_dump(exclude_unset=True))
+    c.audit.log("TILT_SET", f"Detector de tilt: {'activo' if c.tilt.config['enabled'] else 'desactivado'} · racha {c.tilt.config['streak']} · pausa automática {c.tilt.config['auto_pause_min']} min")
+    return c.tilt.state()
+
+
+@router.post("/tilt/resume")
+def tilt_resume(body: TiltResumeRequest, request: Request):
+    c = _c(request)
+    if c.tilt is None:
+        raise HTTPException(503, "tilt no disponible")
+    return {"resumed": c.tilt.resume(body.account, "a mano desde la consola"), **c.tilt.state()}
 
 
 @router.get("/digest")

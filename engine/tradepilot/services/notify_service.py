@@ -35,7 +35,7 @@ TITLES: dict[str, tuple[str, str]] = {
     "ADDON_SILENT": ("📵", "Sin heartbeat del addon"), "ADDON_DOWN": ("📵", "Addon caído"), "ADDON_BACK": ("📶", "Addon de vuelta"),
     "ADDON_RESTART": ("🔁", "Addon reiniciado"), "GAP": ("📉", "Mensajes perdidos"), "ERROR": ("❗", "Error"),
     "DEGRADED_ON": ("🚨", "MODO DEGRADADO: sin addon"), "DEGRADED_OFF": ("✅", "Addon de vuelta"), "ADDON_STILL_DOWN": ("📵", "Sigue sin addon"),
-    "MORNING_BRIEF": ("☀️", "Briefing de la mañana"), "SESSION_REVIEW": ("🏁", "Cierre de sesión"), "TILT": ("🧠", "Tilt: para un momento"),
+    "MORNING_BRIEF": ("☀️", "Briefing de la mañana"), "SESSION_REVIEW": ("🏁", "Cierre de sesión"), "TILT": ("🧠", "Tilt: para un momento"), "TILT_RESUME": ("▶️", "Pausa por tilt levantada"),
     "COPILOT": ("🧭", "Copiloto: propuesta sobre una posición"), "ASSISTANT_RUN": ("🤖", "Asistente: plan ejecutado"), "ADDON_ALONE": ("🕳️", "El addon estuvo sin engine"), "ADDON_SELF_RESTART": ("🔧", "El addon se reconstruyó solo"),
     "NO_TICKS": ("📡", "Sin datos de mercado"), "TICKS_BACK": ("📶", "Datos de mercado de vuelta"), "ENGINE_RESUMED": ("⏰", "PC reanudado / reloj cambiado"), "RECONCILE": ("🧾", "Reconciliación"),
     "ENTRY_MISSED": ("🚫", "Entrada no ejecutada"), "BLOCKED": ("⛔", "Copia bloqueada"), "TRIMMED": ("✂️", "Copia recortada"),

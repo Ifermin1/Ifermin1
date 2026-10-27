@@ -485,6 +485,16 @@ actualizar: NinjaScript Editor → F5).
 - Por API: `GET /api/report/weekly?day=AAAA-MM-DD&account=&tag=&format=html|json` y
   `GET /api/trades.csv?day_from=&day_to=&account=&tag=`, con el token en la cabecera.
 
+### Detector de tilt (Riesgo → Detector de tilt)
+
+Con cada operación cerrada, el engine mira si una cuenta está operando por rabia: **3 pérdidas seguidas**, **tamaño
+creciente tras perder** (martingala), **reentradas** en menos de 60 s tras una pérdida, **más de 12 operaciones por
+hora**, o un día que iba en positivo y **cae más de 500 $**. Con dos señales (o racha y otra) manda un aviso al teléfono
+(`TILT`) con lo que está pasando y qué hacer; con clave de IA la frase la escribe Claude con las cifras. Si pones una
+**pausa automática** (10-60 min), además pausa esa cuenta (como un límite, motivo "tilt") y la reanuda sola al acabar
+(`TILT_RESUME`); *Reanudar ya* la levanta antes. Umbrales en la tarjeta; `TILT_AUTO_PAUSE_MIN` en `engine\.env` fija el
+valor inicial.
+
 ### Briefing de la mañana y cierre de sesión (Inicio → Briefing y cierre)
 
 - **Briefing** (por defecto a las 08:00, hora del PC): noticias vigiladas de hoy con hora e impacto, ventanas sin

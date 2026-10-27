@@ -9,6 +9,7 @@ import { HubCard } from "../components/HubCard";
 import { SecurityCard } from "../components/SecurityCard";
 import { MaintenanceCard } from "../components/MaintenanceCard";
 import { DoctorCard } from "../components/DoctorCard";
+import { TiltCard } from "../components/TiltCard";
 import { DrawdownMeter, ddTone } from "../components/AccountPanel";
 
 const MODE_LABEL: Record<string, string> = { intraday: "dinámico", eod: "EOD", closed: "cerrado", static: "estático" };
@@ -289,6 +290,8 @@ export function Risk() {
         </form>
       </Card>
 
+      <TiltCard client={client} />
+
       <SecurityCard />
 
       <NotifyCard client={client} />
@@ -338,7 +341,7 @@ export function Risk() {
               const ref = pnl < 0 ? l.max_daily_loss : l.max_daily_profit;
               const pct = ref ? Math.min(100, Math.max(0, (Math.abs(pnl) / ref) * 100)) : 0;
               const cls = !ref ? (pnl < 0 ? "warn" : "ok") : pnl < 0 ? (pct >= 80 ? "bad" : "warn") : (pct >= 80 ? "warn" : "ok");
-              const badge = l.halted_reason === "daily_loss" ? "pausada · pérdida diaria" : l.halted_reason === "daily_profit" ? "pausada · corte del día" : l.halted_reason === "profit_goal" ? "pausada · evaluación superada" : l.halted_reason === "drawdown" ? "pausada · drawdown" : "pausada";
+              const badge = l.halted_reason === "daily_loss" ? "pausada · pérdida diaria" : l.halted_reason === "daily_profit" ? "pausada · corte del día" : l.halted_reason === "profit_goal" ? "pausada · evaluación superada" : l.halted_reason === "drawdown" ? "pausada · drawdown" : l.halted_reason === "tilt" ? "pausada · tilt (se reanuda sola)" : "pausada";
               const gained = acc && l.start_balance > 0 ? acc.balance + acc.unrealized_pnl - (acc.commissions_today || 0) - l.start_balance : null;
               return (
                 <tr key={l.account_id} className={sel.has(l.account_id) ? "selected" : ""}><td><input type="checkbox" checked={sel.has(l.account_id)} onChange={() => toggleSel(l.account_id)} /></td><td><b>{l.account_id}</b></td><td className="num">{l.max_daily_loss || "—"}</td><td className="num">{l.max_daily_profit || "—"}</td>
