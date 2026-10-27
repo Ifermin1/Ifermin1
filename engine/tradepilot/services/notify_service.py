@@ -35,7 +35,7 @@ TITLES: dict[str, tuple[str, str]] = {
     "ADDON_SILENT": ("📵", "Sin heartbeat del addon"), "ADDON_DOWN": ("📵", "Addon caído"), "ADDON_BACK": ("📶", "Addon de vuelta"),
     "ADDON_RESTART": ("🔁", "Addon reiniciado"), "GAP": ("📉", "Mensajes perdidos"), "ERROR": ("❗", "Error"),
     "DEGRADED_ON": ("🚨", "MODO DEGRADADO: sin addon"), "DEGRADED_OFF": ("✅", "Addon de vuelta"), "ADDON_STILL_DOWN": ("📵", "Sigue sin addon"),
-    "COPILOT": ("🧭", "Copiloto: propuesta sobre una posición"), "ADDON_ALONE": ("🕳️", "El addon estuvo sin engine"), "ADDON_SELF_RESTART": ("🔧", "El addon se reconstruyó solo"),
+    "COPILOT": ("🧭", "Copiloto: propuesta sobre una posición"), "ASSISTANT_RUN": ("🤖", "Asistente: plan ejecutado"), "ADDON_ALONE": ("🕳️", "El addon estuvo sin engine"), "ADDON_SELF_RESTART": ("🔧", "El addon se reconstruyó solo"),
     "NO_TICKS": ("📡", "Sin datos de mercado"), "TICKS_BACK": ("📶", "Datos de mercado de vuelta"), "ENGINE_RESUMED": ("⏰", "PC reanudado / reloj cambiado"), "RECONCILE": ("🧾", "Reconciliación"),
     "ENTRY_MISSED": ("🚫", "Entrada no ejecutada"), "BLOCKED": ("⛔", "Copia bloqueada"), "TRIMMED": ("✂️", "Copia recortada"),
     "FOLLOWER_FILL": ("💱", "Fill"), "MASTER_RECEIVED": ("📥", "Operación del maestro"), "ENGINE_START": ("🟦", "Engine arrancado"), "KILL_SWITCH_PERSISTED": ("🛑", "Kill switch sigue activo"),
@@ -44,7 +44,7 @@ DEFAULT_EVENTS = ["DAILY_LOSS_LIMIT", "DAILY_LOSS_WARNING", "DAILY_PROFIT_TARGET
                   "DRAWDOWN_WARNING", "KILL_SWITCH_ON", "KILL_SWITCH_OFF", "KILL_SWITCH_PERSISTED", "FLATTEN", "SCHEDULED_FLATTEN", "NAKED_CLOSE",
                   "FOLLOWER_REJECTED", "ACCOUNT_LOCKED", "DESYNC", "OVERCLOSE_FIX", "ADDON_SILENT", "ADDON_DOWN", "ADDON_BACK",
                   "ADDON_RESTART", "GAP", "ERROR", "ENTRY_MISSED", "NEWS_SOON", "NEWS_RESULT", "MANUAL_REJECTED", "DAY_CLOSED", "AUTO_RISK_APPLIED",
-                  "DEGRADED_ON", "DEGRADED_OFF", "ADDON_STILL_DOWN", "NO_TICKS", "TICKS_BACK", "ENGINE_RESUMED", "ADDON_ALONE", "ADDON_SELF_RESTART", "COPILOT"]
+                  "DEGRADED_ON", "DEGRADED_OFF", "ADDON_STILL_DOWN", "NO_TICKS", "TICKS_BACK", "ENGINE_RESUMED", "ADDON_ALONE", "ADDON_SELF_RESTART", "COPILOT", "ASSISTANT_RUN"]
 
 
 class NotifyConfig(BaseModel):

@@ -759,3 +759,5 @@ table.trades tbody tr.sel td { background: var(--hl); box-shadow: inset 0 0 0 1p
 .chart .bar.warn { fill: var(--warn); }
 
 .ai-opinion { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; width: 100%; padding-top: 4px; border-top: 1px dashed var(--line); }
+
+.plan { margin-top: 8px; padding: 8px 10px; border-radius: 10px; border: 1px dashed var(--line-2); } .plan ul, .plan-result { margin: 0 0 6px; padding-left: 18px; } .plan-result li.ok { color: var(--ok); } .plan-result li.bad { color: var(--bad); }

@@ -35,6 +35,14 @@ class PushUnsubscribeRequest(BaseModel):
     endpoint: str
 
 
+class AssistantRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=400)
+
+
+class PlanRequest(BaseModel):
+    id: str = Field(min_length=1, max_length=40)
+
+
 class ConfigImportRequest(BaseModel):
     data: dict
     replace_rules: bool = False

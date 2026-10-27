@@ -10,6 +10,7 @@ import { RecentStats } from "../components/RecentStats";
 import { AdviceCard } from "../components/AdviceCard";
 import { ReconcileCard } from "../components/ReconcileCard";
 import { CopilotCard } from "../components/CopilotCard";
+import { AssistantCard } from "../components/AssistantCard";
 import type { Route } from "../components/Shell";
 
 /** Inicio = sala de control: alertas, P&L del día, cuentas en juego y estado del puente. */
@@ -143,7 +144,10 @@ export function Dashboard({ onRoute }: { onRoute?: (r: Route) => void } = {}) {
         </div>
       </div>
 
-      <CopilotCard />
+      <div className="grid two">
+        <CopilotCard />
+        <AssistantCard />
+      </div>
 
       <ReconcileCard onRoute={onRoute} />
 

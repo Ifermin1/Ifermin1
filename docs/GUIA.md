@@ -485,6 +485,17 @@ actualizar: NinjaScript Editor → F5).
 - Por API: `GET /api/report/weekly?day=AAAA-MM-DD&account=&tag=&format=html|json` y
   `GET /api/trades.csv?day_from=&day_to=&account=&tag=`, con el token en la cabecera.
 
+### Asistente por chat (tarjeta de Inicio y Telegram)
+
+Escribe lo que quieres en lenguaje normal: «pon todos los stops a breakeven», «cierra la mitad de NQ en Sim101», «cierra
+todo en las 50K» (por etiqueta), «pausa la copia», «mueve el stop de NQ a 20450», «¿cuánto llevo hoy?», «posiciones».
+Las consultas se responden al momento con los datos reales. Lo que mueve dinero **no se ejecuta al escribirlo**: el
+asistente te enseña el **plan** (una línea por acción, con cuentas e importes concretos) y solo se ejecuta al pulsar
+*Ejecutar* (PIN + confirmación); caduca a los 2 minutos. En Telegram, cualquier mensaje que no empiece por `/` (o `/ia
+texto`) va al asistente, y el plan llega con un botón *Ejecutar*. Con clave de IA entiende cualquier frase y resuelve
+alias y etiquetas; sin clave, un intérprete por reglas entiende las frases habituales. Todo queda en Auditoría
+(`ASSISTANT`, `ASSISTANT_RUN`) y el resultado de cada plan llega al teléfono.
+
 ### Copiloto en vivo (tarjeta de Inicio)
 
 Mientras haya posiciones abiertas, cada 5 minutos (`COPILOT_INTERVAL_S`) el copiloto mira cada posición con su contexto:

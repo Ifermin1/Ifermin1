@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from tradepilot.api.auth import require_token
-from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest, ProtectRequest, TrailRequest, DayLossRequest, AutoRiskRequest, RiskPresets, ApplyPresetRequest, TagsRequest, OcoEntryRequest, TradeTemplates, ReviewRequest, CheckEntryRequest, AskRequest, PushSubscribeRequest, PushUnsubscribeRequest, ConfigImportRequest
+from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest, ProtectRequest, TrailRequest, DayLossRequest, AutoRiskRequest, RiskPresets, ApplyPresetRequest, TagsRequest, OcoEntryRequest, TradeTemplates, ReviewRequest, CheckEntryRequest, AskRequest, PushSubscribeRequest, PushUnsubscribeRequest, ConfigImportRequest, AssistantRequest, PlanRequest
 from tradepilot.container import Container
 from tradepilot.domain.risk import RiskLimit, Schedule
 
@@ -383,6 +383,37 @@ def stats_analysis(request: Request, day_from: str | None = None, day_to: str | 
     if d1 < d0:
         raise HTTPException(400, "el fin del periodo es anterior al inicio")
     return c.performance.analysis(d0, d1, account or None)
+
+
+@router.post("/assistant")
+async def assistant_ask(body: AssistantRequest, request: Request):
+    """Asistente por chat: responde consultas al momento y, si pide hacer algo, devuelve un plan para confirmar."""
+    c = _c(request)
+    if c.assistant is None:
+        raise HTTPException(503, "asistente no disponible")
+    try:
+        return await c.assistant.handle(body.text, "consola")
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
+@router.post("/assistant/confirm")
+async def assistant_confirm(body: PlanRequest, request: Request):
+    c = _c(request)
+    if c.assistant is None:
+        raise HTTPException(503, "asistente no disponible")
+    try:
+        return await c.assistant.confirm(body.id)
+    except ValueError as exc:
+        raise HTTPException(410, str(exc))
+
+
+@router.post("/assistant/cancel")
+def assistant_cancel(body: PlanRequest, request: Request):
+    c = _c(request)
+    if c.assistant is None:
+        raise HTTPException(503, "asistente no disponible")
+    return {"cancelled": c.assistant.cancel(body.id)}
 
 
 @router.get("/copilot")

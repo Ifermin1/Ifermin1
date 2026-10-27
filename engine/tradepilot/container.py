@@ -33,6 +33,7 @@ from tradepilot.services.watchdog_service import WatchdogService
 from tradepilot.services.backup_service import BackupService
 from tradepilot.services.metrics_service import MetricsService
 from tradepilot.services.copilot_service import CopilotService
+from tradepilot.services.assistant_service import AssistantService
 from tradepilot.services.sync_service import SyncService
 
 
@@ -66,6 +67,7 @@ class Container:
     backup: BackupService | None = None
     metrics: MetricsService | None = None
     copilot: CopilotService | None = None
+    assistant: AssistantService | None = None
 
     async def start(self) -> None:
         if self.advisor is not None:
@@ -203,7 +205,9 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
                                no_ticks_after_s=cfg.WATCHDOG_NO_TICKS_AFTER_S, remind_s=cfg.WATCHDOG_REMIND_S)
     backup = BackupService(store, audit, cfg.DB_PATH, keep=cfg.BACKUP_KEEP, interval_h=cfg.BACKUP_INTERVAL_H, accounts=accounts, risk=risk, replication=replication, notify=notify)
     hub = HubReporter(store, bus, cfg.HUB_URL, cfg.HUB_TOKEN, cfg.HUB_NODE, cfg.HUB_INTERVAL_S, accounts, risk, bridge, mode=cfg.ENGINE_MODE)
+    assistant = AssistantService(accounts, risk, trade, market, ai, audit, store, bridge)
     notify.commands = TelegramCommands(notify, accounts, risk, trade, market, bridge)
+    notify.commands.assistant = assistant
     metrics = MetricsService(store, bus, bridge, accounts, risk, hub, watchdog)
     copilot = CopilotService(accounts, risk, trade, market, news, ai, audit, store, trail, interval_s=cfg.COPILOT_INTERVAL_S, remind_s=cfg.COPILOT_REMIND_S)
     replication.metrics = metrics
@@ -218,4 +222,4 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
             except Exception as exc:
                 logger.exception(f"Error en vigilancia de {name}: {exc}")
     accounts.after_sync = _after_sync
-    return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal, commissions, performance, notify, news, trade, market, trail, auto_risk, advisor, coach, push, report, hub, reconcile, watchdog, backup, metrics, copilot)
+    return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal, commissions, performance, notify, news, trade, market, trail, auto_risk, advisor, coach, push, report, hub, reconcile, watchdog, backup, metrics, copilot, assistant)

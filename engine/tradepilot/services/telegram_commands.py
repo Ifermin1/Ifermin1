@@ -19,6 +19,7 @@ HELP = ("<b>TradePilot X</b> · órdenes por Telegram\n"
         "/pausar — kill switch: no se copia ni se opera\n"
         "/reanudar — quita el kill switch\n"
         "/cerrar — CERRAR TODO (pide confirmación)\n"
+        "Y en lenguaje normal: «pon los stops a breakeven», «cierra la mitad de NQ en Sim101», «¿cuánto llevo hoy?» (lo que mueva dinero pide confirmación)\n"
         "/ayuda — esta lista")
 CONFIRM_TTL_S = 90
 
@@ -36,6 +37,7 @@ class TelegramCommands:
         self.notify, self.accounts, self.risk, self.trade, self.market, self.bridge = notify, accounts, risk, trade, market, bridge
         self.pending: dict[str, tuple[str, float]] = {}      # nonce -> (acción, caduca)
         self.handled = 0
+        self.assistant = None                                # AssistantService (lo fija el contenedor)
 
     # ---- entrada ----
     async def handle(self, update: dict) -> None:
@@ -56,7 +58,10 @@ class TelegramCommands:
             logger.warning(f"Telegram: mensaje de un chat no autorizado ({(m.get('chat') or {}).get('id')}), ignorado")
             return
         text = str(m.get("text") or "").strip()
-        if not text.startswith("/"):
+        if not text:
+            return
+        if not text.startswith("/") or text.lower().startswith("/ia "):
+            await self._assist(text[4:] if text.lower().startswith("/ia ") else text)
             return
         cmd = text.split()[0].lower().split("@")[0]
         self.handled += 1
@@ -78,6 +83,27 @@ class TelegramCommands:
             await self._ask_confirm("flatten", "⚠️ <b>¿CERRAR TODO?</b>\nSe cancelan las órdenes y se cierran a mercado todas las posiciones de todas las cuentas activas.\n" + self.positions_text(short=True))
         else:
             await self.notify.send("No conozco esa orden. " + HELP)
+
+    async def _assist(self, text: str) -> None:
+        """Frase en lenguaje normal: el asistente responde; si propone acciones, botón para confirmarlas."""
+        if self.assistant is None:
+            await self.notify.send("El asistente no está disponible en este engine.")
+            return
+        self.handled += 1
+        try:
+            r = await self.assistant.handle(text, "telegram")
+        except Exception as exc:
+            await self.notify.send(f"No pude interpretarlo: {_esc(exc)}")
+            return
+        plan = r.get("plan")
+        if not plan:
+            await self.notify.send(_esc(r["reply"]))
+            return
+        self.pending = {k: v for k, v in self.pending.items() if v[1] > time.time()}
+        self.pending[plan["id"]] = ("assist", time.time() + CONFIRM_TTL_S)
+        kb = {"inline_keyboard": [[{"text": "✅ Ejecutar", "callback_data": f"assist:{plan['id']}"}, {"text": "❌ No", "callback_data": "cancel"}]]}
+        body = _esc(r["reply"]) + "\n\n<b>Plan:</b>\n" + "\n".join("• " + _esc(a["description"]) for a in plan["actions"])
+        await self.notify.api("sendMessage", {"chat_id": self.notify.config.chat_id, "text": body[:3900], "parse_mode": "HTML", "reply_markup": kb})
 
     async def _ask_confirm(self, action: str, text: str) -> None:
         nonce = secrets.token_urlsafe(6)
@@ -101,11 +127,18 @@ class TelegramCommands:
         action, _, nonce = data.partition(":")
         p = self.pending.pop(nonce, None)
         if p is None or p[0] != action or p[1] < time.time():
-            await edit("Esa confirmación caducó. Vuelve a enviar /cerrar.")
+            await edit("Esa confirmación caducó. Vuelve a pedirlo.")
             return
         if action == "flatten":
             await edit("✂️ Cerrando todo…")
             await self.notify.send(await self.flatten_all())
+        elif action == "assist" and self.assistant is not None:
+            await edit("⚙️ Ejecutando el plan…")
+            try:
+                r = await self.assistant.confirm(nonce)
+                await self.notify.send("\n".join(("✅ " if x["ok"] else "❌ ") + _esc(x["action"]) + " → " + _esc(x["detail"]) for x in r["results"]) or "Nada que ejecutar.")
+            except ValueError as exc:
+                await self.notify.send(_esc(exc))
 
     # ---- acciones ----
     async def flatten_all(self) -> str:

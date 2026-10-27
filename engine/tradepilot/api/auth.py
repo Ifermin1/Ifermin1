@@ -47,7 +47,7 @@ def role_of(token: str | None, settings) -> str | None:
 
 
 # Con el token de solo lectura solo pasan los GET y estas consultas que van por POST porque llevan cuerpo (no cambian nada).
-READ_ONLY_POSTS = {"/api/ai/review", "/api/ai/check-entry", "/api/ai/ask"}
+READ_ONLY_POSTS = {"/api/ai/review", "/api/ai/check-entry", "/api/ai/ask", "/api/assistant"}
 
 
 def _note(req, ok: bool, token: str | None = None) -> str | None:
