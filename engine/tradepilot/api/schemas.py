@@ -35,6 +35,19 @@ class PushUnsubscribeRequest(BaseModel):
     endpoint: str
 
 
+class PropRuleRequest(BaseModel):
+    account_id: str = Field(min_length=1)
+    consistency: Optional[float] = Field(default=None, ge=0.05, le=1)
+    min_days: Optional[int] = Field(default=None, ge=0, le=60)
+    min_day_profit: Optional[float] = Field(default=None, ge=0)
+    safety_net: Optional[bool] = None
+    safety_extra: Optional[float] = Field(default=None, ge=0)
+    payout_min: Optional[float] = Field(default=None, ge=0)
+    payout_max: Optional[float] = Field(default=None, ge=0)
+    payout_max_pct: Optional[float] = Field(default=None, ge=1, le=100)
+    winning_days: Optional[int] = Field(default=None, ge=0, le=60)
+
+
 class TiltConfigRequest(BaseModel):
     enabled: Optional[bool] = None
     streak: Optional[int] = Field(default=None, ge=2, le=10)

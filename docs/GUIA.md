@@ -485,6 +485,17 @@ actualizar: NinjaScript Editor → F5).
 - Por API: `GET /api/report/weekly?day=AAAA-MM-DD&account=&tag=&format=html|json` y
   `GET /api/trades.csv?day_from=&day_to=&account=&tag=`, con el token en la cabecera.
 
+### Reglas de prop firm y payout (Riesgo → Reglas de prop firm y payout)
+
+Para cada cuenta con firma, el engine mira lo que la firma exige antes de pagar y te dice **cuánto falta**:
+colchón de seguridad (Apex: ganancia ≥ drawdown + 100 $), días operados mínimos, días ganadores (Topstep: 5 días de
+≥ 200 $), **consistencia** (el mejor día no puede pasar del 30 % en Apex, 40 % en MFF, 50 % en Topstep y TPT del total
+ganado) y beneficio mínimo retirable. Cuando todo está en verde la cuenta aparece como **payout disponible** con el
+importe retirable. En las cuentas de evaluación sigue el objetivo. Lo más útil: **"Hoy puedes ganar hasta X $ sin
+romper la consistencia"**; al llegar al 80 % de ese tope avisa al teléfono (`PROP_RULE_WARN`) para que bajes tamaño o
+pares. Las cifras por firma son orientativas y cambian: *ajustar reglas de esta cuenta* las corrige para tu plan. Los
+retiros que anotas en *Análisis → Pendientes y registros* cuentan como pagados/pedidos.
+
 ### Detector de tilt (Riesgo → Detector de tilt)
 
 Con cada operación cerrada, el engine mira si una cuenta está operando por rabia: **3 pérdidas seguidas**, **tamaño

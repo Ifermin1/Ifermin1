@@ -10,6 +10,7 @@ import { SecurityCard } from "../components/SecurityCard";
 import { MaintenanceCard } from "../components/MaintenanceCard";
 import { DoctorCard } from "../components/DoctorCard";
 import { TiltCard } from "../components/TiltCard";
+import { PropRulesCard } from "../components/PropRulesCard";
 import { DrawdownMeter, ddTone } from "../components/AccountPanel";
 
 const MODE_LABEL: Record<string, string> = { intraday: "dinámico", eod: "EOD", closed: "cerrado", static: "estático" };
@@ -289,6 +290,8 @@ export function Risk() {
           <button className="primary">Guardar comisiones</button>
         </form>
       </Card>
+
+      <PropRulesCard client={client} />
 
       <TiltCard client={client} />
 

@@ -36,6 +36,7 @@ from tradepilot.services.copilot_service import CopilotService
 from tradepilot.services.assistant_service import AssistantService
 from tradepilot.services.digest_service import DigestService
 from tradepilot.services.tilt_service import TiltService
+from tradepilot.services.proprules_service import PropRulesService
 from tradepilot.services.sync_service import SyncService
 
 
@@ -72,6 +73,7 @@ class Container:
     assistant: AssistantService | None = None
     digest: DigestService | None = None
     tilt: TiltService | None = None
+    proprules: PropRulesService | None = None
 
     async def start(self) -> None:
         if self.advisor is not None:
@@ -100,6 +102,8 @@ class Container:
             await self.digest.start()
         if self.tilt is not None:
             await self.tilt.start()
+        if self.proprules is not None:
+            await self.proprules.start()
         self.audit.log("ENGINE_START", f"Engine iniciado en modo {self.settings.ENGINE_MODE}")
         if self.news is not None and not self.news.ai.enabled:
             logger.info("Calendario: sin ANTHROPIC_API_KEY, los avisos de noticias llevan un análisis por reglas (pon la clave en engine/.env para usar la IA)")
@@ -122,6 +126,8 @@ class Container:
             logger.warning("API_TOKEN sigue siendo el valor por defecto; cámbialo en engine/.env antes de exponer el engine")
 
     async def stop(self) -> None:
+        if self.proprules is not None:
+            await self.proprules.stop()
         if self.tilt is not None:
             await self.tilt.stop()
         if self.digest is not None:
@@ -218,6 +224,7 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
     backup = BackupService(store, audit, cfg.DB_PATH, keep=cfg.BACKUP_KEEP, interval_h=cfg.BACKUP_INTERVAL_H, accounts=accounts, risk=risk, replication=replication, notify=notify)
     hub = HubReporter(store, bus, cfg.HUB_URL, cfg.HUB_TOKEN, cfg.HUB_NODE, cfg.HUB_INTERVAL_S, accounts, risk, bridge, mode=cfg.ENGINE_MODE)
     assistant = AssistantService(accounts, risk, trade, market, ai, audit, store, bridge)
+    proprules = PropRulesService(store, accounts, risk, audit)
     tilt = TiltService(store, audit, risk, accounts, ai, auto_pause_min=cfg.TILT_AUTO_PAUSE_MIN)
     performance.on_trade_closed = tilt.on_trade
     digest = DigestService(store, audit, news, coach, accounts, risk, ai, brief_time=cfg.MORNING_BRIEF_TIME, review_time=cfg.SESSION_REVIEW_TIME)
@@ -237,4 +244,4 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
             except Exception as exc:
                 logger.exception(f"Error en vigilancia de {name}: {exc}")
     accounts.after_sync = _after_sync
-    return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal, commissions, performance, notify, news, trade, market, trail, auto_risk, advisor, coach, push, report, hub, reconcile, watchdog, backup, metrics, copilot, assistant, digest, tilt)
+    return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal, commissions, performance, notify, news, trade, market, trail, auto_risk, advisor, coach, push, report, hub, reconcile, watchdog, backup, metrics, copilot, assistant, digest, tilt, proprules)

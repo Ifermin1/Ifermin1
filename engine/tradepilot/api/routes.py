@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from tradepilot.api.auth import require_token
-from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest, ProtectRequest, TrailRequest, DayLossRequest, AutoRiskRequest, RiskPresets, ApplyPresetRequest, TagsRequest, OcoEntryRequest, TradeTemplates, ReviewRequest, CheckEntryRequest, AskRequest, PushSubscribeRequest, PushUnsubscribeRequest, ConfigImportRequest, AssistantRequest, PlanRequest, DigestConfigRequest, DigestRunRequest, TiltConfigRequest, TiltResumeRequest
+from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest, ProtectRequest, TrailRequest, DayLossRequest, AutoRiskRequest, RiskPresets, ApplyPresetRequest, TagsRequest, OcoEntryRequest, TradeTemplates, ReviewRequest, CheckEntryRequest, AskRequest, PushSubscribeRequest, PushUnsubscribeRequest, ConfigImportRequest, AssistantRequest, PlanRequest, DigestConfigRequest, DigestRunRequest, TiltConfigRequest, TiltResumeRequest, PropRuleRequest
 from tradepilot.container import Container
 from tradepilot.domain.risk import RiskLimit, Schedule
 
@@ -383,6 +383,27 @@ def stats_analysis(request: Request, day_from: str | None = None, day_to: str | 
     if d1 < d0:
         raise HTTPException(400, "el fin del periodo es anterior al inicio")
     return c.performance.analysis(d0, d1, account or None)
+
+
+@router.get("/proprules")
+def proprules_all(request: Request):
+    """Reglas de prop firm por cuenta: ganancia, colchón, días, consistencia, retiros; cuánto falta para el payout."""
+    c = _c(request)
+    if c.proprules is None:
+        raise HTTPException(503, "reglas no disponibles")
+    return {"accounts": c.proprules.evaluate_all(), "generated_at": c.proprules.now().astimezone().isoformat(timespec="seconds")}
+
+
+@router.put("/proprules")
+def proprules_set(body: PropRuleRequest, request: Request):
+    c = _c(request)
+    if c.proprules is None:
+        raise HTTPException(503, "reglas no disponibles")
+    if c.accounts.find(body.account_id) is None:
+        raise HTTPException(404, "cuenta desconocida")
+    rule = c.proprules.set_rule(body.account_id, body.model_dump(exclude_unset=True, exclude={"account_id"}))
+    c.audit.log("PROP_RULE_SET", f"{body.account_id}: reglas de prop firm ajustadas (consistencia {rule['consistency'] * 100:.0f} %, {rule['min_days']} días mín., retiro mín. {rule['payout_min']:,.0f} $)", target=body.account_id)
+    return c.proprules.evaluate(body.account_id)
 
 
 @router.get("/tilt")

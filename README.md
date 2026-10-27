@@ -87,6 +87,7 @@ Si *Cuentas* queda vacío, el addon no está respondiendo en 5557: revisa que Ni
 ## Protecciones
 
 - **Grupos y presets**: etiquetas por cuenta (50K, PA…) con filtro y acciones en bloque, presets de riesgo (Conservador/Moderado/Agresivo, editables) y una tarjeta de *Recomendaciones* en Inicio con la acción de un clic (pausar, pasar a conservador, igualar, cerrar, poner perfil).
+- **Reglas de prop firm**: colchón, días mínimos, días ganadores, consistencia y mínimo retirable por cuenta, cuánto falta para el payout y cuánto puedes ganar hoy sin romper la consistencia (aviso al 80 %).
 - **Detector de tilt**: racha, martingala, reentradas rápidas, frecuencia y hundimiento del día → aviso al teléfono y pausa automática opcional de la cuenta.
 - **Briefing y cierre automáticos**: a la hora que elijas, el briefing de la mañana (noticias, ventanas sin operar, tamaño) y la revisión del coach del día llegan al teléfono.
 - **Asistente por chat**: en Inicio y por Telegram, lenguaje natural → consultas al momento y planes de acción (breakeven, cerrar, parcial, pausar, mover stop) que solo se ejecutan al confirmar.

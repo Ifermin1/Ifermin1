@@ -104,6 +104,10 @@ export type ReviewResult = { day: string; source: "ia" | "regla"; model: string;
                              review: { summary: string; patterns: { title: string; evidence: string; cost_usd: number | null }[]; tomorrow: string[]; score: number; mood: "bien" | "regular" | "mal" } };
 export type AskResult = { question: string; answer: string; numbers: string[]; model: string | null; ms: number; context: { n_trades: number; period_days: number } };
 export type EntryCheck = { verdict: "green" | "amber" | "red"; reasons: { level: "red" | "amber"; text: string }[]; checked_at: string; ai: { verdict?: "green" | "amber" | "red"; reason?: string; suggestion?: string; model?: string; ms?: number; error?: string } | null };
+export type PropRule = { consistency: number; min_days: number; min_day_profit: number; safety_net: boolean; safety_extra: number; payout_min: number; payout_max: number; payout_max_pct: number; winning_days: number };
+export type PropRuleStatus = { account_id: string; alias: string; firm: string; plan: string; is_eval: boolean; start_balance: number; balance: number; profit: number; today: number; traded_days: number; winning_days: number;
+                               best_day: number; best_day_share: number | null; max_today: number | null; today_room: number | null; payouts_requested: number; payouts_paid: number; n_payouts: number; available: number; eligible: boolean;
+                               requirements: { key: string; label: string; status: "ok" | "pending"; detail: string; missing: number | null }[]; rule: PropRule };
 export type TiltState = { config: { enabled: boolean; streak: number; reentry_s: number; max_per_hour: number; day_drop_usd: number; auto_pause_min: number }; ai: boolean;
                           accounts: Record<string, { at: string; signals: { kind: string; text: string; weight: number }[]; score: number; day: string }>; paused: Record<string, string> };
 export type DigestState = { config: { enabled: boolean; brief_time: string; review_time: string; weekdays_only: boolean }; brief: { day: string; at: string; text: string } | null; review: { day: string; at: string; text: string } | null; ai: boolean };
@@ -234,6 +238,8 @@ export function makeClient(s: Session) {
     news: (days = 7, countries = "", minImpact = "low") => req<NewsFeed>(`/api/news?days=${days}${countries ? `&countries=${encodeURIComponent(countries)}` : ""}&min_impact=${minImpact}`),
     tradeStatus: () => req<TradeStatus>("/api/trade/status"),
     tradeOrders: (limit = 50) => req<StoredOrder[]>(`/api/trade/orders?limit=${limit}`),
+    propRules: () => req<{ accounts: PropRuleStatus[]; generated_at: string }>("/api/proprules"),
+    propRuleSet: (account_id: string, rule: Partial<PropRule>) => req<PropRuleStatus>("/api/proprules", { method: "PUT", body: JSON.stringify({ account_id, ...rule }) }),
     tilt: () => req<TiltState>("/api/tilt"),
     tiltConfig: (c: Partial<TiltState["config"]>) => req<TiltState>("/api/tilt", { method: "PUT", body: JSON.stringify(c) }),
     tiltResume: (account: string) => req<TiltState & { resumed: boolean }>("/api/tilt/resume", { method: "POST", body: JSON.stringify({ account }) }),
