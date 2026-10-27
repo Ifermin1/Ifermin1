@@ -385,6 +385,33 @@ def stats_analysis(request: Request, day_from: str | None = None, day_to: str | 
     return c.performance.analysis(d0, d1, account or None)
 
 
+@router.get("/copilot")
+def copilot_state(request: Request):
+    """Copiloto en vivo: últimas propuestas sobre las posiciones abiertas (IA con clave; reglas sin ella)."""
+    c = _c(request)
+    if c.copilot is None:
+        raise HTTPException(503, "copiloto no disponible")
+    return c.copilot.state()
+
+
+@router.post("/copilot/run")
+async def copilot_run(request: Request):
+    c = _c(request)
+    if c.copilot is None:
+        raise HTTPException(503, "copiloto no disponible")
+    return await c.copilot.run("manual")
+
+
+@router.post("/copilot/enabled")
+def copilot_enabled(body: dict, request: Request):
+    c = _c(request)
+    if c.copilot is None:
+        raise HTTPException(503, "copiloto no disponible")
+    c.copilot.set_enabled(bool(body.get("enabled", True)))
+    c.audit.log("COPILOT_SET", f"Copiloto en vivo {'activado' if c.copilot.enabled else 'desactivado'}")
+    return c.copilot.state()
+
+
 @router.get("/metrics/summary")
 def metrics_summary(request: Request, hours: int = 168):
     """Salud: latencias y contadores por hora (hasta 30 días), por día, hora en curso, totales desde el arranque y estado actual."""

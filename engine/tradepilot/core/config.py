@@ -75,6 +75,9 @@ class Settings(BaseSettings):
     WATCHDOG_NO_TICKS_AFTER_S: int = 180
     WATCHDOG_REMIND_S: int = 600
     # Copias de seguridad de la base de datos (data/backups): cuántas conservar y cada cuántas horas
+    # Copiloto en vivo: cada cuántos segundos revisa las posiciones abiertas y cada cuánto repite el mismo aviso
+    COPILOT_INTERVAL_S: int = 300
+    COPILOT_REMIND_S: int = 1800
     BACKUP_KEEP: int = 14
     BACKUP_INTERVAL_H: float = 24
     MOCK_DEMO_HISTORY: bool = True          # simulador: genera un mes de operaciones inventadas para el calendario (no en :memory:)

@@ -9,6 +9,7 @@ import { NewsToday, analysisLine, useNewsAlerts } from "../components/NewsPanel"
 import { RecentStats } from "../components/RecentStats";
 import { AdviceCard } from "../components/AdviceCard";
 import { ReconcileCard } from "../components/ReconcileCard";
+import { CopilotCard } from "../components/CopilotCard";
 import type { Route } from "../components/Shell";
 
 /** Inicio = sala de control: alertas, P&L del día, cuentas en juego y estado del puente. */
@@ -141,6 +142,8 @@ export function Dashboard({ onRoute }: { onRoute?: (r: Route) => void } = {}) {
           </Card>
         </div>
       </div>
+
+      <CopilotCard />
 
       <ReconcileCard onRoute={onRoute} />
 

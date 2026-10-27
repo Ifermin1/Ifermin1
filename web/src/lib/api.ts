@@ -104,6 +104,9 @@ export type ReviewResult = { day: string; source: "ia" | "regla"; model: string;
                              review: { summary: string; patterns: { title: string; evidence: string; cost_usd: number | null }[]; tomorrow: string[]; score: number; mood: "bien" | "regular" | "mal" } };
 export type AskResult = { question: string; answer: string; numbers: string[]; model: string | null; ms: number; context: { n_trades: number; period_days: number } };
 export type EntryCheck = { verdict: "green" | "amber" | "red"; reasons: { level: "red" | "amber"; text: string }[]; checked_at: string; ai: { verdict?: "green" | "amber" | "red"; reason?: string; suggestion?: string; model?: string; ms?: number; error?: string } | null };
+export type CopilotSuggestion = { account: string; symbol: string; action: "breakeven" | "tighten" | "reduce" | "close" | "protect" | "hold"; price: number | null; severity: "bad" | "warn" | "ok" | "info";
+                                  title: string; detail: string; label: string; quantity: number };
+export type CopilotState = { ran_at: string | null; reason: string | null; source: "ia" | "regla" | null; model: string | null; positions: number; suggestions: CopilotSuggestion[]; enabled: boolean; interval_s: number };
 export type ReconcileFinding = { kind: "unconfirmed_order" | "naked_position" | "pending_entry" | "desync" | "trail_without_position"; severity: "bad" | "warn" | "info";
                                  account: string; symbol: string; detail: string; action: "protect" | "resync" | "review"; client_id?: string; order_id?: string };
 export type ReconcileReport = { ran_at: string | null; reason: string | null; findings: ReconcileFinding[]; counts: Record<string, number>; accounts: number };
@@ -225,6 +228,9 @@ export function makeClient(s: Session) {
     news: (days = 7, countries = "", minImpact = "low") => req<NewsFeed>(`/api/news?days=${days}${countries ? `&countries=${encodeURIComponent(countries)}` : ""}&min_impact=${minImpact}`),
     tradeStatus: () => req<TradeStatus>("/api/trade/status"),
     tradeOrders: (limit = 50) => req<StoredOrder[]>(`/api/trade/orders?limit=${limit}`),
+    copilot: () => req<CopilotState>("/api/copilot"),
+    copilotRun: () => req<CopilotState>("/api/copilot/run", { method: "POST" }),
+    copilotEnabled: (enabled: boolean) => req<CopilotState>("/api/copilot/enabled", { method: "POST", body: JSON.stringify({ enabled }) }),
     reconcile: () => req<ReconcileReport>("/api/reconcile"),
     reconcileRun: () => req<ReconcileReport>("/api/reconcile/run", { method: "POST" }),
     tradeOrder: (o: ManualOrder) => req<ManualOrderResult>("/api/trade/order", { method: "POST", body: JSON.stringify(o) }),

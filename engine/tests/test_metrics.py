@@ -1,5 +1,6 @@
 """Robustez 6: métricas por hora, contadores desde la auditoría y salida Prometheus."""
 import asyncio
+from datetime import datetime, timedelta
 
 from tradepilot.services.metrics_service import MetricsService, _pct, hour_key
 
@@ -25,15 +26,16 @@ async def test_observe_counters_rollup_and_summary(container):
     rows = container.store.metrics_range(hour_key())
     assert {r["metric"] for r in rows} >= {"copy_fill_ms", "fills", "rejected", "disconnects"}
     # cambio de hora: la hora anterior queda guardada y la nueva empieza de cero
-    m.hour = "2026-10-25T10:00"
+    past = (datetime.now() - timedelta(hours=3)).strftime("%Y-%m-%dT%H:00")
+    m.hour = past
     m.samples.clear(); m.counters.clear()
     m.samples["manual_order_ms"].append(7.0)              # una muestra "de la hora anterior"
     m._roll_if_needed()                                   # hour_key() != 2026-10-25T10:00 -> vuelca esa hora y empieza la actual
     assert m.hour == hour_key() and not m.samples
     s = m.summary(24 * 2)
     assert s["gauges"]["accounts_enabled"] >= 1 and "connected" in s["gauges"] and s["totals"]["fills"] == 1
-    assert any(h["hour"] == "2026-10-25T10:00" and "manual_order_ms" in h for h in s["hourly"])
-    assert any(d["day"] == "2026-10-25" and d["manual_order_ms_n"] == 1 for d in s["daily"])
+    assert any(h["hour"] == past and "manual_order_ms" in h for h in s["hourly"])
+    assert any(d["day"] == past[:10] and d["manual_order_ms_n"] >= 1 for d in s["daily"])
 
 
 async def test_prometheus_and_api(client, container):

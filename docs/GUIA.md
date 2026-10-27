@@ -485,6 +485,17 @@ actualizar: NinjaScript Editor → F5).
 - Por API: `GET /api/report/weekly?day=AAAA-MM-DD&account=&tag=&format=html|json` y
   `GET /api/trades.csv?day_from=&day_to=&account=&tag=`, con el token en la cabecera.
 
+### Copiloto en vivo (tarjeta de Inicio)
+
+Mientras haya posiciones abiertas, cada 5 minutos (`COPILOT_INTERVAL_S`) el copiloto mira cada posición con su contexto:
+flotante en $ y en R, stop y objetivo vivos, trailing, drawdown restante, límites, noticias próximas, ATR y racha de hoy,
+y propone **una acción concreta por posición** con el botón que la ejecuta: *Poner stop*, *Breakeven*, *Apretar stop*
+(a un precio concreto), *Cerrar la mitad* o *Cerrar*. Con clave de IA la propuesta la hace Claude; sin clave, reglas
+(sin stop → stop a 1 ATR; dato de impacto alto en ≤ 10 min → cerrar o reducir; +1 R con el stop en pérdida → breakeven;
++2 R → asegurar +1 R; riesgo mayor que la mitad del drawdown restante → reducir; 3 pérdidas seguidas y esta en contra →
+cerrar). Cada propuesta nueva llega también por Telegram/push (`COPILOT`, una vez cada 30 min por posición y acción).
+El copiloto **nunca ejecuta nada solo**: cada botón pasa por el PIN y la confirmación. Se puede desactivar en la tarjeta.
+
 ### Addon 3.0: lo que el addon hace por su cuenta
 
 El addon de NinjaTrader (`ninjatrader\TradePilotXBridge.cs`, recompilar con F5 tras actualizar) se vigila a sí mismo:
