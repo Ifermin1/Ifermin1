@@ -256,3 +256,38 @@ export function TrailBox({ client, account, symbol, quantity, trail, aiEnabled, 
     </div>
   );
 }
+
+/** Calculadora de tamaño por riesgo: "arriesgo X $ (o Y % del saldo) con este stop" → contratos, respetando el tope de la
+ * cuenta, el del engine y el drawdown que queda. */
+export function SizeCalc({ symbol, slTicks, balance, room, maxAccount, maxEngine, onUse }: {
+  symbol: string; slTicks: number; balance: number | null; room: number | null; maxAccount: number | null; maxEngine: number; onUse: (qty: number) => void }) {
+  const [mode, setMode] = useState<"usd" | "pct">(() => { try { return localStorage.getItem("tpx.size.mode") === "pct" ? "pct" : "usd"; } catch { return "usd"; } });
+  const [val, setVal] = useState<string>(() => { try { return localStorage.getItem("tpx.size.val") ?? "200"; } catch { return "200"; } });
+  useEffect(() => { try { localStorage.setItem("tpx.size.mode", mode); localStorage.setItem("tpx.size.val", val); } catch { /* privado */ } }, [mode, val]);
+  const pv = pointValue(symbol), ts = tickSize(symbol);
+  const perContract = pv && slTicks > 0 ? slTicks * ts * pv : null;
+  const risk = mode === "usd" ? Number(val) || 0 : balance ? (balance * (Number(val) || 0)) / 100 : 0;
+  const raw = perContract && risk > 0 ? Math.floor(risk / perContract) : 0;
+  const caps: string[] = [];
+  let qty = raw;
+  if (maxAccount && qty > maxAccount) { qty = maxAccount; caps.push(`tope de la cuenta ${maxAccount}`); }
+  if (qty > maxEngine) { qty = maxEngine; caps.push(`tope del engine ${maxEngine}`); }
+  const overRoom = room !== null && room > 0 && perContract ? qty * perContract > room : false;
+  const tooMuchRoom = room !== null && room > 0 && risk > 0.5 * room;
+  return (
+    <div className="sizecalc" data-testid="sizecalc">
+      <span className="muted small">tamaño por riesgo</span>
+      <div className="view-tabs"><button className={mode === "usd" ? "active" : ""} onClick={() => setMode("usd")}>$</button><button className={mode === "pct" ? "active" : ""} onClick={() => setMode("pct")}>% saldo</button></div>
+      {(mode === "usd" ? [100, 200, 300, 500] : [0.25, 0.5, 1, 2]).map((v) => <button key={v} className={`chip-btn ${Number(val) === v ? "active" : ""}`} onClick={() => setVal(String(v))}>{mode === "usd" ? `${v} $` : `${v} %`}</button>)}
+      <input inputMode="decimal" value={val} onChange={(e) => setVal(e.target.value)} style={{ width: 64 }} data-testid="sizecalc-val" />
+      {!slTicks ? <span className="muted small">pon primero el stop automático</span> : !perContract ? <span className="muted small">sin valor por punto conocido para {symbol}</span> : (
+        <>
+          <span className="small">{Math.round(risk)} $ con stop de {slTicks} ticks ({perContract.toFixed(0)} $/contrato) → <b data-testid="sizecalc-qty">{qty}</b> contrato{qty === 1 ? "" : "s"}{caps.length ? <span className="muted"> (limitado por {caps.join(" y ")})</span> : null}</span>
+          {qty > 0 && <button className="chip-btn primary" onClick={() => onUse(qty)} data-testid="sizecalc-use">Usar {qty}</button>}
+          {raw === 0 && <span className="small warn">ni un contrato cabe en ese riesgo: sube el riesgo o acorta el stop</span>}
+          {(overRoom || tooMuchRoom) && <span className="small bad">ese riesgo es más de la mitad del drawdown que queda ({Math.round(room ?? 0)} $)</span>}
+        </>
+      )}
+    </div>
+  );
+}

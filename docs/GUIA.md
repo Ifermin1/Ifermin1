@@ -458,6 +458,10 @@ actualizar: NinjaScript Editor → F5).
   kill switch activo o con la cuenta pausada por riesgo, los botones COMPRAR/VENDER se desactivan y verás el motivo;
   cerrar y cancelar siguen disponibles mientras haya conexión. Todo queda en Auditoría y, si lo activas en Avisos al
   teléfono, los rechazos llegan por Telegram (`MANUAL_REJECTED`).
+- **Tamaño por riesgo**: debajo de los contratos, elige cuánto quieres arriesgar en la operación (100-500 $ o 0,25-2 %
+  del saldo de la cuenta) y, con el stop automático puesto, el ticket calcula los contratos que caben (riesgo ÷ lo que
+  pierde un contrato en ese stop), respetando el tope de la cuenta y el del engine, y avisa si ese riesgo es más de la
+  mitad del drawdown que queda. *Usar N* pone los contratos.
 - **Semáforo antes de entrar**: el botón *Semáforo* del ticket (y, con *comprobar antes de enviar* marcado, cada
   COMPRAR/VENDER) pasa la orden por las mismas comprobaciones que haría un supervisor: kill switch, pérdida del día,
   drawdown gastado, cuenta pausada, tope de contratos, si estás aumentando una posición, racha de pérdidas, noticia de

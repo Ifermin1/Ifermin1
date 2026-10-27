@@ -767,3 +767,5 @@ table.trades tbody tr.sel td { background: var(--hl); box-shadow: inset 0 0 0 1p
 .prop-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 10px; } .prop-acc { padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel-2); display: flex; flex-direction: column; gap: 6px; } .prop-acc.ok { border-color: var(--ok); }
 .prop-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; } .prop-head .badge { margin-left: auto; }
 .prop-reqs { list-style: none; margin: 0; padding: 0; font-size: 12.5px; display: flex; flex-direction: column; gap: 3px; } .prop-reqs li.ok .prop-ico { color: var(--ok); } .prop-ico { display: inline-block; width: 16px; }
+
+.sizecalc { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 10px; border-radius: 10px; background: var(--panel-2); border: 1px dashed var(--line); }

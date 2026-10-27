@@ -5,7 +5,7 @@ import { CandleChart } from "../components/CandleChart";
 import { Card, Empty } from "../components/ui";
 import { Icon } from "../components/Icons";
 import { root, signedMoney, tickSize, pointValue } from "../lib/format";
-import { QuickAmount, ProtectPanel, ticksToText, StepPicker, Nudger, useNudge, loadStep, saveStep, stepLabel, trailText, STEPS, type Nudgeable, type Step } from "../components/TradeHelpers";
+import { QuickAmount, ProtectPanel, SizeCalc, ticksToText, StepPicker, Nudger, useNudge, loadStep, saveStep, stepLabel, trailText, STEPS, type Nudgeable, type Step } from "../components/TradeHelpers";
 
 /* Operar: poner, modificar y cancelar órdenes y cerrar posiciones desde cualquier sitio.
  * Pensado para que un retraso nunca cueste dinero: cada orden lleva un id único (reenviarla nunca duplica), solo se marca
@@ -294,6 +294,9 @@ export function Trade() {
                 <input type="number" min={1} max={status?.max_qty ?? 20} value={qty} onChange={(e) => setQty(Math.max(1, Math.min(status?.max_qty ?? 20, Number(e.target.value) || 1)))} data-testid="t-qty" />
                 <button className="chip-btn" onClick={() => setQty(Math.min(status?.max_qty ?? 20, qty + 1))} aria-label="más">+</button><span className="muted small">contratos</span></div>
             </div>
+            {symbol && !oco && (() => { const a = accounts.find((x) => x.account_id === account); const lim = risk?.limits.find((l) => l.account_id === account); return (
+              <SizeCalc symbol={symbol} slTicks={Number(sl) || 0} balance={a?.balance ?? null} room={a?.drawdown.room ?? null} maxAccount={lim?.max_position_size || null} maxEngine={status?.max_qty ?? 20}
+                        onUse={(n) => setQty(Math.max(1, Math.min(status?.max_qty ?? 20, n)))} />); })()}
             {(type === "LIMIT" || type === "STOPLIMIT") && <div className="ticket-row"><label>Precio límite<div className="px"><button className="chip-btn" onClick={() => bump(limit, -1, setLimit)}>−</button><input inputMode="decimal" value={limit} onChange={(e) => setLimit(e.target.value)} placeholder={last ? fmtPx(last, symbol) : ""} data-testid="t-limit" /><button className="chip-btn" onClick={() => bump(limit, 1, setLimit)}>+</button>{last && <button className="chip-btn" onClick={() => setLimit(fmtPx(last, symbol))}>último</button>}</div></label></div>}
             {(type === "STOPMARKET" || type === "STOPLIMIT") && <div className="ticket-row"><label>Precio del stop<div className="px"><button className="chip-btn" onClick={() => bump(stop, -1, setStop)}>−</button><input inputMode="decimal" value={stop} onChange={(e) => setStop(e.target.value)} placeholder={last ? fmtPx(last, symbol) : ""} data-testid="t-stop" /><button className="chip-btn" onClick={() => bump(stop, 1, setStop)}>+</button>{last && <button className="chip-btn" onClick={() => setStop(fmtPx(last, symbol))}>último</button>}</div></label></div>}
             {oco && <div className="ticket-row oco-row" data-testid="oco-row">
