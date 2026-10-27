@@ -757,3 +757,5 @@ table.trades tbody tr.sel td { background: var(--hl); box-shadow: inset 0 0 0 1p
 .doctor-icon { width: 16px; text-align: center; font-weight: 800; } .doctor-list li.bad .doctor-icon { color: var(--bad); } .doctor-list li.warn .doctor-icon { color: var(--warn); } .doctor-list li.ok .doctor-icon { color: var(--ok); }
 
 .chart .bar.warn { fill: var(--warn); }
+
+.ai-opinion { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; width: 100%; padding-top: 4px; border-top: 1px dashed var(--line); }

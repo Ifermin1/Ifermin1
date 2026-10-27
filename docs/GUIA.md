@@ -464,6 +464,11 @@ actualizar: NinjaScript Editor → F5).
   impacto en los próximos 10 minutos, precio viejo, volatilidad disparada y stop demasiado corto (< 0,5 ATR) o
   inexistente. VERDE envía sin más, ÁMBAR envía y te deja ver las señales, ROJO pide una confirmación extra con la lista
   de motivos. Nunca envía solo ni retrasa la orden más de lo que tarda la comprobación (milisegundos, sin IA).
+  Con clave de IA aparece la casilla **segunda opinión IA**: además de las reglas, Claude recibe el contexto completo
+  (P&L y drawdown de la cuenta, posición abierta, racha y últimas operaciones de hoy, noticias próximas, ATR y el stop de
+  la orden) y responde con su propio semáforo, el motivo y una sugerencia concreta ("baja a 2 contratos", "stop de al
+  menos 25 ticks", "espera a las 14:45"). Las reglas se ven al instante; la IA se añade a los pocos segundos. Si la IA
+  lo ve en rojo y las reglas no, también pide confirmación.
 
 ### Informe semanal y CSV (pestaña Análisis, arriba a la derecha)
 

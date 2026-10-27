@@ -103,7 +103,7 @@ export type ReviewResult = { day: string; source: "ia" | "regla"; model: string;
                              near_news: { trade: string; net: number; event: string; minutes_after: number }[]; quick_stops: string[];
                              review: { summary: string; patterns: { title: string; evidence: string; cost_usd: number | null }[]; tomorrow: string[]; score: number; mood: "bien" | "regular" | "mal" } };
 export type AskResult = { question: string; answer: string; numbers: string[]; model: string | null; ms: number; context: { n_trades: number; period_days: number } };
-export type EntryCheck = { verdict: "green" | "amber" | "red"; reasons: { level: "red" | "amber"; text: string }[]; checked_at: string; ai: { verdict?: string; reason?: string; model?: string; error?: string } | null };
+export type EntryCheck = { verdict: "green" | "amber" | "red"; reasons: { level: "red" | "amber"; text: string }[]; checked_at: string; ai: { verdict?: "green" | "amber" | "red"; reason?: string; suggestion?: string; model?: string; ms?: number; error?: string } | null };
 export type ReconcileFinding = { kind: "unconfirmed_order" | "naked_position" | "pending_entry" | "desync" | "trail_without_position"; severity: "bad" | "warn" | "info";
                                  account: string; symbol: string; detail: string; action: "protect" | "resync" | "review"; client_id?: string; order_id?: string };
 export type ReconcileReport = { ran_at: string | null; reason: string | null; findings: ReconcileFinding[]; counts: Record<string, number>; accounts: number };

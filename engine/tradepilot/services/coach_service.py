@@ -34,9 +34,14 @@ ASK_SYSTEM = (
     'Devuelve ÚNICAMENTE un JSON: {"answer": "...", "numbers": ["dato 1", "dato 2"]}'
 )
 CHECK_SYSTEM = (
-    "Eres un gestor de riesgo. Te paso una orden que un trader va a mandar y su contexto (riesgo, racha, noticias, volatilidad). "
-    'Devuelve ÚNICAMENTE un JSON: {"verdict": "verde"|"ámbar"|"rojo", "reason": "1 frase en español"}'
+    "Eres el gestor de riesgo de un trader intradía de futuros con cuentas de prop firm. Te paso una orden que va a mandar ahora y su "
+    "contexto: señales de las reglas, estado de la cuenta (P&L del día, drawdown restante, límites, posición abierta), racha y últimas "
+    "operaciones de hoy, noticias próximas, volatilidad (ATR) y el stop/objetivo de la orden. Juzga si es prudente ENTRAR AHORA con ESE tamaño "
+    "y ESE stop. Sé concreto y breve, en español. Devuelve ÚNICAMENTE un JSON: "
+    '{"verdict": "green"|"amber"|"red", "reason": "1-2 frases con el motivo principal citando cifras", '
+    '"suggestion": "cambio concreto si lo hay (p. ej. \"baja a 2 contratos\", \"stop de al menos 25 ticks\", \"espera a las 14:45\") o cadena vacía"}'
 )
+_VERDICT_ES = {"verde": "green", "ámbar": "amber", "ambar": "amber", "rojo": "red", "green": "green", "amber": "amber", "red": "red"}
 
 
 class CoachService:
@@ -228,11 +233,37 @@ class CoachService:
         out = {"verdict": verdict, "reasons": reasons, "checked_at": self.now().astimezone().isoformat(timespec="seconds"), "ai": None}
         if use_ai and self.ai.enabled:
             try:
-                r = await self.ai.ask(CHECK_SYSTEM, json.dumps({"order": order, "signals": reasons, "verdict_rules": verdict}, ensure_ascii=False, default=str), max_tokens=300)
-                out["ai"] = {"verdict": r.get("verdict"), "reason": r.get("reason"), "model": r.get("model")}
+                ctx = self._entry_context(order, snap, trades, streak)
+                t0 = time.monotonic()
+                r = await self.ai.ask(CHECK_SYSTEM, json.dumps({"order": order, "signals_rules": reasons, "verdict_rules": verdict, "context": ctx}, ensure_ascii=False, default=str), max_tokens=400)
+                v = _VERDICT_ES.get(str(r.get("verdict") or "").strip().lower(), "amber")
+                out["ai"] = {"verdict": v, "reason": str(r.get("reason") or "")[:400], "suggestion": str(r.get("suggestion") or "")[:200], "model": r.get("model"), "ms": round((time.monotonic() - t0) * 1000)}
             except Exception as exc:
                 out["ai"] = {"error": str(exc)[:160]}
         return out
+
+    def _entry_context(self, order: dict, snap, trades: list[dict], streak: int) -> dict:
+        """Lo que un gestor de riesgo querría ver antes de opinar sobre una entrada."""
+        symbol = str(order.get("symbol") or "")
+        st = self.risk.state()
+        ctx: dict = {"now": self.now().strftime("%Y-%m-%d %H:%M"), "day_total_all_accounts": st.day_total, "day_loss_limit_all": st.day_loss_limit, "kill_switch": st.kill_switch}
+        if snap is not None:
+            lim = self.risk.limits.get(snap.account_id)
+            ctx["account"] = {"id": snap.account_id, "alias": snap.alias, "firm": snap.firm, "plan": snap.plan, "balance": snap.balance, "net_pnl_today": snap.net_pnl,
+                              "drawdown_used_pct": snap.drawdown.pct, "drawdown_room_usd": snap.drawdown.room,
+                              "limits": {"max_daily_loss": lim.max_daily_loss, "max_daily_profit": lim.max_daily_profit, "max_position_size": lim.max_position_size, "halted": lim.trading_halted} if lim else None,
+                              "open_positions": [{"symbol": p.symbol, "quantity": p.quantity, "avg_price": p.avg_price, "unrealized": p.unrealized_pnl} for p in snap.open_positions if p.quantity]}
+        ctx["today"] = {"n_trades": len(trades), "net": round(sum(ts.net_of(t) for t in trades), 2), "loss_streak": streak,
+                        "last_trades": [ts.brief(t) for t in sorted(trades, key=lambda t: t.get("closed_at") or "")[-6:]]}
+        try:
+            al = self.news.alerts() if self.news else {"upcoming": []}
+            ctx["news_next"] = [{"title": u["event"]["title"], "in_minutes": u["minutes"], "impact": u["event"]["impact"]} for u in al.get("upcoming", [])[:4]]
+        except Exception:
+            ctx["news_next"] = []
+        if self.market is not None and symbol:
+            ctx["market"] = {"last": self.market.price(symbol), "tick_age_s": self.market.age_s(symbol), "atr_5m_ticks": self.market.atr_ticks(symbol, 5), "atr_60m_ticks": self.market.atr_ticks(symbol, 60),
+                             "volume_ratio": self.market.volume_ratio(symbol), "tick_size": tick_size(symbol)}
+        return ctx
 
     # ---- chat con tus datos ----
     def _context(self, days: int = 90) -> dict:

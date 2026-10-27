@@ -162,11 +162,21 @@ export function Trade() {
   const [checking, setChecking] = useState(false);
   const [checkAlways, setCheckAlways] = useState(() => load("tpx.trade.check", "1") === "1");
   useEffect(() => { save("tpx.trade.check", checkAlways ? "1" : "0"); }, [checkAlways]);
-  const runCheck = async (action: "BUY" | "SELL"): Promise<EntryCheck | null> => {
+  const [checkAi, setCheckAi] = useState(() => load("tpx.trade.checkai", "0") === "1");
+  useEffect(() => { save("tpx.trade.checkai", checkAi ? "1" : "0"); }, [checkAi]);
+  const [aiBusy, setAiBusy] = useState(false);
+  const runCheck = async (action: "BUY" | "SELL", withAi = checkAi && !!status?.ai_enabled): Promise<EntryCheck | null> => {
     if (!client || !account || !symbol) return null;
     setChecking(true);
-    try { const c = await client.aiCheckEntry({ account, symbol, action, quantity: qty, order_type: type, sl_ticks: Number(sl) || 0, tp_ticks: Number(tp) || 0 }, false); setCheck(c); return c; }
-    catch { return null; } finally { setChecking(false); }
+    const o = { account, symbol, action, quantity: qty, order_type: type, sl_ticks: Number(sl) || 0, tp_ticks: Number(tp) || 0 };
+    let c: EntryCheck | null = null;
+    try { c = await client.aiCheckEntry(o, false); setCheck(c); } catch { return null; } finally { setChecking(false); }
+    if (withAi && c) {
+      // la opinión de Claude tarda unos segundos: las reglas ya están en pantalla, la IA se añade cuando llega
+      setAiBusy(true);
+      try { const a = await client.aiCheckEntry(o, true); c = { ...c, ai: a.ai }; setCheck(c); } catch { /* sin IA: se queda el semáforo de reglas */ } finally { setAiBusy(false); }
+    }
+    return c;
   };
   const submit = async (action: "BUY" | "SELL") => {
     if (!account || !symbol || !canTrade) return;
@@ -174,6 +184,7 @@ export function Trade() {
     if (checkAlways) {
       const c = await runCheck(action);
       if (c && c.verdict === "red" && !confirm(`SEMÁFORO EN ROJO:\n\n${c.reasons.map((r) => "· " + r.text).join("\n")}\n\n¿Enviar igualmente?`)) return;
+      if (c && c.verdict !== "red" && c.ai?.verdict === "red" && !confirm(`LA IA LO VE EN ROJO:\n\n${c.ai.reason ?? ""}${c.ai.suggestion ? `\nSugerencia: ${c.ai.suggestion}` : ""}\n\n¿Enviar igualmente?`)) return;
     }
     const order: ManualOrder = { client_id: newId(), account, symbol, action, quantity: qty, order_type: type,
       limit_price: type === "LIMIT" || type === "STOPLIMIT" ? Number(limit) || 0 : 0, stop_price: type === "STOPMARKET" || type === "STOPLIMIT" ? Number(stop) || 0 : 0,
@@ -303,6 +314,10 @@ export function Trade() {
               <label className="inline small"><input type="checkbox" checked={checkAlways} onChange={(e) => setCheckAlways(e.target.checked)} /> comprobar antes de enviar</label>
               {check && <span className={`light ${check.verdict}`} title={check.checked_at}>{check.verdict === "green" ? "VERDE" : check.verdict === "amber" ? "ÁMBAR" : "ROJO"}</span>}
               {check && (check.reasons.length ? <span className="small">{check.reasons.map((r) => r.text).join(" · ")}</span> : <span className="small ok">sin señales en contra: riesgo, racha, noticias y volatilidad en orden</span>)}
+              {status?.ai_enabled && <label className="inline small" title="Pide además la opinión de Claude con el contexto completo (tarda unos segundos; las reglas se muestran al instante)"><input type="checkbox" checked={checkAi} onChange={(e) => setCheckAi(e.target.checked)} data-testid="check-ai" /> segunda opinión IA</label>}
+              {aiBusy && <span className="muted small">IA pensando…</span>}
+              {check?.ai && !aiBusy && (check.ai.error ? <span className="small warn">IA no disponible: {check.ai.error}</span>
+                : <span className="small ai-opinion" data-testid="ai-opinion"><span className={`light ${check.ai.verdict ?? "amber"}`}>IA {check.ai.verdict === "green" ? "VERDE" : check.ai.verdict === "amber" ? "ÁMBAR" : "ROJO"}</span> {check.ai.reason}{check.ai.suggestion ? <b> → {check.ai.suggestion}</b> : null}{check.ai.ms ? <span className="muted"> · {Math.round(check.ai.ms / 100) / 10} s</span> : null}</span>)}
             </div>
             <div className="muted small">{last ? `último ${symbol}: ${fmtPx(last, symbol)}` : "sin precio en vivo de este instrumento"}{account === master ? ` · la orden va a la MAESTRA y se replica a ${followersOf(account)} seguidoras` : account ? " · solo esta cuenta (las seguidoras no la copian)" : ""}</div>
             {oco ? <div className="ticket-actions one"><button className="oco-btn" disabled={!canTrade || busy !== null || !symbol} onClick={() => void submitOco()} data-testid="t-oco-send">ENVIAR OCO {qty} (compra arriba / venta abajo)</button></div>

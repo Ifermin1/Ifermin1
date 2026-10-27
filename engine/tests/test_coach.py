@@ -76,3 +76,23 @@ async def test_check_entry_traffic_light(client: AsyncClient, container):
         container.store.save_trade(_trade("Sim102", day, f"09:3{i}:00", f"09:3{i}:30", -50))
     d = (await client.post("/api/ai/check-entry", json={"account": "Sim102", "symbol": "NQ 12-26", "action": "SELL", "quantity": 1, "sl_ticks": 40})).json()
     assert d["verdict"] == "red" and any("3 pérdidas seguidas" in x["text"] for x in d["reasons"])
+
+
+async def test_check_entry_with_ai_normalizes_verdict_and_adds_context(container):
+    from tradepilot.services.ai_service import AIService
+
+    class FakeAI(AIService):
+        def __init__(self):
+            super().__init__(api_key="k")
+            self.prompts = []
+        async def ask(self, system, prompt, model=None, max_tokens=None):
+            self.prompts.append(prompt)
+            return {"verdict": "rojo", "reason": "racha y noticia en 5 min", "suggestion": "espera 15 min", "model": "fake"}
+    fake = FakeAI()
+    container.coach.ai = fake
+    await container.accounts.sync_once()
+    r = await container.coach.check_entry({"account": "Sim101", "symbol": "NQ 12-26", "action": "BUY", "quantity": 1, "order_type": "MARKET", "sl_ticks": 40, "tp_ticks": 80}, use_ai=True)
+    assert r["ai"]["verdict"] == "red" and r["ai"]["suggestion"] == "espera 15 min" and r["ai"]["model"] == "fake" and "ms" in r["ai"]
+    import json
+    sent = json.loads(fake.prompts[0])
+    assert sent["context"]["account"]["id"] == "Sim101" and "today" in sent["context"] and "market" in sent["context"] and "verdict_rules" in sent
