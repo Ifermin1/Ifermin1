@@ -87,6 +87,7 @@ Si *Cuentas* queda vacío, el addon no está respondiendo en 5557: revisa que Ni
 ## Protecciones
 
 - **Grupos y presets**: etiquetas por cuenta (50K, PA…) con filtro y acciones en bloque, presets de riesgo (Conservador/Moderado/Agresivo, editables) y una tarjeta de *Recomendaciones* en Inicio con la acción de un clic (pausar, pasar a conservador, igualar, cerrar, poner perfil).
+- **Briefing y cierre automáticos**: a la hora que elijas, el briefing de la mañana (noticias, ventanas sin operar, tamaño) y la revisión del coach del día llegan al teléfono.
 - **Asistente por chat**: en Inicio y por Telegram, lenguaje natural → consultas al momento y planes de acción (breakeven, cerrar, parcial, pausar, mover stop) que solo se ejecutan al confirmar.
 - **Copiloto en vivo**: con posiciones abiertas, cada 5 min una propuesta concreta por posición (breakeven, apretar stop, reducir, cerrar antes del dato, poner stop) con botón; IA con clave, reglas sin ella; aviso al teléfono.
 - **Semáforo con IA**: segunda opinión de Claude con el contexto completo antes de entrar.

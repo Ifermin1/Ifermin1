@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from tradepilot.api.auth import require_token
-from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest, ProtectRequest, TrailRequest, DayLossRequest, AutoRiskRequest, RiskPresets, ApplyPresetRequest, TagsRequest, OcoEntryRequest, TradeTemplates, ReviewRequest, CheckEntryRequest, AskRequest, PushSubscribeRequest, PushUnsubscribeRequest, ConfigImportRequest, AssistantRequest, PlanRequest
+from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest, ProtectRequest, TrailRequest, DayLossRequest, AutoRiskRequest, RiskPresets, ApplyPresetRequest, TagsRequest, OcoEntryRequest, TradeTemplates, ReviewRequest, CheckEntryRequest, AskRequest, PushSubscribeRequest, PushUnsubscribeRequest, ConfigImportRequest, AssistantRequest, PlanRequest, DigestConfigRequest, DigestRunRequest
 from tradepilot.container import Container
 from tradepilot.domain.risk import RiskLimit, Schedule
 
@@ -383,6 +383,33 @@ def stats_analysis(request: Request, day_from: str | None = None, day_to: str | 
     if d1 < d0:
         raise HTTPException(400, "el fin del periodo es anterior al inicio")
     return c.performance.analysis(d0, d1, account or None)
+
+
+@router.get("/digest")
+def digest_state(request: Request):
+    """Briefing de la mañana y cierre de sesión: configuración (horas) y los últimos textos."""
+    c = _c(request)
+    if c.digest is None:
+        raise HTTPException(503, "resúmenes no disponibles")
+    return c.digest.state()
+
+
+@router.put("/digest")
+def digest_config(body: DigestConfigRequest, request: Request):
+    c = _c(request)
+    if c.digest is None:
+        raise HTTPException(503, "resúmenes no disponibles")
+    c.digest.set_config(**body.model_dump(exclude_unset=True))
+    c.audit.log("DIGEST_SET", f"Resúmenes automáticos: {'activados' if c.digest.config['enabled'] else 'desactivados'} · briefing {c.digest.config['brief_time']} · cierre {c.digest.config['review_time']}")
+    return c.digest.state()
+
+
+@router.post("/digest/run")
+async def digest_run(body: DigestRunRequest, request: Request):
+    c = _c(request)
+    if c.digest is None:
+        raise HTTPException(503, "resúmenes no disponibles")
+    return await (c.digest.morning_brief("manual") if body.kind == "brief" else c.digest.session_review("manual"))
 
 
 @router.post("/assistant")

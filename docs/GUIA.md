@@ -485,6 +485,17 @@ actualizar: NinjaScript Editor → F5).
 - Por API: `GET /api/report/weekly?day=AAAA-MM-DD&account=&tag=&format=html|json` y
   `GET /api/trades.csv?day_from=&day_to=&account=&tag=`, con el token en la cabecera.
 
+### Briefing de la mañana y cierre de sesión (Inicio → Briefing y cierre)
+
+- **Briefing** (por defecto a las 08:00, hora del PC): noticias vigiladas de hoy con hora e impacto, ventanas sin
+  operar, cuentas con poco colchón y las reglas de ayer. Con clave de IA lo escribe Claude (qué mueve el mercado, con
+  qué tamaño empezar, la regla del día).
+- **Cierre** (17:05): la revisión del coach del día generada sola: resultado, disciplina, lo que costó dinero y las tres
+  reglas para mañana.
+- Los dos llegan por Telegram/push (`MORNING_BRIEF`, `SESSION_REVIEW`), una vez al día, de lunes a viernes (se puede
+  cambiar), y quedan en la tarjeta para leerlos. *Generar ahora* los hace al momento. Horas en la tarjeta o en
+  `engine\.env` (`MORNING_BRIEF_TIME`, `SESSION_REVIEW_TIME`).
+
 ### Asistente por chat (tarjeta de Inicio y Telegram)
 
 Escribe lo que quieres en lenguaje normal: «pon todos los stops a breakeven», «cierra la mitad de NQ en Sim101», «cierra

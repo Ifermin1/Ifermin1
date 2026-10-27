@@ -761,3 +761,5 @@ table.trades tbody tr.sel td { background: var(--hl); box-shadow: inset 0 0 0 1p
 .ai-opinion { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; width: 100%; padding-top: 4px; border-top: 1px dashed var(--line); }
 
 .plan { margin-top: 8px; padding: 8px 10px; border-radius: 10px; border: 1px dashed var(--line-2); } .plan ul, .plan-result { margin: 0 0 6px; padding-left: 18px; } .plan-result li.ok { color: var(--ok); } .plan-result li.bad { color: var(--bad); }
+
+.digest-text { white-space: pre-wrap; font-family: inherit; font-size: 13px; line-height: 1.5; margin: 0 0 10px; padding: 10px 12px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }

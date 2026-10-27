@@ -76,6 +76,9 @@ class Settings(BaseSettings):
     WATCHDOG_REMIND_S: int = 600
     # Copias de seguridad de la base de datos (data/backups): cuántas conservar y cada cuántas horas
     # Copiloto en vivo: cada cuántos segundos revisa las posiciones abiertas y cada cuánto repite el mismo aviso
+    # Resúmenes automáticos (hora local del PC): briefing de la mañana y cierre de sesión al teléfono
+    MORNING_BRIEF_TIME: str = "08:00"
+    SESSION_REVIEW_TIME: str = "17:05"
     COPILOT_INTERVAL_S: int = 300
     COPILOT_REMIND_S: int = 1800
     BACKUP_KEEP: int = 14

@@ -110,6 +110,7 @@ resto responde 403. `/api/health` devuelve `role` para que la consola se ponga e
 | POST | `/api/ai/review` | `{day, force}` revisión de la sesión (IA si hay clave, si no por reglas), cacheada por día |
 | POST | `/api/ai/check-entry` | Semáforo de una orden: `{verdict: green|amber|red, reasons[]}` sin IA (ms); `ai: true` añade la opinión del modelo |
 | POST | `/api/ai/ask` | Pregunta en lenguaje natural sobre las operaciones de los últimos N días (requiere clave de IA) |
+| GET/PUT/POST | `/api/digest` · `/api/digest/run` | Briefing de la mañana y cierre de sesión: configuración, últimos textos, generar ahora |
 | POST | `/api/assistant` · `/api/assistant/confirm` · `/api/assistant/cancel` | Asistente por chat: respuesta + plan; confirmar/cancelar el plan (confirmar solo con token completo) |
 | GET/POST | `/api/copilot` · `/api/copilot/run` · `/api/copilot/enabled` | Copiloto en vivo: propuestas por posición abierta (IA o reglas) |
 | GET | `/api/metrics` · `/api/metrics/summary?hours=` | Prometheus (gauges, contadores, cuantiles) y resumen por hora/día para la pestaña Salud |

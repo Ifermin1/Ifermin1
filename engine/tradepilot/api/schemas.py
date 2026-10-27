@@ -35,6 +35,17 @@ class PushUnsubscribeRequest(BaseModel):
     endpoint: str
 
 
+class DigestConfigRequest(BaseModel):
+    enabled: Optional[bool] = None
+    brief_time: Optional[str] = Field(default=None, pattern=r"^\d{2}:\d{2}$")
+    review_time: Optional[str] = Field(default=None, pattern=r"^\d{2}:\d{2}$")
+    weekdays_only: Optional[bool] = None
+
+
+class DigestRunRequest(BaseModel):
+    kind: str = Field(pattern="^(brief|review)$")
+
+
 class AssistantRequest(BaseModel):
     text: str = Field(min_length=1, max_length=400)
 
