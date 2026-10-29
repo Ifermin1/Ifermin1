@@ -30,7 +30,7 @@ versión de escritorio).
    - `API_TOKEN=` un token largo tuyo (es la única llave de la consola).
 5. Instalar el addon en NinjaTrader: `scripts\update.ps1` copia `ninjatrader\TradePilotXBridge.cs` a la carpeta de AddOns.
    Después, en NinjaTrader: *New → NinjaScript Editor → F5* (compilar) y **reiniciar NinjaTrader**.
-   En *New → NinjaScript Output* debe aparecer `[TradePilotX] Bridge v2.6 online`.
+   En *New → NinjaScript Output* debe aparecer `[TradePilotX] Bridge v3.0 online`.
    **Quitar los avisos de voz de NinjaTrader**: por defecto reproduce "order filled", "order cancelled"… por cada orden de
    cada cuenta; con varias seguidoras son decenas de avisos por operación y frenan a NinjaTrader. En *Tools → Options →
    General*, apartado *Sounds*, desmarca todos los sonidos de órdenes (order filled, order cancelled, order pending, order
@@ -44,6 +44,9 @@ versión de escritorio).
    pararlo a mano: `Start-ScheduledTask -TaskName 'TradePilotX Engine'` / `Stop-ScheduledTask -TaskName 'TradePilotX Engine'`.
    Con la tarea instalada, para actualizar: `Stop-ScheduledTask`, `update.ps1` (arranca una copia en la ventana; ciérrala con
    Ctrl+C al terminar) y `Start-ScheduledTask`.
+8. **Arrancarlo todo con un clic** (NinjaTrader con el addon, engine, consola): doble clic en `scripts\start_all.bat`. Ver
+   "Arranque con un clic" en el apartado 5. Para que lo haga solo al iniciar sesión en Windows:
+   `powershell -ExecutionPolicy Bypass -File scripts\start_all.ps1 -Install` (sin administrador).
 
 ---
 
@@ -363,9 +366,9 @@ si solo quieres vigilar y cortar.
 
 ## 5. Operativa diaria
 
-1. Abrir NinjaTrader y conectar la cuenta maestra y las seguidoras. Comprobar en el Output `Bridge v2.9 online`.
-2. Arrancar el engine (`run_engine.ps1`) si no está corriendo. En *Inicio*: modo `NinjaTrader · addon v2.9`, heartbeat
-   actualizándose, sin avisos rojos.
+1. Abrir NinjaTrader y conectar la cuenta maestra y las seguidoras. Comprobar en el Output `Bridge v3.0 online`.
+2. Arrancar el engine (`run_engine.ps1`) si no está corriendo. En *Inicio*: modo `NinjaTrader · addon v3.0`, heartbeat
+   actualizándose, sin avisos rojos. Los pasos 1 y 2 los hace de una vez `scripts\start_all.bat` (ver abajo).
 3. En *Cuentas*: las seguidoras que deben copiar con el interruptor encendido y el badge *copiando*.
 4. Operar solo en la cuenta maestra. Todo (entrada, stop, take profit, modificaciones, cancelaciones) se copia.
 5. Vigilar *Inicio*: en *Cuentas en juego* cada seguidora debe tener la misma posición que la maestra (× multiplicador) y sus
@@ -373,6 +376,38 @@ si solo quieres vigilar y cortar.
    `FOLLOWER_FILL`. Las tarjetas de latencia y deslizamiento indican la calidad de la copia y el gráfico, cómo va el día.
 6. Al terminar: el cierre programado lo hace solo; si no lo usas, comprueba que todas las cuentas están planas antes del
    cierre del prop firm.
+
+### Arranque con un clic (`scripts\start_all.bat`)
+
+Doble clic en `scripts\start_all.bat` (o `powershell -ExecutionPolicy Bypass -File scripts\start_all.ps1`) y el script, en
+orden:
+
+1. **NinjaTrader**: si no está abierto lo abre (busca `NinjaTrader.exe` en *Archivos de programa*, en los accesos directos
+   del menú Inicio y del escritorio; si está en otro sitio: `-NinjaPath "D:\...\NinjaTrader.exe"`). Después espera, hasta 4
+   minutos, a que el **addon** responda en el puerto `ZMQ_SYNC_PORT` (5557). El addon carga solo cada vez que NinjaTrader
+   arranca: no hay que hacer nada en NinjaTrader, salvo entrar con la contraseña si no está guardada.
+2. **Engine**: si ya escucha en `API_PORT` no toca nada; si existe la tarea "TradePilotX Engine" la arranca; si no, abre
+   `run_engine.ps1` en una ventana minimizada. Espera a que responda (la primera vez instala dependencias y compila la
+   consola: más de 2 minutos).
+3. **Túnel** (solo con `-Tunnel`): arranca la tarea "TradePilotX Tunnel" si la creaste con `publish.ps1 -Install` y muestra la
+   URL pública.
+4. **Revisión**: ejecuta el doctor (`python -m tradepilot.doctor`), imprime un resumen y abre `http://localhost:8000` en el
+   navegador (`-NoBrowser` para no abrirlo). Si algo no respondió, la ventana se queda abierta con el motivo en rojo.
+
+Lo que **no** puede hacer ningún script, porque lo hace NinjaTrader por dentro:
+
+- **Compilar el addon**: una vez tras instalar y cada vez que `update.ps1` diga que copió `TradePilotXBridge.cs`: *New →
+  NinjaScript Editor → F5* y reiniciar NinjaTrader. Hasta entonces el script dirá "el addon no responde".
+- **La contraseña de NinjaTrader**: en su ventana de entrada marca *Remember password* y *Auto login*; con eso el arranque
+  es desatendido de principio a fin.
+- **Conectar las cuentas**: en *Tools → Options → General*, NinjaTrader puede conectar solo a tu conexión al arrancar
+  (*On startup connect to*). Sin eso, el addon arranca pero las cuentas aparecen cuando conectes.
+
+Opciones: `-NoNinja` (solo engine, para modo mock o si abres NinjaTrader tú), `-Tunnel`, `-NoBrowser`, `-WaitAddonS 600`
+(esperar más al addon), `-Install` (crea el acceso directo *TradePilot X* en la carpeta Inicio de Windows: al iniciar sesión
+arranca todo; admite `-Tunnel`/`-NoBrowser`/`-NinjaPath`), `-Uninstall` (lo quita). Convive con `install_autostart.ps1`:
+si la tarea del engine ya está instalada, el script la usa en vez de arrancar un segundo engine. En modo `mock`
+(`ENGINE_MODE` en `engine\.env`) el paso de NinjaTrader se omite.
 
 ### Operar desde cualquier sitio (pestaña Operar)
 
@@ -752,7 +787,7 @@ antes. Si además esa ventana dice `Cuenta Sim101 activada`, ese engine está en
 - **Cerrar una sola cuenta:** *Cuentas → Cerrar* en esa tarjeta.
 - **Cerrar seguidoras sin tocar la maestra:** *Riesgo → Cerrar todas las seguidoras*.
 - **El engine se cayó o el PC se reinició:** las posiciones y órdenes siguen en el bróker. Arrancar NinjaTrader y luego el
-  engine; el addon recupera las órdenes vivas y el engine vuelve a comparar posiciones (si algo no cuadra, aparece
+  engine (`scripts\start_all.bat` hace ambas cosas en orden); el addon recupera las órdenes vivas y el engine vuelve a comparar posiciones (si algo no cuadra, aparece
   DESINCRONIZADA). Antes de operar, mirar *Cuentas*.
 - **Nada funciona y hay posición abierta:** cerrar a mano en NinjaTrader (*Close* en cada cuenta). TradePilot nunca sustituye
   esa opción.

@@ -1,4 +1,4 @@
-# Actualiza TradePilot X en Windows: código, dependencias, consola web, addon de NinjaTrader y reinicio del engine.
+﻿# Actualiza TradePilot X en Windows: código, dependencias, consola web, addon de NinjaTrader y reinicio del engine.
 # Uso: powershell -ExecutionPolicy Bypass -File scripts\update.ps1
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot

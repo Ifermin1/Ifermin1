@@ -72,6 +72,11 @@ powershell -ExecutionPolicy Bypass -File scripts\run_engine.ps1
 
 El script crea el entorno virtual de Python, compila la consola web si falta (necesita Node.js), crea `engine\.env`, abre el puerto en el firewall y arranca el engine. Requisitos: Python 3.11+, Node.js 18+ y Git.
 
+Para el día a día, una vez instalado: **doble clic en `scripts\start_all.bat`** abre NinjaTrader (el addon carga con él),
+espera a que el addon responda, arranca el engine (o su tarea programada), pasa el doctor y abre la consola. Con
+`scripts\start_all.ps1 -Install` todo eso ocurre solo al iniciar sesión en Windows. Detalles en `docs/GUIA.md` → "Arranque
+con un clic".
+
 ## Con NinjaTrader real (PC Windows)
 
 En modo `mock` el engine **no está conectado a NinjaTrader**: las operaciones son inventadas y lo que abras en NinjaTrader no llega. Para replicar operaciones reales:

@@ -1,4 +1,4 @@
-# Arranca el engine de TradePilot X en Windows (junto a NinjaTrader).
+﻿# Arranca el engine de TradePilot X en Windows (junto a NinjaTrader).
 # Uso: powershell -ExecutionPolicy Bypass -File scripts\run_engine.ps1
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot

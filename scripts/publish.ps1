@@ -1,4 +1,4 @@
-# Publica la consola de TradePilot X en Internet con Cloudflare Tunnel (sin abrir puertos en el router, con HTTPS).
+﻿# Publica la consola de TradePilot X en Internet con Cloudflare Tunnel (sin abrir puertos en el router, con HTTPS).
 # El engine sigue en este PC (tiene que estar junto a NinjaTrader); el túnel solo le da una puerta de entrada segura.
 #
 #   scripts\publish.ps1                                   túnel RÁPIDO: URL aleatoria https://xxxx.trycloudflare.com

@@ -42,7 +42,7 @@ claves ni contenido de `.env`, y para elaborarla no se envió ninguna orden ni s
   (mismo SHA) y `git status --short` (sin cambios). La API pública de GitHub devolvió el mismo SHA como cabeza de la rama.
 - Documentación: `README.md` · `docs/GUIA.md` · `docs/ARQUITECTURA.md` · `docs/COMERCIALIZACION.md` · `hub/README.md` ·
   `engine/.env.example`. Scripts de operación en `scripts/` (`update.ps1`, `run_engine.ps1`, `install_autostart.ps1`,
-  `publish.ps1`, `fake_ninja.py`, `ci_scenarios.py`).
+  `publish.ps1`, `start_all.ps1`/`start_all.bat` (arranque completo), `fake_ninja.py`, `ci_scenarios.py`).
 
 ## 2. Instalación
 

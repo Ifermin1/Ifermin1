@@ -1,4 +1,4 @@
-# Registra el engine de TradePilot X para que arranque solo al iniciar sesión en Windows
+﻿# Registra el engine de TradePilot X para que arranque solo al iniciar sesión en Windows
 # y se reinicie si se cae. Ejecutar UNA vez como administrador:
 #   powershell -ExecutionPolicy Bypass -File scripts\install_autostart.ps1
 # Para quitarlo:  Unregister-ScheduledTask -TaskName "TradePilotX Engine" -Confirm:$false
