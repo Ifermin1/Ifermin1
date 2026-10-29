@@ -53,7 +53,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 {
     public class TradePilotXBridge : AddOnBase
     {
-        private const string BridgeVersion = "3.0";
+        private const string BridgeVersion = "3.1";
 
         // ---- configuración ------------------------------------------------
         private class BridgeConfig
@@ -111,6 +111,10 @@ namespace NinjaTrader.NinjaScript.AddOns
         private readonly ConcurrentDictionary<string, bool> feedWarned = new ConcurrentDictionary<string, bool>();
         // (follower, master_order_id) -> orden del follower, para modificar/cancelar y evitar duplicados
         private readonly ConcurrentDictionary<string, Order> followerOrders = new ConcurrentDictionary<string, Order>();
+        // v3.1: OCO local. key de la copia -> grupo "cuenta|oco del maestro": cuando una copia del grupo ejecuta del todo (el stop),
+        // las demás vivas del mismo grupo en esa cuenta (el objetivo) se cancelan aquí mismo, sin esperar a que el engine
+        // reenvíe el ORDER_CANCELLED del maestro (29/10: el objetivo de la seguidora ejecutó 1 s después del stop y la dejó invertida).
+        private readonly ConcurrentDictionary<string, string> copyGroups = new ConcurrentDictionary<string, string>();
         // Órdenes pendientes del master ya publicadas: NinjaTrader emite Accepted y Working seguidos
         private readonly ConcurrentDictionary<string, bool> pendingPublished = new ConcurrentDictionary<string, bool>();
         // Cantidad ya copiada a mercado para cubrir lo que la orden del follower NO ejecutó (rechazo/cancelación)
@@ -458,6 +462,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                     "order_type", TypeName(order.OrderType),
                     "state", e.OrderState.ToString(),
                     "order_id", OrderKey(order),
+                    "oco", order.Oco ?? "",      // v3.1: stop y objetivo del maestro enlazados; la copia imita el enlace
                     "timestamp", e.Time.ToString("o")));
             }
             catch (Exception ex) { Error("OnMasterOrder: " + ex.Message); }
@@ -703,6 +708,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                             // Cuánto proteger lo decide el engine (libro de exposición, que cuenta las entradas en vuelo): aquí la
                             // posición del bróker puede ir por detrás del fill de la entrada y recortar un stop legítimo.
                             pendingCopies[key] = true;
+                            RegisterCopyGroup(key, accountName, Get(m, "oco"));
                             SubmitNew(account, symbol, Get(m, "action"), type, qty, limit, stop, key, masterOrderId);
                         }
                         break;
@@ -736,6 +742,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                                 return "IGNORED|posición ya cubierta por otras copias vivas";
                             }
                             pendingCopies[key] = true;
+                            RegisterCopyGroup(key, accountName, Get(m, "oco"));
                             Warn("ORDER_MODIFIED sin copia viva para " + key + ": se recrea " + rqty + " (posición " + pos + ", otras copias vivas " + covered + ")");
                             SubmitNew(account, symbol, Get(m, "action"), rtype, rqty, rlimit, rstop, key, masterOrderId);
                             return "OK|ORDER_MODIFIED_RECREATED";
@@ -935,6 +942,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                     order.Quantity, order.Instrument.FullName, e.OrderState, string.IsNullOrEmpty(error) ? "" : " ERROR=" + error + " " + native);
                 if (e.OrderState == OrderState.Rejected) Error(line);
                 else if (cfg.VerboseOutput || !string.IsNullOrEmpty(error) || !IsTransitState(e.OrderState)) Info(line);
+                if (e.OrderState == OrderState.Filled) CancelOcoSiblings(order, account);
                 if (e.OrderState == OrderState.Cancelled || e.OrderState == OrderState.Rejected || e.OrderState == OrderState.Filled)
                 {
                     ReconcileAfterCancel(order, account);
@@ -1150,6 +1158,42 @@ namespace NinjaTrader.NinjaScript.AddOns
             }
             catch { }
             return 0;
+        }
+
+        // ===================================================================
+        // v3.1: OCO local entre copias (stop y objetivo del maestro enlazados)
+        // ===================================================================
+        private void RegisterCopyGroup(string key, string accountName, string masterOco)
+        {
+            string dummy;
+            if (string.IsNullOrEmpty(masterOco)) { copyGroups.TryRemove(key, out dummy); return; }
+            copyGroups[key] = accountName + "|" + masterOco;
+        }
+
+        /// <summary>La copia `filled` ejecutó del todo: si pertenece a un grupo OCO del maestro, se cancelan aquí mismo las otras
+        /// copias vivas del grupo en la misma cuenta. En el maestro lo hace NinjaTrader (OCO); en la seguidora las copias nacen
+        /// sueltas y hasta ahora el objetivo solo se cancelaba cuando el engine reenviaba el ORDER_CANCELLED del maestro.</summary>
+        private void CancelOcoSiblings(Order filled, string accountName)
+        {
+            try
+            {
+                string myKey = null, group = null;
+                foreach (var kv in followerOrders)
+                    if (ReferenceEquals(kv.Value, filled)) { myKey = kv.Key; break; }
+                if (myKey == null || !copyGroups.TryGetValue(myKey, out group) || string.IsNullOrEmpty(group)) return;
+                var siblings = new List<Order>();
+                foreach (var kv in copyGroups)
+                {
+                    if (kv.Key == myKey || kv.Value != group) continue;
+                    Order o;
+                    if (followerOrders.TryGetValue(kv.Key, out o) && o != null && IsLive(o) && o.Account != null && o.Account.Name == accountName)
+                        siblings.Add(o);
+                }
+                if (siblings.Count == 0) return;
+                siblings[0].Account.Cancel(siblings);
+                Info("OCO local en " + accountName + ": " + filled.Name + " ejecutó; canceladas " + siblings.Count + " copias enlazadas (" + string.Join(", ", siblings.Select(o => o.Name).ToArray()) + ")");
+            }
+            catch (Exception ex) { Warn("OCO local: no se pudo cancelar el resto del grupo: " + ex.Message); }
         }
 
         /// <summary>Orden en cualquier estado no terminal (incluye Initialized/Submitted): sirve para no duplicar.</summary>

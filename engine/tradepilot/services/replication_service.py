@@ -508,7 +508,7 @@ class ReplicationService:
         return ({"target_account": task.target_account, "action": ev.action, "symbol": symbol, "quantity": task.scaled_quantity,
                  "order_type": ev.order_type, "master_order_id": task.master_order_id, "msg_type": ev.msg_type,
                  "price": ev.price, "limit_price": ev.limit_price, "stop_price": ev.stop_price, "entry": entry,
-                 "master_filled_scaled": owed_total}, entry)
+                 "master_filled_scaled": owed_total, "oco": ev.oco or ""}, entry)
 
     async def _execute(self, task: ReplicationTask, rule: ReplicationRule | None = None, symbol: str | None = None) -> None:
         await self._execute_many([(task, rule, symbol or task.master_event.symbol)])

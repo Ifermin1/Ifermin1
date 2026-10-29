@@ -511,7 +511,7 @@ class RiskService:
                    "daily_profit": "objetivo de ganancia diaria alcanzado",
                    "profit_goal": "objetivo de la evaluación alcanzado",
                    "drawdown": "límite de drawdown"}.get(limit.halted_reason, "pausa manual")
-            return False, f"cuenta {account_id} en pausa ({why})"
+            return False, f"cuenta {account_id} en pausa ({why}): se reanuda en Inicio → Cuentas en pausa o en Riesgo → Reanudar"
         if limit.max_position_size:
             if quantity > limit.max_position_size:
                 return False, f"qty {quantity} supera el máximo {limit.max_position_size} de {account_id}"

@@ -410,7 +410,7 @@ class NinjaZmqBridge(BrokerBridge):
 
     @staticmethod
     def _payload(target_account, action, symbol, quantity, order_type, master_order_id, msg_type="EXECUTION",
-                 price=0.0, limit_price=0.0, stop_price=0.0, entry=None, master_filled_scaled=None) -> dict:
+                 price=0.0, limit_price=0.0, stop_price=0.0, entry=None, master_filled_scaled=None, oco="") -> dict:
         payload = {
             "msg_type": msg_type, "account": target_account, "action": action, "symbol": symbol,
             "quantity": quantity, "price": price, "order_type": order_type, "master_order_id": master_order_id,
@@ -421,6 +421,9 @@ class NinjaZmqBridge(BrokerBridge):
         if master_filled_scaled is not None:
             # addon >= 2.6: hasta dónde debe llegar la copia viva (lo ejecutado de esa orden del maestro, escalado)
             payload["master_filled_scaled"] = master_filled_scaled
+        if oco:
+            # addon >= 3.1: stop y objetivo del maestro enlazados (OCO): la seguidora cancela el otro en cuanto uno ejecuta
+            payload["oco"] = oco
         return payload
 
     def _interpret(self, reply: str, o: dict):
@@ -471,12 +474,12 @@ class NinjaZmqBridge(BrokerBridge):
 
     async def send_order(self, target_account, action, symbol, quantity, order_type, master_order_id,
                          msg_type="EXECUTION", price=0.0, limit_price=0.0, stop_price=0.0, entry=None,
-                         master_filled_scaled=None) -> str | None:
+                         master_filled_scaled=None, oco="") -> str | None:
         """Devuelve la respuesta del addon ("OK|tipo", "OK|detalle", "IGNORED|motivo") o None si fue por 5556 sin confirmación."""
         if not self._running:
             raise RuntimeError("Puente ZMQ no iniciado")
         payload = self._payload(target_account, action, symbol, quantity, order_type, master_order_id, msg_type,
-                                price, limit_price, stop_price, entry, master_filled_scaled)
+                                price, limit_price, stop_price, entry, master_filled_scaled, oco)
         raw = json.dumps(payload)
         if self._orders_via_req:
             # Canal con confirmación (addon >= 1.9): si el addon no contesta, se reintenta una vez (el addon ignora

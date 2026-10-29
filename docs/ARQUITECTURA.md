@@ -204,12 +204,19 @@ hub no responde la cola se conserva y se reintenta (tope 5000 elementos). El hub
 y una página mínima con el P&L del día de cada nodo, cuentas, kill switch, operaciones de la semana y últimos avisos. La
 fase 2 (órdenes desde el hub, usuarios) queda abierta.
 
-## 6b2. Addon 3.0: defensas propias
+## 6b2. Addon 3.0 y 3.1: defensas propias
 
 `MaxOrderQty` (tope duro por orden) y validación de esquema en `HandleFollowerMessage`/`HandleManual`; `NoteEngine()` anota
 cada petición del engine y `CheckEngineSilence()` avisa en el Output a los `EngineSilentWarnS`; `CheckPoller()` (timer de
 10 s) reconstruye los sockets si el `NetMQPoller` dejó de correr; `HEARTBEAT` añade `engine_silent_s`, `uptime_s`,
 `restarts` y `PING` responde `PONG|boot|seq|version|silent`. El engine audita `ADDON_ALONE` y `ADDON_SELF_RESTART`.
+
+**3.1 — OCO local entre copias.** `OnMasterOrder` publica `oco` (el `Order.Oco` del maestro); el engine lo pasa en el
+`ORDER_PENDING` de la copia (`MasterEvent.oco` → `_order_kwargs` → `_payload`, solo si no está vacío) y el addon guarda
+`copyGroups[key] = cuenta|oco`. En `OnFollowerOrder`, al quedar `Filled` una copia del grupo, `CancelOcoSiblings` cancela
+en la misma cuenta las otras copias vivas del grupo sin esperar el `ORDER_CANCELLED` del maestro (29/10: el objetivo de la
+seguidora ejecutó 1 s después de su stop y la dejó invertida; `OVERCLOSE_FIX` la cerró con pérdida). El `ORDER_CANCELLED`
+del maestro que llega después responde `IGNORED|sin orden viva` y queda como `SKIPPED`.
 
 ## 6c. Pruebas: unitarias, propiedades, escenarios y caos
 

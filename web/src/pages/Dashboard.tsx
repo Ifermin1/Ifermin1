@@ -12,6 +12,7 @@ import { ReconcileCard } from "../components/ReconcileCard";
 import { CopilotCard } from "../components/CopilotCard";
 import { AssistantCard } from "../components/AssistantCard";
 import { DigestCard } from "../components/DigestCard";
+import { PausedAccountsCard } from "../components/PausedAccountsCard";
 import type { Route } from "../components/Shell";
 
 /** Inicio = sala de control: alertas, P&L del día, cuentas en juego y estado del puente. */
@@ -50,8 +51,8 @@ export function Dashboard({ onRoute }: { onRoute?: (r: Route) => void } = {}) {
   if (health?.stats.seq_gaps) alerts.push({ id: "gaps", tone: "warn", title: `Mensajes perdidos del addon: ${health.stats.seq_gaps}`, text: "Revisa la sincronización de las seguidoras.", go: "accounts" });
   if (accounts.some((a) => a.desync)) alerts.push({ id: "desync", tone: "bad", title: "Seguidoras desincronizadas", text: "No coinciden con la maestra: iguálalas o ciérralas.", accounts: accounts.filter((a) => a.desync).map((a) => a.account_id), go: "accounts" });
   if (risk?.session_closed) alerts.push({ id: "session", tone: "warn", title: `Sesión cerrada por horario (${risk.schedule.flatten_at})`, text: "No se copia nada hasta mañana; en Riesgo puedes reabrir.", go: "risk" });
-  if (halted("daily_loss").length) alerts.push({ id: "loss", tone: "bad", title: "Límite de pérdida diaria alcanzado", text: "Cuenta pausada y cerrada; se reanuda a mano en Riesgo.", accounts: halted("daily_loss"), go: "risk" });
-  if (halted("drawdown").length) alerts.push({ id: "dd", tone: "bad", title: "Límite de drawdown alcanzado", text: "Pausada y cerrada antes de tocar el suelo del prop firm; se reanuda en Riesgo solo si vuelve a tener margen. Si acabas de aplicar un perfil y no cuadra con el saldo, corrige el tamaño.", accounts: halted("drawdown"), go: "risk" });
+  if (halted("daily_loss").length) alerts.push({ id: "loss", tone: "bad", title: "Límite de pérdida diaria alcanzado", text: "Cuenta pausada y cerrada; justo debajo, en Cuentas en pausa, puedes reanudarla.", accounts: halted("daily_loss"), go: "risk" });
+  if (halted("drawdown").length) alerts.push({ id: "dd", tone: "bad", title: "Límite de drawdown alcanzado", text: "Pausada y cerrada antes de tocar el suelo del prop firm. Justo debajo, en Cuentas en pausa, están las cifras y el botón Reanudar; si no tiene margen, corrige el límite en Riesgo.", accounts: halted("drawdown"), go: "risk" });
   const hot = accounts.filter((a) => a.enabled && a.drawdown.pct !== null && a.drawdown.pct >= 80 && !limits.get(a.account_id)?.trading_halted);
   if (hot.length) alerts.push({ id: "hot", tone: "warn", title: "Drawdown al límite", text: "Cerca del suelo del prop firm: reduce o cierra antes de que el engine lo haga por ti.", accounts: hot.map((a) => `${a.alias || a.account_id} (${a.drawdown.pct!.toFixed(0)} %, quedan ${Math.round(a.drawdown.room ?? 0)} $)`), go: "accounts" });
   if (halted("daily_profit").length) alerts.push({ id: "cut", tone: "ok", title: "Corte del día hecho", text: "Ganancia asegurada: posición cerrada y sin copiar hasta mañana.", accounts: halted("daily_profit"), go: "risk" });
@@ -96,6 +97,7 @@ export function Dashboard({ onRoute }: { onRoute?: (r: Route) => void } = {}) {
           </ul>
         </Card>
       )}
+      <PausedAccountsCard onRoute={onRoute} />
 
       <div className="stats">
         <Kpi label="Copiando" icon="users" value={`${copying.length} / ${accounts.filter((a) => a.enabled && a.account_id !== master).length}`} tone={copying.length ? "ok" : "muted"}

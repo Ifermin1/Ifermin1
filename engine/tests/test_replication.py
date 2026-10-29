@@ -649,3 +649,28 @@ async def test_entry_preset_applies_to_every_rule_of_the_master(container):
     assert "ENTRY_MODE_SET" in _types(container, 2)
     rep.set_entry_for_all("Sim101", entry_mode="market")
     assert all(r.entry_mode == "market" for r in rep.rules)
+
+
+async def test_master_oco_group_travels_with_bracket_copies(container):
+    """addon >= 3.1: el stop y el objetivo del maestro llegan con su grupo OCO; la copia lo lleva para que la seguidora
+    cancele el otro en cuanto uno ejecute. Sin OCO en el maestro, el campo va vacío."""
+    rep = container.replication
+    b = container.bridge
+    rep.add_rule("Sim101", "Sim102")
+    await rep.process_master_event(_event(quantity=2).model_dump(mode="json"))
+    stop = _event(msg_type="ORDER_PENDING", action="SELL", order_type="STOPMARKET", state="Working", price=19900.0,
+                  stop_price=19900.0, order_id="sl1", oco="OCO-77")
+    tp = _event(msg_type="ORDER_PENDING", action="SELL", order_type="LIMIT", state="Working", price=20100.0,
+                limit_price=20100.0, order_id="tp1", oco="OCO-77")
+    await rep.process_master_event(stop.model_dump(mode="json"))
+    await rep.process_master_event(tp.model_dump(mode="json"))
+    sent = [o for o in b.sent_orders if o["msg_type"] == "ORDER_PENDING"]
+    assert [o["oco"] for o in sent] == ["OCO-77", "OCO-77"]
+    assert b.sent_orders[0]["oco"] == ""   # la entrada a mercado no lleva grupo
+
+
+def test_zmq_payload_only_carries_oco_when_set():
+    from tradepilot.infrastructure.brokers.ninja_zmq import NinjaZmqBridge
+    base = dict(target_account="Sim102", action="SELL", symbol="NQ 12-26", quantity=1, order_type="LIMIT", master_order_id="m1", msg_type="ORDER_PENDING")
+    assert "oco" not in NinjaZmqBridge._payload(**base)
+    assert NinjaZmqBridge._payload(**base, oco="OCO-1")["oco"] == "OCO-1"

@@ -123,7 +123,7 @@ if ($NoNinja -or $mode -ne "ninja") {
         Write-Host "  - NinjaTrader sigue en la ventana de entrada (contraseña) o cargando: espera y vuelve a ejecutar este script." -ForegroundColor Red
         Write-Host "  - El addon no está compilado: en NinjaTrader, New -> NinjaScript Editor -> F5 y reinicia NinjaTrader (solo la primera vez y tras cada update.ps1 que lo copie)." -ForegroundColor Red
         Write-Host "  - Puertos distintos en Documents\NinjaTrader 8\TradePilotX\config.json y en engine\.env (ZMQ_SYNC_PORT)." -ForegroundColor Red
-        Write-Host "  En NinjaTrader, New -> NinjaScript Output debe mostrar '[TradePilotX] Bridge v3.0 online'." -ForegroundColor Red
+        Write-Host "  En NinjaTrader, New -> NinjaScript Output debe mostrar '[TradePilotX] Bridge v3.1 online'." -ForegroundColor Red
         $summary += "Addon de NinjaTrader: NO responde (el engine arranca igual y se conectará cuando el addon aparezca)"
     }
 }

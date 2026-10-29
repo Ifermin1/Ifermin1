@@ -30,7 +30,7 @@ versión de escritorio).
    - `API_TOKEN=` un token largo tuyo (es la única llave de la consola).
 5. Instalar el addon en NinjaTrader: `scripts\update.ps1` copia `ninjatrader\TradePilotXBridge.cs` a la carpeta de AddOns.
    Después, en NinjaTrader: *New → NinjaScript Editor → F5* (compilar) y **reiniciar NinjaTrader**.
-   En *New → NinjaScript Output* debe aparecer `[TradePilotX] Bridge v3.0 online`.
+   En *New → NinjaScript Output* debe aparecer `[TradePilotX] Bridge v3.1 online`.
    **Quitar los avisos de voz de NinjaTrader**: por defecto reproduce "order filled", "order cancelled"… por cada orden de
    cada cuenta; con varias seguidoras son decenas de avisos por operación y frenan a NinjaTrader. En *Tools → Options →
    General*, apartado *Sounds*, desmarca todos los sonidos de órdenes (order filled, order cancelled, order pending, order
@@ -366,8 +366,8 @@ si solo quieres vigilar y cortar.
 
 ## 5. Operativa diaria
 
-1. Abrir NinjaTrader y conectar la cuenta maestra y las seguidoras. Comprobar en el Output `Bridge v3.0 online`.
-2. Arrancar el engine (`run_engine.ps1`) si no está corriendo. En *Inicio*: modo `NinjaTrader · addon v3.0`, heartbeat
+1. Abrir NinjaTrader y conectar la cuenta maestra y las seguidoras. Comprobar en el Output `Bridge v3.1 online`.
+2. Arrancar el engine (`run_engine.ps1`) si no está corriendo. En *Inicio*: modo `NinjaTrader · addon v3.1`, heartbeat
    actualizándose, sin avisos rojos. Los pasos 1 y 2 los hace de una vez `scripts\start_all.bat` (ver abajo).
 3. En *Cuentas*: las seguidoras que deben copiar con el interruptor encendido y el badge *copiando*.
 4. Operar solo en la cuenta maestra. Todo (entrada, stop, take profit, modificaciones, cancelaciones) se copia.
@@ -578,7 +578,7 @@ y propone **una acción concreta por posición** con el botón que la ejecuta: *
 cerrar). Cada propuesta nueva llega también por Telegram/push (`COPILOT`, una vez cada 30 min por posición y acción).
 El copiloto **nunca ejecuta nada solo**: cada botón pasa por el PIN y la confirmación. Se puede desactivar en la tarjeta.
 
-### Addon 3.0: lo que el addon hace por su cuenta
+### Addon 3.0 y 3.1: lo que el addon hace por su cuenta
 
 El addon de NinjaTrader (`ninjatrader\TradePilotXBridge.cs`, recompilar con F5 tras actualizar) se vigila a sí mismo:
 
@@ -591,6 +591,8 @@ El addon de NinjaTrader (`ninjatrader\TradePilotXBridge.cs`, recompilar con F5 t
   (`ADDON_ALONE`) para que sepas cuánto tiempo estuviste sin copia ni límites.
 - **Se reconstruye solo**: si el bucle interno de NetMQ se detiene por un error, el addon rehace sus sockets en 10 s y lo
   dice (`ADDON_SELF_RESTART` en Auditoría). Antes parecía vivo pero no respondía hasta recompilar.
+- **OCO local (3.1)**: stop y objetivo copiados de un grupo OCO del maestro se cancelan entre sí dentro del addon en
+  cuanto uno ejecuta (ver "Stop y objetivo en la seguidora" más abajo).
 - `PING` responde también con la versión y los segundos sin engine; el heartbeat lleva `engine_silent_s`, `uptime_s` y
   `restarts`. Los engines antiguos ignoran los campos nuevos; el engine sigue aceptando addons desde la 2.6 (2.7 para
   operar desde la consola).
@@ -756,6 +758,35 @@ Si la maestra opera y las seguidoras no entran, abre **Auditoría** y mira el mo
   acabas de aplicar un perfil de prop firm y la cuenta se pausó por drawdown, el tamaño elegido no corresponde con el
   saldo real (el suelo quedó por encima del saldo): corrige el perfil y reanuda.
 - `cuenta bloqueada por el prop firm` → el bróker rechazó por administración; la cuenta se desactivó sola.
+
+### Cuentas en pausa: por qué y cómo reanudar
+
+Cuando el engine pausa una cuenta (drawdown, pérdida diaria, corte del día, objetivo de la evaluación, tilt o a mano), la
+pausa **se guarda** y no se levanta sola: hasta reanudar, todo lo que la maestra haga queda en Auditoría como `BLOCKED ·
+cuenta X en pausa (motivo)`. En *Inicio* (y arriba de *Riesgo*) aparece la tarjeta **Cuentas en pausa** con, por cuenta:
+
+- el motivo con sus cifras (por ejemplo, para drawdown: cuánto vale la cuenta, dónde está el suelo del prop firm, cuánto
+  queda y el colchón que hizo saltar la pausa);
+- **qué hace Reanudar** en ese caso: si la cuenta ya tiene margen, vuelve a copiar; si sigue dentro del colchón (o por
+  debajo del límite de pérdida), el engine **rechaza** la reanudación y la tarjeta muestra el motivo en rojo: entonces el
+  límite no corresponde con esa cuenta (perfil automático con un tamaño o plan mal deducidos) y hay que editarlo en
+  *Riesgo* (subir el drawdown máximo, bajar el colchón o quitar el límite) antes de reanudar;
+- el botón **Reanudar** (pide el PIN si está configurado) y **Editar límite en Riesgo**.
+
+Las doce cuentas pausadas de golpe el 29/10 fueron esto: el perfil automático de prop firm les puso un drawdown y un colchón,
+y al operar en ellas a mano en pérdida se acercaron al suelo. Reanudar sin corregir el límite no sirve si siguen dentro del
+colchón.
+
+### Stop y objetivo en la seguidora: por qué el addon 3.1 los enlaza
+
+En la maestra, el stop y el objetivo de una ATM (o de *Proteger*) van **enlazados (OCO)**: cuando uno ejecuta, NinjaTrader
+cancela el otro al instante. En la seguidora, las copias nacían sueltas: al ejecutar el stop copiado, el objetivo copiado
+seguía vivo hasta que el engine reenviaba la cancelación del maestro (menos de un segundo). El 29/10 a las 11:19 el precio
+tocó el objetivo (29586) un segundo después de ejecutar el stop (29592.75): dos seguidoras compraron 2 más, quedaron largas
+sin que la maestra lo estuviera y el engine las cerró a mercado (`OVERCLOSE_FIX`) perdiendo unos puntos. Desde el addon
+**3.1** el maestro publica su grupo OCO, la copia lo lleva, y **el propio addon cancela el objetivo de la seguidora en
+cuanto su stop ejecuta** (y al revés), sin pasar por el engine (`OCO local` en el Output de NinjaTrader). Si el maestro
+pone stop y objetivo sin enlazar (dos órdenes sueltas), nada cambia.
 
 ### Si la consola dice "El engine rechazó el token guardado"
 

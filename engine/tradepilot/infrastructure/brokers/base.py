@@ -77,6 +77,7 @@ class BrokerBridge(ABC):
         stop_price: float = 0.0,
         entry: dict | None = None,
         master_filled_scaled: int | None = None,
+        oco: str = "",
     ) -> str | None: ...
 
     # ---- operativa manual desde la consola (addon >= 2.7) ----
