@@ -327,7 +327,7 @@ export function Accounts() {
             <table className="acc-table" data-testid="acc-table">
               <thead><tr>
                 <th><input type="checkbox" title="Marcar las visibles" checked={selVisible} onChange={(e) => setMsel(e.target.checked ? new Set(visible.map((r) => r.a.account_id)) : new Set())} /></th>
-                <th>Cuenta</th><th>Estado</th><th>Copia</th><th className="num">P&L hoy</th><th>Corte del día</th><th>Objetivo evaluación</th><th>Drawdown</th><th>Posición</th><th></th>
+                <th>Cuenta</th><th>Estado</th><th title="Interruptor: copiar o no. × = contratos por cada 1 de la maestra (enteros; 0.5 = la mitad)">Copia · × contratos</th><th className="num">P&L hoy</th><th>Corte del día</th><th>Objetivo evaluación</th><th>Drawdown</th><th>Posición</th><th></th>
               </tr></thead>
               <tbody>
                 {visible.map(({ a, link, limit, pnl, live, dd, start, gained, copying }) => {
@@ -354,8 +354,9 @@ export function Accounts() {
                           <label className="switch small" title={link?.enabled ? "Dejar de copiar" : "Copiar a la maestra"}>
                             <input type="checkbox" checked={!!link?.enabled} disabled={busy === id || !master || !a.enabled} onChange={(e) => void apply(id, e.target.checked, link?.multiplier ?? 1)} data-testid={`copy-${id}`} /><span />
                           </label>
-                          <label className="mult">×<input key={`m-${link?.multiplier ?? 1}`} type="number" step="0.1" min="0.1" defaultValue={link?.multiplier ?? 1} disabled={busy === id || !master} data-testid={`mult-${id}`}
-                            onBlur={(e) => { const v = Number(e.target.value); if (v > 0 && v !== (link?.multiplier ?? 1)) void apply(id, link?.enabled ?? false, v); }} /></label>
+                          <label className="mult" title="Contratos de esta cuenta por cada 1 de la maestra (números enteros con las flechas; se puede escribir 0.5 para la mitad). Al cambiarlo, la cuenta queda copiando.">×<input key={`m-${link?.multiplier ?? 1}`} type="number" step="1" min="1" defaultValue={link?.multiplier ?? 1} disabled={busy === id || !master || !a.enabled} data-testid={`mult-${id}`}
+                            onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                            onBlur={(e) => { const v = Math.round(Number(e.target.value.replace(",", ".")) * 100) / 100; if (v > 0 && v !== (link?.multiplier ?? 1)) void apply(id, true, v); }} /></label>
                           {link?.target_root && <span className="chip">→ {link.target_root}</span>}
                         </>}
                       </div></td>

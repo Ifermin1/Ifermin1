@@ -284,7 +284,8 @@ si solo quieres vigilar y cortar.
 1. **Cuentas → Cuenta maestra.** Se detecta sola del addon. Para cambiarla, elige otra en el desplegable y confirma: el addon
    la guarda y sobrevive a reinicios. Al cambiar de maestra, los vínculos anteriores no se arrastran.
 2. **Seguidoras.** Aparecen solas las cuentas conectadas en NinjaTrader; las desconectadas se ocultan solas. Para cada
-   seguidora: multiplicador (x1 = mismos contratos) e interruptor *copiando*. La ✕ elimina el vínculo.
+   seguidora: interruptor *copiando* y **×** = contratos de la seguidora por cada 1 de la maestra (las flechas van de 1 en 1:
+   ×1 mismos contratos, ×2 el doble; escribe 0.5 para la mitad). Cambiar el × deja la cuenta copiando. La ✕ elimina el vínculo.
 3. **Gestionar cuentas** (botón arriba a la derecha): todas las que NinjaTrader conoce, con buscador y filtros. Alias (por
    ejemplo "Eval MFF 172"), activar/desactivar a mano (una desactivada nunca recibe copias), y "auto" para volver a la regla
    "activa mientras está conectada".
