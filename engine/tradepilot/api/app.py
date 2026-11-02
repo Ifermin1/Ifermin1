@@ -40,8 +40,14 @@ def create_app(container: Container | None = None) -> FastAPI:
 
     @app.middleware("http")
     async def security_headers(request, call_next):
-        # La consola puede estar publicada en Internet (túnel): cabeceras defensivas y HSTS cuando llega por HTTPS
-        resp = await call_next(request)
+        # La consola puede estar publicada en Internet (túnel): cabeceras defensivas y HSTS cuando llega por HTTPS.
+        # ?scope=all: la petición ve todo el historial aunque haya una etapa activa (botón "Ver todo").
+        from tradepilot.core.scope import STAGE_BYPASS
+        token = STAGE_BYPASS.set(request.query_params.get("scope") == "all")
+        try:
+            resp = await call_next(request)
+        finally:
+            STAGE_BYPASS.reset(token)
         resp.headers.setdefault("X-Content-Type-Options", "nosniff")
         resp.headers.setdefault("X-Frame-Options", "DENY")
         resp.headers.setdefault("Referrer-Policy", "no-referrer")

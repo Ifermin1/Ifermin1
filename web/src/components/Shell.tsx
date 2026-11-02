@@ -118,7 +118,7 @@ async function hardReload() {
 }
 
 export function Shell({ route, onRoute, children }: { route: Route; onRoute: (r: Route) => void; children: ReactNode }) {
-  const { health, wsStatus, risk, logout, session, density, setDensity, theme, setTheme } = useStore();
+  const { health, wsStatus, risk, logout, session, density, setDensity, theme, setTheme, scopeAll, setScopeAll } = useStore();
   const connected = health?.bridge.connected ?? null;
   const stale = staleBuild(health?.web_build);
   const [remote, setRemote] = useState(false);
@@ -139,6 +139,12 @@ export function Shell({ route, onRoute, children }: { route: Route; onRoute: (r:
             <Badge ok={wsStatus === "open" ? true : wsStatus === "connecting" ? null : false}>en vivo</Badge>
           </div>
           <div className="muted small">{session?.baseUrl}</div>
+          {health?.stage && (
+            <div className="small" data-testid="stage-chip" title="Etapa activa: las estadísticas cuentan desde esa fecha (Análisis → Etapa para cambiarla)">
+              <span className="chip">Etapa {health.stage.name} · desde {health.stage.start_date.slice(8, 10)}/{health.stage.start_date.slice(5, 7)}{health.stage.mode === "new_accounts" ? " · solo cuentas nuevas" : ""}</span>
+              <button className="link tiny" onClick={() => setScopeAll(!scopeAll)} data-testid="scope-toggle">{scopeAll ? "viendo todo · ver etapa" : "ver todo el historial"}</button>
+            </div>
+          )}
           <div className="muted small" title={BUILT.toISOString()}>consola del {fmtBuild(BUILT)}</div>
           <button className="link" onClick={() => setRemote(true)} data-testid="remote-open">{health?.public_url ? "Acceso remoto · publicada" : "Acceso remoto"}</button>
           <button className="link" onClick={() => onRoute("pocket")} data-testid="pocket-open">Vista de bolsillo</button>

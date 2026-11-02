@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { StageCard } from "../components/StageCard";
 import { useStore } from "../lib/store";
 import type { AnalysisData, AnalysisDay, AnalysisParams, CashEvent, CashEventInput, Trade } from "../lib/api";
 import { Card, Empty, Kpi } from "../components/ui";
@@ -58,7 +59,7 @@ const download = (name: string, text: string) => {
 };
 
 export function Analysis() {
-  const { client, accounts, health, audit } = useStore();
+  const { client, accounts, health, audit, scopeAll } = useStore();
   const [tab, setTab] = useState<Tab>(() => { const m = window.location.hash.match(/analysis\/(\w+)/); return (TABS.find((t) => t.id === m?.[1])?.id ?? "stats"); });
   const [range, setRange] = useState<Range>("90");
   const [account, setAccount] = useState("");
@@ -97,7 +98,7 @@ export function Analysis() {
     client.analysis(from, to, account).then((d) => { if (alive) { setData(d); setError(null); } })
       .catch((e) => { if (alive) setError(e instanceof Error ? e.message : String(e)); });
     return () => { alive = false; };
-  }, [client, from, to, account, lastFillId, tick]);
+  }, [client, from, to, account, lastFillId, tick, scopeAll]);
   const reload = () => setTick((n) => n + 1);
   const go = (t: Tab) => { setTab(t); window.location.hash = `analysis/${t}`; };
 
@@ -136,6 +137,7 @@ export function Analysis() {
   if (!client) return null;
   return (
     <div className="grid" data-testid="analysis">
+      <StageCard />
       <Card>
         <div className="perf-bar">
           <div className="an-tabs" role="tablist" data-testid="an-tabs">

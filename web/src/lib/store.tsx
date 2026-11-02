@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { show as notifyShow } from "./notify";
-import { ApiError, makeClient, loadSession, saveSession, type Account, type AuditEvent, type Client, type Health, type Price,
+import { ApiError, makeClient, loadSession, saveSession, setScopeAll as apiSetScopeAll, type Account, type AuditEvent, type Client, type Health, type Price,
          type RiskState, type Rule, type Session } from "./api";
 import { root } from "./format";
 import { hashPin, loadLock, saveLock, type LockConfig } from "./lock";
@@ -20,6 +20,7 @@ type Store = {
   theme: Theme; setTheme: (t: Theme) => void;
   refresh: () => Promise<void>; setRules: (r: Rule[]) => void; setRisk: (r: RiskState) => void;
   readOnly: boolean;                           // sesión con el token de solo lectura: el engine rechaza cualquier acción
+  scopeAll: boolean; setScopeAll: (v: boolean) => void;   // "Ver todo": ignorar la etapa activa en las lecturas de historial
   lock: { config: LockConfig; locked: boolean; asking: boolean };
   setLock: (c: LockConfig) => void;
   unlock: (pin: string | null) => Promise<boolean>;   // null = cancelar la petición de PIN
@@ -57,6 +58,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return !!msg;
   };
   const [density, setDensityState] = useState<Density>(loadDensity);
+  const [scopeAll, setScopeAllState] = useState<boolean>(() => { try { return localStorage.getItem("tpx.scope") === "all"; } catch { return false; } });
+  apiSetScopeAll(scopeAll);
+  const setScopeAll = useCallback((v: boolean) => { apiSetScopeAll(v); setScopeAllState(v); try { localStorage.setItem("tpx.scope", v ? "all" : "stage"); } catch { /* privado */ } }, []);
   // ---- candado (PIN local) ----
   const [lockCfg, setLockCfg] = useState<LockConfig>(loadLock);
   const [locked, setLocked] = useState(false);
@@ -156,7 +160,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const value: Store = { session, client, login, logout, health, accounts, rules, audit, risk, prices, wsStatus, error, wsRtt, wsLastAt, authError,
                          density, setDensity, theme, setTheme, refresh, setRules, setRisk,
-                         readOnly: health?.role === "read", lock: { config: lockCfg, locked, asking }, setLock, unlock, guard };
+                         readOnly: health?.role === "read", scopeAll, setScopeAll, lock: { config: lockCfg, locked, asking }, setLock, unlock, guard };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

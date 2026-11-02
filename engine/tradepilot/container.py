@@ -31,6 +31,7 @@ from tradepilot.services.hub_reporter import HubReporter
 from tradepilot.services.reconcile_service import ReconcileService
 from tradepilot.services.watchdog_service import WatchdogService
 from tradepilot.services.backup_service import BackupService
+from tradepilot.services.stage_service import StageService
 from tradepilot.services.metrics_service import MetricsService
 from tradepilot.services.copilot_service import CopilotService
 from tradepilot.services.assistant_service import AssistantService
@@ -74,6 +75,7 @@ class Container:
     digest: DigestService | None = None
     tilt: TiltService | None = None
     proprules: PropRulesService | None = None
+    stage: StageService | None = None
 
     async def start(self) -> None:
         if self.advisor is not None:
@@ -226,6 +228,7 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
     assistant = AssistantService(accounts, risk, trade, market, ai, audit, store, bridge)
     proprules = PropRulesService(store, accounts, risk, audit)
     tilt = TiltService(store, audit, risk, accounts, ai, auto_pause_min=cfg.TILT_AUTO_PAUSE_MIN)
+    stage = StageService(store, accounts, audit, backup=backup)
     performance.on_trade_closed = tilt.on_trade
     digest = DigestService(store, audit, news, coach, accounts, risk, ai, brief_time=cfg.MORNING_BRIEF_TIME, review_time=cfg.SESSION_REVIEW_TIME)
     notify.commands = TelegramCommands(notify, accounts, risk, trade, market, bridge)
@@ -244,4 +247,4 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
             except Exception as exc:
                 logger.exception(f"Error en vigilancia de {name}: {exc}")
     accounts.after_sync = _after_sync
-    return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal, commissions, performance, notify, news, trade, market, trail, auto_risk, advisor, coach, push, report, hub, reconcile, watchdog, backup, metrics, copilot, assistant, digest, tilt, proprules)
+    return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal, commissions, performance, notify, news, trade, market, trail, auto_risk, advisor, coach, push, report, hub, reconcile, watchdog, backup, metrics, copilot, assistant, digest, tilt, proprules, stage=stage)

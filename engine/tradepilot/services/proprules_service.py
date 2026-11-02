@@ -59,6 +59,12 @@ class PropRulesService:
 
     # ---- evaluación ----
     def evaluate(self, account_id: str) -> dict | None:
+        # las reglas de payout necesitan todo el historial de la cuenta, haya o no una etapa activa
+        from tradepilot.core.scope import stage_bypass
+        with stage_bypass():
+            return self._evaluate(account_id)
+
+    def _evaluate(self, account_id: str) -> dict | None:
         snap = self.accounts.find(account_id)
         if snap is None:
             return None

@@ -510,6 +510,24 @@ actualizar: NinjaScript Editor → F5).
   menos 25 ticks", "espera a las 14:45"). Las reglas se ven al instante; la IA se añade a los pocos segundos. Si la IA
   lo ve en rojo y las reglas no, también pide confirmación.
 
+### Etapas: modo prueba, cuentas nuevas o empezar de cero (Análisis → Etapa)
+
+Cuando quieras **empezar de cero sin perder nada** (modo prueba, cuentas nuevas de la prop firm, nuevo mes de evaluación),
+empieza una **etapa** en la tarjeta de arriba de *Análisis*:
+
+- **Nombre y fecha de inicio**: desde ese día cuentan las estadísticas de Calendario, Análisis, informes, coach e Inicio.
+- **Qué cuenta**: *Solo cuentas nuevas desde esa fecha* (las que existían al empezar quedan fuera; cada cuenta se puede
+  incluir o excluir pulsando su chip: «nueva» / «anterior», «cuenta» / «fuera») o *Todas las cuentas, solo desde esa fecha*.
+- **Ver todo el historial**: botón en la tarjeta y en el menú lateral (chip *Etapa …*). Cambia solo lo que ves; vuelve a la
+  etapa con el mismo botón. Las reglas de prop firm (días operados, consistencia) siempre miran el historial completo.
+- **Terminar etapa**: las estadísticas vuelven a contar todo. No se borra nada en ningún caso.
+- **Borrar el historial anterior** (dentro de la tarjeta, desplegable rojo): operaciones, P&L diario, saldos, comisiones y
+  movimientos de caja anteriores a una fecha, de todas las cuentas. Antes se guarda una copia de seguridad (Riesgo → Copias)
+  y hay que escribir BORRAR. La auditoría, las cuentas, reglas y límites se conservan. Es irreversible: la etapa ya oculta
+  lo anterior sin borrarlo, así que solo hazlo si no quieres volver a verlo.
+
+La copia de operaciones no cambia con la etapa: sigue copiando a todas las cuentas que tengan regla.
+
 ### Informe semanal y CSV (pestaña Análisis, arriba a la derecha)
 
 - **Informe semanal**: elige un día y pulsa el botón; se abre en otra pestaña el informe de esa semana (lunes a domingo)
@@ -742,6 +760,8 @@ cola y el último envío. La página del hub enseña el P&L del día de cada eng
 | `NEWS_RESULT` 📊 | Se ha publicado el dato: real frente a previsión, análisis del resultado y reacción del precio. | Espera a que el mercado digiera el dato antes de copiar con tamaño normal; mira la pestaña Noticias para el detalle. |
 | `ENTRY_MISSED` | Una entrada límite con tolerancia no se llenó en el plazo y estaba configurada para cancelar. La seguidora no tiene esa operación. | Decidir si entrar a mano o subir la tolerancia / usar "a mercado lo que falte". |
 | `SKIPPED` "cierre de emergencia de la maestra" | Durante 20 s tras cerrar la maestra por emergencia, sus fills no se copian. | Nada; es la protección contra salidas dobles. |
+| `STAGE_START` / `STAGE_UPDATE` / `STAGE_END` | Etapa empezada, ajustada o terminada (Análisis → Etapa): desde qué fecha y con qué cuentas cuentan las estadísticas. | Nada; nunca borra. |
+| `HISTORY_PURGED` 🗑️ | Borrado del historial anterior a una fecha, con el detalle de filas y la copia previa. | Nada; si fue un error, restaura la copia (Riesgo → Copias). |
 | `ENTRY_MODE_SET` | Alguien pulsó *Entrar al precio del maestro* o *Entrar a mercado* en *Inicio*: cambió el modo de entrada de todas las seguidoras. | Nada. Comprueba en *Cuentas → ⚙* si quieres afinar tolerancia o espera por cuenta. |
 
 ---

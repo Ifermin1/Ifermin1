@@ -4,6 +4,7 @@
 export type Health = {
   app: string; mode: "mock" | "ninja"; addon_outdated: boolean; min_addon_version: string; web_build: string | null;
   public_url: string | null; token_weak: boolean; role?: "full" | "read"; read_token_set?: boolean;
+  stage?: { name: string; mode: "date" | "new_accounts"; start_date: string } | null;
   watchdog?: { degraded: boolean; degraded_since: string | null; no_ticks: boolean; market_open: boolean; last_tick_age_s: number | null; last_resume: { at: string; kind: string; gap_s: number } | null; loop_lag_ms: number } | null;
   bridge: { mode: string; connected: boolean; last_msg_in: string | null; last_msg_out: string | null;
             last_sync: string | null; last_heartbeat: string | null; master_account: string | null; addon_version: string | null; error_count: number; master_feed_up: boolean; follower_feed_up: boolean; sync_up: boolean };
@@ -55,6 +56,13 @@ export type DayStat = { day: string; pnl: number; net: number; pnl_broker: numbe
 export type Trade = { id: number; account_id: string; day: string; symbol: string; side: "long" | "short"; quantity: number; entry_price: number;
                       exit_price: number; pnl: number; commissions: number; opened_at: string | null; closed_at: string; fills: number };
 export type MonthStats = { from: string; to: string; days: DayStat[]; trades: Trade[]; accounts: string[] };
+
+/** Etapa (modo prueba): desde qué fecha y con qué cuentas cuentan las estadísticas. */
+export type StageMode = "date" | "new_accounts";
+export type Stage = { active: boolean; name: string; mode: StageMode; start_date: string; started_at: string | null; previous: string[]; include: string[]; exclude: string[];
+                      accounts: { account_id: string; alias: string; enabled: boolean; is_new: boolean; in_scope: boolean }[];
+                      counts: { trades_stage: number | null; trades_total: number | null } };
+export type StageReset = { before: string; deleted: Record<string, number>; backup: { file?: string } | null };
 
 /** Avisos por Telegram (engine → teléfono). */
 export type NotifyState = { enabled: boolean; bot_token: string; chat_id: string; events: string[]; defaults: string[]; titles: Record<string, string>;
@@ -170,9 +178,19 @@ export function saveSession(s: Session | null) {
 
 export class ApiError extends Error { constructor(public status: number, msg: string) { super(msg); } }
 
+/** "Ver todo": con una etapa activa, las lecturas llevan ?scope=all y el engine devuelve el historial completo. */
+let scopeAll = false;
+export function setScopeAll(v: boolean) { scopeAll = v; }
+export function isScopeAll() { return scopeAll; }
+function withScope(path: string, init: RequestInit): string {
+  if (!scopeAll || (init.method && init.method !== "GET") || !path.startsWith("/api/")) return path;
+  return path + (path.includes("?") ? "&" : "?") + "scope=all";
+}
+
 export function makeClient(s: Session) {
   const base = s.baseUrl.replace(/\/$/, "");
   async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
+    path = withScope(path, init);
     const r = await fetch(base + path, {
       ...init,
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${s.token}`, ...(init.headers || {}) },
@@ -182,6 +200,7 @@ export function makeClient(s: Session) {
   }
   /** Descarga binaria/texto con el token en la cabecera (informes, CSV): devuelve el blob y el nombre sugerido. */
   async function raw(path: string): Promise<{ blob: Blob; filename: string }> {
+    path = withScope(path, {});
     const r = await fetch(base + path, { headers: { Authorization: `Bearer ${s.token}` } });
     if (!r.ok) throw new ApiError(r.status, (await r.text()) || r.statusText);
     const m = /filename=([^;]+)/.exec(r.headers.get("Content-Disposition") ?? "");
@@ -292,6 +311,9 @@ export function makeClient(s: Session) {
     savePresets: (presets: RiskPreset[]) => req<{ presets: RiskPreset[]; defaults: RiskPreset[] }>("/api/ui/risk-presets", { method: "PUT", body: JSON.stringify({ presets }) }),
     applyPreset: (preset_id: string, accounts: string[]) => req<{ applied: string[]; preset: RiskPreset }>("/api/risk/preset", { method: "POST", body: JSON.stringify({ preset_id, accounts }) }),
     advice: () => req<AdviceList>("/api/advice"),
+    stage: () => req<Stage>("/api/stage"),
+    stageSet: (body: { action: "start" | "update" | "stop"; name?: string; mode?: StageMode; start_date?: string; include?: string[]; exclude?: string[] }) => req<Stage>("/api/stage", { method: "PUT", body: JSON.stringify(body) }),
+    stageReset: (before: string, confirm: string) => req<StageReset>("/api/stage/reset", { method: "POST", body: JSON.stringify({ before, confirm }) }),
     aiReview: (day = "", force = false) => req<ReviewResult>("/api/ai/review", { method: "POST", body: JSON.stringify({ day, force }) }),
     aiAsk: (question: string, days = 90) => req<AskResult>("/api/ai/ask", { method: "POST", body: JSON.stringify({ question, days }) }),
     aiCheckEntry: (o: { account: string; symbol: string; action: string; quantity: number; order_type: string; sl_ticks: number; tp_ticks: number }, ai = false) =>

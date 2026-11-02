@@ -24,7 +24,7 @@ const DUR: { label: string; max: number }[] = [
 ];
 
 export function Performance() {
-  const { client, accounts, health, audit, density } = useStore();
+  const { client, accounts, health, audit, density, scopeAll } = useStore();
   const compact = density === "compact";
   const [cursor, setCursor] = useState(() => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d; });
   const [account, setAccount] = useState("");
@@ -45,7 +45,7 @@ export function Performance() {
     let alive = true;
     client.month(key, account).then((m) => { if (alive) setData(m); }).catch(() => {});
     return () => { alive = false; };
-  }, [client, key, account, lastTradeId]);
+  }, [client, key, account, lastTradeId, scopeAll]);
   useEffect(() => {
     if (!box.current) return;
     const ro = new ResizeObserver((e) => setWidth(Math.max(240, Math.floor(e[0].contentRect.width))));

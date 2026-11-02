@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from tradepilot.api.auth import require_token
-from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest, ProtectRequest, TrailRequest, DayLossRequest, AutoRiskRequest, RiskPresets, ApplyPresetRequest, TagsRequest, OcoEntryRequest, TradeTemplates, ReviewRequest, CheckEntryRequest, AskRequest, PushSubscribeRequest, PushUnsubscribeRequest, ConfigImportRequest, AssistantRequest, PlanRequest, DigestConfigRequest, DigestRunRequest, TiltConfigRequest, TiltResumeRequest, PropRuleRequest
+from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest, ProtectRequest, TrailRequest, DayLossRequest, AutoRiskRequest, RiskPresets, ApplyPresetRequest, TagsRequest, OcoEntryRequest, TradeTemplates, ReviewRequest, CheckEntryRequest, AskRequest, PushSubscribeRequest, PushUnsubscribeRequest, ConfigImportRequest, AssistantRequest, PlanRequest, DigestConfigRequest, DigestRunRequest, TiltConfigRequest, TiltResumeRequest, PropRuleRequest, StageRequest, StageResetRequest
 from tradepilot.container import Container
 from tradepilot.domain.risk import RiskLimit, Schedule
 
@@ -80,6 +80,7 @@ def health(request: Request):
         "bridge": c.accounts.health(),
         "risk": c.risk.state(),
         "watchdog": c.watchdog.state() if c.watchdog is not None else None,
+        "stage": c.stage.summary() if c.stage is not None else None,     # etapa activa (modo prueba): nombre, modo y fecha
         "stats": c.replication.stats,
         "ws_clients": request.app.state.ws_hub.count,
     }
@@ -1154,3 +1155,39 @@ async def mock_master_event(body: MockEventRequest, request: Request):
         raise HTTPException(400, "Solo disponible en ENGINE_MODE=mock")
     overrides = {k: v for k, v in body.model_dump().items() if v is not None}
     return await bridge.emit_master_event(**overrides)
+
+
+# ---- etapas (modo prueba): empezar de cero sin borrar, solo cuentas nuevas, o borrar el historial anterior ----
+@router.get("/stage")
+def stage_get(request: Request):
+    c = _c(request)
+    if c.stage is None:
+        raise HTTPException(503, "etapas no disponibles")
+    return c.stage.state()
+
+
+@router.put("/stage")
+def stage_put(body: StageRequest, request: Request):
+    c = _c(request)
+    if c.stage is None:
+        raise HTTPException(503, "etapas no disponibles")
+    try:
+        if body.action == "start":
+            return c.stage.start(body.name or "Etapa", body.mode or "date", body.start_date)
+        if body.action == "stop":
+            return c.stage.stop()
+        return c.stage.update(name=body.name, mode=body.mode, start_date=body.start_date, include=body.include, exclude=body.exclude)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
+@router.post("/stage/reset")
+def stage_reset(body: StageResetRequest, request: Request):
+    """Borra el historial anterior a `before` (con copia de seguridad previa). confirm debe ser "BORRAR"."""
+    c = _c(request)
+    if c.stage is None:
+        raise HTTPException(503, "etapas no disponibles")
+    try:
+        return c.stage.reset_history(body.before, body.confirm)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))

@@ -14,6 +14,9 @@ class SQLiteStore:
     el volumen es bajo y así evitamos "database is locked"."""
 
     def __init__(self, db_path: str = "data/tradepilot.db") -> None:
+        # Etapa (StageService.filter): devuelve (día_desde o None, función cuenta->bool o None); None = sin etapa.
+        # Se aplica a las lecturas de historial salvo dentro de core.scope.stage_bypass() (p. ej. ?scope=all).
+        self.stage_filter = None
         self.db_path = Path(db_path)
         if str(db_path) != ":memory:":
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -283,7 +286,38 @@ class SQLiteStore:
                 "VALUES (:account_id, :day, :symbol, :side, :quantity, :entry_price, :exit_price, :pnl, :commissions, :opened_at, :closed_at, :fills)", t)
             return int(cur.lastrowid)
 
+    # ---- etapa: recorte de fechas y cuentas en las lecturas de historial ----
+    def _scope(self, day_from: str) -> tuple[str, object]:
+        from tradepilot.core.scope import STAGE_BYPASS
+        if self.stage_filter is None or STAGE_BYPASS.get():
+            return day_from, None
+        start, in_scope = self.stage_filter()
+        if start and day_from < start:
+            day_from = start
+        return day_from, in_scope
+
+    @staticmethod
+    def _keep(rows: list[dict], in_scope) -> list[dict]:
+        return rows if in_scope is None else [r for r in rows if in_scope(r.get("account_id"))]
+
+    def history_accounts(self) -> list[str]:
+        """Cuentas que aparecen en el historial (operaciones o P&L diario), sin recorte de etapa."""
+        with self._lock:
+            rows = self._conn.execute("SELECT DISTINCT account_id FROM trades UNION SELECT DISTINCT account_id FROM daily_stats").fetchall()
+        return sorted(str(r[0]) for r in rows if r[0])
+
+    def purge_before(self, day: str) -> dict[str, int]:
+        """Borra el historial anterior a `day` (operaciones, P&L diario, saldos, comisiones, movimientos de caja y muestras
+        de P&L). La auditoría, las cuentas, reglas y límites se conservan. Devuelve filas borradas por tabla."""
+        out: dict[str, int] = {}
+        with self._lock, self._conn:
+            for table, col in (("trades", "day"), ("daily_stats", "day"), ("balance_daily", "day"), ("commissions_daily", "day"), ("cash_events", "day"), ("pnl_samples", "ts")):
+                cur = self._conn.execute(f"DELETE FROM {table} WHERE {col} < ?", (day,))
+                out[table] = int(cur.rowcount or 0)
+        return out
+
     def get_trades(self, day_from: str, day_to: str, account_id: str | None = None) -> list[dict]:
+        day_from, in_scope = self._scope(day_from)
         sql = "SELECT * FROM trades WHERE day >= ? AND day <= ?"
         args: list = [day_from, day_to]
         if account_id:
@@ -291,7 +325,7 @@ class SQLiteStore:
             args.append(account_id)
         with self._lock:
             rows = self._conn.execute(sql + " ORDER BY closed_at", args).fetchall()
-        return [dict(r) for r in rows]
+        return self._keep([dict(r) for r in rows], in_scope)
 
     def recent_symbols(self, day_from: str) -> list[str]:
         """Instrumentos operados desde `day_from` (para el selector de la pestaña Operar)."""
@@ -309,6 +343,7 @@ class SQLiteStore:
                                (account_id, day, pnl, updated_at))
 
     def get_daily_pnl(self, day_from: str, day_to: str, account_id: str | None = None) -> list[dict]:
+        day_from, in_scope = self._scope(day_from)
         sql = "SELECT account_id, day, pnl FROM daily_stats WHERE day >= ? AND day <= ?"
         args: list = [day_from, day_to]
         if account_id:
@@ -316,7 +351,7 @@ class SQLiteStore:
             args.append(account_id)
         with self._lock:
             rows = self._conn.execute(sql + " ORDER BY day", args).fetchall()
-        return [dict(r) for r in rows]
+        return self._keep([dict(r) for r in rows], in_scope)
 
     # ---- saldo por día y movimientos de caja (retiros, pagos, depósitos) ----
     def save_balance_day(self, account_id: str, day: str, balance: float, updated_at: str) -> None:
@@ -325,6 +360,7 @@ class SQLiteStore:
                                (account_id, day, balance, updated_at))
 
     def get_balance_days(self, day_from: str, day_to: str, account_id: str | None = None) -> list[dict]:
+        day_from, in_scope = self._scope(day_from)
         sql = "SELECT account_id, day, balance, updated_at FROM balance_daily WHERE day >= ? AND day <= ?"
         args: list = [day_from, day_to]
         if account_id:
@@ -332,7 +368,7 @@ class SQLiteStore:
             args.append(account_id)
         with self._lock:
             rows = self._conn.execute(sql + " ORDER BY day", args).fetchall()
-        return [dict(r) for r in rows]
+        return self._keep([dict(r) for r in rows], in_scope)
 
     def list_cash_events(self, account_id: str | None = None) -> list[dict]:
         sql, args = "SELECT * FROM cash_events", []
@@ -341,7 +377,8 @@ class SQLiteStore:
             args.append(account_id)
         with self._lock:
             rows = self._conn.execute(sql + " ORDER BY day, id", args).fetchall()
-        return [dict(r) for r in rows]
+        start, in_scope = self._scope("0000-00-00")
+        return [r for r in self._keep([dict(r) for r in rows], in_scope) if not start or start == "0000-00-00" or str(r.get("day") or "") >= start]
 
     def get_cash_event(self, event_id: int) -> dict | None:
         with self._lock:
@@ -376,6 +413,7 @@ class SQLiteStore:
             return int(self._conn.execute(sql, args).fetchone()[0])
 
     def get_commissions_range(self, day_from: str, day_to: str, account_id: str | None = None) -> list[dict]:
+        day_from, in_scope = self._scope(day_from)
         sql = "SELECT account_id, day, contracts, cost FROM commissions_daily WHERE day >= ? AND day <= ?"
         args: list = [day_from, day_to]
         if account_id:
@@ -383,7 +421,7 @@ class SQLiteStore:
             args.append(account_id)
         with self._lock:
             rows = self._conn.execute(sql, args).fetchall()
-        return [dict(r) for r in rows]
+        return self._keep([dict(r) for r in rows], in_scope)
 
     # ---- curva de P&L ----
     def add_pnl_samples(self, rows: list[tuple[str, str, float]]) -> None:

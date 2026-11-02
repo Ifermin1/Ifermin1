@@ -374,3 +374,18 @@ class CheckEntryRequest(BaseModel):
 class AskRequest(BaseModel):
     question: str = Field(min_length=3, max_length=400)
     days: int = Field(default=90, ge=7, le=365)
+
+
+class StageRequest(BaseModel):
+    """Etapa: action = start (name, mode, start_date) | update (name, mode, start_date, include, exclude) | stop."""
+    action: str = "update"
+    name: str | None = None
+    mode: str | None = None
+    start_date: str | None = None
+    include: list[str] | None = None
+    exclude: list[str] | None = None
+
+
+class StageResetRequest(BaseModel):
+    before: str
+    confirm: str = ""
