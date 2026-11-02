@@ -59,8 +59,11 @@ export type MonthStats = { from: string; to: string; days: DayStat[]; trades: Tr
 
 /** Etapa (modo prueba): desde qué fecha y con qué cuentas cuentan las estadísticas. */
 export type StageMode = "date" | "new_accounts";
+export type GoalMaster = "flatten_all" | "rotate" | "master_only";
+export type StageGoal = { goal: number; gained: number | null; pct: number | null; reached: boolean; start_balance: number };
 export type Stage = { active: boolean; name: string; mode: StageMode; start_date: string; started_at: string | null; previous: string[]; include: string[]; exclude: string[];
-                      accounts: { account_id: string; alias: string; enabled: boolean; is_new: boolean; in_scope: boolean }[];
+                      goal_usd: number; goal_master: GoalMaster; master: string | null;
+                      accounts: { account_id: string; alias: string; enabled: boolean; is_new: boolean; in_scope: boolean; goal: StageGoal }[];
                       counts: { trades_stage: number | null; trades_total: number | null } };
 export type StageReset = { before: string; deleted: Record<string, number>; backup: { file?: string } | null };
 
@@ -313,6 +316,7 @@ export function makeClient(s: Session) {
     advice: () => req<AdviceList>("/api/advice"),
     stage: () => req<Stage>("/api/stage"),
     stageSet: (body: { action: "start" | "update" | "stop"; name?: string; mode?: StageMode; start_date?: string; include?: string[]; exclude?: string[] }) => req<Stage>("/api/stage", { method: "PUT", body: JSON.stringify(body) }),
+    stageGoal: (goal_usd: number, goal_master: GoalMaster) => req<Stage>("/api/stage/goal", { method: "PUT", body: JSON.stringify({ goal_usd, goal_master }) }),
     stageReset: (before: string, confirm: string) => req<StageReset>("/api/stage/reset", { method: "POST", body: JSON.stringify({ before, confirm }) }),
     aiReview: (day = "", force = false) => req<ReviewResult>("/api/ai/review", { method: "POST", body: JSON.stringify({ day, force }) }),
     aiAsk: (question: string, days = 90) => req<AskResult>("/api/ai/ask", { method: "POST", body: JSON.stringify({ question, days }) }),

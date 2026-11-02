@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useStore } from "../lib/store";
-import type { Stage, StageMode } from "../lib/api";
+import type { GoalMaster, Stage, StageMode } from "../lib/api";
 import { Card } from "./ui";
 
 /* Etapa (modo prueba): empezar de cero sin borrar nada (desde una fecha, o solo cuentas nuevas), ver todo cuando haga
@@ -20,7 +20,9 @@ export function StageCard() {
   const [open, setOpen] = useState(false);
   const [purgeDay, setPurgeDay] = useState(() => iso(new Date()));
   const [purgeWord, setPurgeWord] = useState("");
-  const load = () => client?.stage().then((s) => { setSt(s); if (s.active) { setName(s.name); setMode(s.mode); setDay(s.start_date); setPurgeDay(s.start_date); } }).catch(() => {});
+  const [goal, setGoal] = useState("1500");
+  const [goalMaster, setGoalMaster] = useState<GoalMaster>("flatten_all");
+  const load = () => client?.stage().then((s) => { setSt(s); if (s.active) { setName(s.name); setMode(s.mode); setDay(s.start_date); setPurgeDay(s.start_date); } if (s.goal_usd > 0) setGoal(String(s.goal_usd)); setGoalMaster(s.goal_master); }).catch(() => {});
   useEffect(() => { void load(); }, [client]);   // eslint-disable-line react-hooks/exhaustive-deps
   if (!client || !st) return null;
 
@@ -36,6 +38,12 @@ export function StageCard() {
     const include = new Set(st.include), exclude = new Set(st.exclude);
     if (inScope) { include.delete(acc); exclude.add(acc); } else { exclude.delete(acc); include.add(acc); }
     void run(acc, () => client.stageSet({ action: "update", include: [...include], exclude: [...exclude] }), `${acc} ${inScope ? "fuera de" : "dentro de"} la etapa.`);
+  };
+  const applyGoal = () => {
+    const g = Number(goal.replace(",", ".")) || 0;
+    const n = st.accounts.filter((a) => a.in_scope && a.enabled).length;
+    if (!confirm(g > 0 ? `¿Poner un objetivo de +${g.toLocaleString("es-ES")} $ a las ${n} cuentas de la etapa?\n\nCada cuenta se cierra y pausa sola al ganar esa cantidad sobre su saldo de AHORA (y las que entren después, sobre el saldo con el que aparezcan).` : "¿Quitar el objetivo de prueba de las cuentas de la etapa?")) return;
+    void run("goal", () => client.stageGoal(g, goalMaster), g > 0 ? `Objetivo +${g.toLocaleString("es-ES")} $ aplicado a ${n} cuentas.` : "Objetivo quitado.");
   };
   const purge = () => {
     if (purgeWord !== "BORRAR") { setErr("Escribe BORRAR en la casilla para confirmar."); return; }
@@ -70,16 +78,33 @@ export function StageCard() {
               ? <button className="primary" disabled={busy !== null || readOnly} onClick={() => void start()} data-testid="stage-start">{busy === "start" ? "…" : "Empezar etapa"}</button>
               : <span className="chips"><button className="primary" disabled={busy !== null || readOnly} onClick={() => void save()}>Guardar</button><button className="ghost" disabled={busy !== null || readOnly} onClick={stop} data-testid="stage-stop">Terminar etapa</button></span>}
           </div>
-          {st.active && st.mode === "new_accounts" && (
+          {st.active && (st.mode === "new_accounts" || st.goal_usd > 0) && (
             <div>
-              <p className="muted small">Cuentas: las marcadas <b>nueva</b> aparecieron después de empezar la etapa y cuentan solas; las <b>anteriores</b> no cuentan salvo que las incluyas. Pulsa una para cambiarla.</p>
+              <p className="muted small">{st.mode === "new_accounts" ? <>Cuentas: las marcadas <b>nueva</b> aparecieron después de empezar la etapa y cuentan solas; las <b>anteriores</b> no cuentan salvo que las incluyas. Pulsa una para cambiarla.</> : <>Cuentas de la etapa y su avance hacia el objetivo.</>}</p>
               <div className="chips" data-testid="stage-accounts">
                 {st.accounts.map((a) => (
-                  <button key={a.account_id} className={`chip-btn ${a.in_scope ? "active" : ""}`} disabled={busy !== null || readOnly} onClick={() => toggle(a.account_id, a.in_scope)} title={a.in_scope ? "Dentro de la etapa: pulsa para dejarla fuera" : "Fuera de la etapa: pulsa para incluirla"} data-testid={`stage-acc-${a.account_id}`}>
-                    {a.alias ? `${a.alias} (${a.account_id})` : a.account_id} · {a.is_new ? "nueva" : "anterior"} · {a.in_scope ? "cuenta" : "fuera"}
+                  <button key={a.account_id} className={`chip-btn ${a.in_scope ? "active" : ""}`} disabled={busy !== null || readOnly || st.mode !== "new_accounts"} onClick={() => toggle(a.account_id, a.in_scope)} title={a.in_scope ? "Dentro de la etapa: pulsa para dejarla fuera" : "Fuera de la etapa: pulsa para incluirla"} data-testid={`stage-acc-${a.account_id}`}>
+                    {a.alias ? `${a.alias} (${a.account_id})` : a.account_id} · {a.is_new ? "nueva" : "anterior"} · {a.in_scope ? "cuenta" : "fuera"}{a.in_scope && a.goal.goal > 0 ? ` · ${a.goal.reached ? "✅ objetivo" : `${(a.goal.gained ?? 0) >= 0 ? "+" : ""}${Math.round(a.goal.gained ?? 0).toLocaleString("es-ES")} / ${a.goal.goal.toLocaleString("es-ES")} $`}` : ""}{a.account_id === st.master ? " · maestra" : ""}
                   </button>
                 ))}
               </div>
+            </div>
+          )}
+          {st.active && (
+            <div data-testid="stage-goal">
+              <p className="muted small" style={{ margin: "0 0 6px" }}><b>Objetivo de prueba por cuenta.</b> Cada cuenta de la etapa se cierra y se pausa sola al ganar esa cantidad sobre su saldo de ahora (aviso al 90 %). Las que entren después lo reciben solas. Lo ves en los chips de arriba y en Inicio → Cuentas en pausa.</p>
+              <div className="rule-form">
+                <label>Objetivo ($ por cuenta, 0 = sin objetivo)<input inputMode="decimal" value={goal} onChange={(e) => setGoal(e.target.value)} data-testid="goal-usd" /></label>
+                <label>Si la maestra llega primero
+                  <select value={goalMaster} onChange={(e) => setGoalMaster(e.target.value as GoalMaster)} data-testid="goal-master">
+                    <option value="flatten_all">Cerrar la maestra y todas las seguidoras, y parar la copia</option>
+                    <option value="rotate">Cerrar la maestra y pasar el liderazgo a la seguidora más lejos del objetivo (sigues operando en esa)</option>
+                    <option value="master_only">Cerrar solo la maestra (las seguidoras quedan con sus stops; nada más se copia)</option>
+                  </select>
+                </label>
+                <button className="primary" disabled={busy !== null || readOnly} onClick={applyGoal} data-testid="goal-apply">{busy === "goal" ? "…" : "Aplicar objetivo"}</button>
+              </div>
+              <p className="muted small">Si una seguidora llega primero, solo se cierra y pausa esa; las demás siguen copiando. Consejo: usa una cuenta Sim como maestra y todas las reales como seguidoras: así la maestra nunca "llega" y cada cuenta real se cierra justo en su objetivo.</p>
             </div>
           )}
           <details className="danger-zone">

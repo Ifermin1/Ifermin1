@@ -23,6 +23,7 @@ class RiskService:
         self.replication = None               # lo inyecta el contenedor
         self.commissions = None               # CommissionService, lo inyecta el contenedor
         self.master_flatten_grace = 20.0      # segundos sin copiar fills de la maestra tras cerrarla
+        self.on_halt = None                   # async (account, reason) -> None: lo fija StageService (objetivo de prueba)
         raw = store.get_kv("schedule")
         self.schedule = Schedule.model_validate(json.loads(raw)) if raw else Schedule()
         self.session_closed_day: str = store.get_kv("session_closed_day", "") or ""
@@ -330,6 +331,11 @@ class RiskService:
                 await self.flatten(acc, why)
             except Exception as exc:
                 self.audit.log("ERROR", f"No se pudo cerrar {acc} tras el {why}: {exc}. ¡Revisa la cuenta a mano!", target=acc)
+        if self.on_halt is not None:
+            try:
+                await self.on_halt(acc, reason)
+            except Exception as exc:
+                self.audit.log("ERROR", f"Tras pausar {acc} ({reason}): {exc}", target=acc)
 
     async def _check_schedule(self) -> None:
         s = self.schedule

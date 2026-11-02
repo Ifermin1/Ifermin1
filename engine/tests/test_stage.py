@@ -82,3 +82,65 @@ async def test_stage_routes(client, container):
     assert r.status_code == 422
     r = await client.put("/api/stage", json={"action": "stop"})
     assert r.json()["active"] is False
+
+
+async def _goal_setup(container, goal_master):
+    b, st, risk, rep = container.bridge, container.stage, container.risk, container.replication
+    b.noise = 0
+    await container.accounts.sync_once()
+    await b.set_master("Sim101")
+    rep.add_rule("Sim101", "Sim102")
+    rep.add_rule("Sim101", "Sim103")
+    st.start("Prueba", "date", TODAY)
+    s = st.set_goal(1500, goal_master)
+    return b, st, risk, rep, s
+
+
+async def test_goal_applies_to_stage_accounts_and_follower_closes_alone(container):
+    b, st, risk, rep, s = await _goal_setup(container, "flatten_all")
+    for acc in ("Sim101", "Sim102", "Sim103"):
+        lim = risk.limits[acc]
+        assert lim.profit_goal == 1500 and lim.start_balance == b.accounts[acc]
+    assert all(a["goal"]["pct"] == 0 for a in s["accounts"])
+    # la seguidora Sim102 gana 1600: se cierra y pausa sola; la maestra y el kill switch no cambian
+    b.accounts["Sim102"] += 1600
+    await container.accounts.sync_once()
+    await risk.check()
+    assert risk.limits["Sim102"].trading_halted and risk.limits["Sim102"].halted_reason == "profit_goal"
+    assert not risk.limits["Sim101"].trading_halted and not risk.state().kill_switch
+    acc = {a["account_id"]: a for a in st.state()["accounts"]}
+    assert acc["Sim102"]["goal"]["reached"] is True and acc["Sim102"]["goal"]["pct"] >= 100
+
+
+async def test_goal_master_first_flatten_all_stops_copy(container):
+    b, st, risk, rep, _ = await _goal_setup(container, "flatten_all")
+    b.accounts["Sim101"] += 1500
+    await container.accounts.sync_once()
+    await risk.check()
+    assert risk.limits["Sim101"].halted_reason == "profit_goal"
+    assert risk.state().kill_switch and "objetivo de prueba" in (risk.state().kill_switch_reason or "")
+    assert any(a.event_type == "STAGE_GOAL_MASTER" for a in container.audit.recent(10))
+
+
+async def test_goal_master_first_rotate_promotes_furthest_follower(container):
+    b, st, risk, rep, _ = await _goal_setup(container, "rotate")
+    b.accounts["Sim103"] += 900      # Sim103 va por +900; Sim102 por 0 -> Sim102 es la nueva maestra
+    b.accounts["Sim101"] += 1500
+    await container.accounts.sync_once()
+    await risk.check()
+    assert b.health.master_account == "Sim102"
+    masters = {(r.master_account, r.follower_account) for r in rep.rules if r.enabled}
+    assert masters == {("Sim102", "Sim103")}
+    assert not risk.state().kill_switch
+    ev = [a for a in container.audit.recent(10) if a.event_type == "STAGE_GOAL_MASTER"]
+    assert ev and "NUEVA MAESTRA: Sim102" in ev[0].message
+
+
+async def test_goal_zero_removes_goal_and_resumes(container):
+    b, st, risk, rep, _ = await _goal_setup(container, "master_only")
+    b.accounts["Sim102"] += 1600
+    await container.accounts.sync_once()
+    await risk.check()
+    assert risk.limits["Sim102"].trading_halted
+    st.set_goal(0)
+    assert risk.limits["Sim102"].profit_goal == 0 and not risk.limits["Sim102"].trading_halted

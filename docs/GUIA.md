@@ -528,6 +528,22 @@ empieza una **etapa** en la tarjeta de arriba de *Análisis*:
 
 La copia de operaciones no cambia con la etapa: sigue copiando a todas las cuentas que tengan regla.
 
+**Objetivo de prueba por cuenta** (dentro de la tarjeta, con la etapa activa). Pones la cantidad (p. ej. 1500 $) y
+*Aplicar objetivo*: cada cuenta de la etapa recibe ese objetivo sobre **su saldo de ahora** (es el "objetivo de la
+evaluación" de Riesgo, con el saldo inicial rellenado solo). Cuando una cuenta lo alcanza (saldo + flotante − comisiones del
+día), el engine **la cierra y la pausa** (`PROFIT_GOAL`, aviso al 90 % con `PROFIT_GOAL_WARNING`) y las demás siguen. Las
+cuentas que entren después en la etapa lo reciben solas. En los chips ves el avance (+1.385 / 1.500 $) y ✅ al llegar.
+Si la que llega primero es la **maestra**, eliges qué pasa:
+
+- *Cerrar la maestra y todas las seguidoras, y parar la copia*: se cierra todo y se activa el kill switch
+  (`STAGE_GOAL_MASTER`). Para seguir con las que no llegaron: *Cuentas → Hacer líder* en otra cuenta y *Reanudar*.
+- *Pasar el liderazgo a la seguidora más lejos del objetivo*: la maestra se cierra y pausa, esa seguidora pasa a ser la
+  maestra y las reglas se reapuntan solas. **Tienes que operar en esa cuenta a partir de ahí** (el aviso lo dice).
+- *Cerrar solo la maestra*: las seguidoras quedan con sus stops y objetivos copiados; nada más se copia hasta elegir maestra.
+
+Consejo: con una cuenta **Sim** como maestra y todas las reales como seguidoras, la maestra nunca "llega" y cada cuenta real
+se cierra exactamente en su objetivo sin tocar a las demás.
+
 ### Informe semanal y CSV (pestaña Análisis, arriba a la derecha)
 
 - **Informe semanal**: elige un día y pulsa el botón; se abre en otra pestaña el informe de esa semana (lunes a domingo)
@@ -760,6 +776,8 @@ cola y el último envío. La página del hub enseña el P&L del día de cada eng
 | `NEWS_RESULT` 📊 | Se ha publicado el dato: real frente a previsión, análisis del resultado y reacción del precio. | Espera a que el mercado digiera el dato antes de copiar con tamaño normal; mira la pestaña Noticias para el detalle. |
 | `ENTRY_MISSED` | Una entrada límite con tolerancia no se llenó en el plazo y estaba configurada para cancelar. La seguidora no tiene esa operación. | Decidir si entrar a mano o subir la tolerancia / usar "a mercado lo que falte". |
 | `SKIPPED` "cierre de emergencia de la maestra" | Durante 20 s tras cerrar la maestra por emergencia, sus fills no se copian. | Nada; es la protección contra salidas dobles. |
+| `STAGE_GOAL_SET` 🎯 | Objetivo de prueba aplicado a las cuentas de la etapa (o a una cuenta nueva). | Comprobar el saldo inicial en Riesgo si una cuenta entró con posición abierta. |
+| `STAGE_GOAL_MASTER` 🏁 | La maestra alcanzó el objetivo de prueba: según la regla, todo cerrado y copia parada, liderazgo pasado a otra cuenta (**opera en ella**) o solo la maestra cerrada. | Leer el aviso: dice en qué cuenta seguir. |
 | `STAGE_START` / `STAGE_UPDATE` / `STAGE_END` | Etapa empezada, ajustada o terminada (Análisis → Etapa): desde qué fecha y con qué cuentas cuentan las estadísticas. | Nada; nunca borra. |
 | `HISTORY_PURGED` 🗑️ | Borrado del historial anterior a una fecha, con el detalle de filas y la copia previa. | Nada; si fue un error, restaura la copia (Riesgo → Copias). |
 | `ENTRY_MODE_SET` | Alguien pulsó *Entrar al precio del maestro* o *Entrar a mercado* en *Inicio*: cambió el modo de entrada de todas las seguidoras. | Nada. Comprueba en *Cuentas → ⚙* si quieres afinar tolerancia o espera por cuenta. |

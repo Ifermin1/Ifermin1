@@ -228,7 +228,7 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
     assistant = AssistantService(accounts, risk, trade, market, ai, audit, store, bridge)
     proprules = PropRulesService(store, accounts, risk, audit)
     tilt = TiltService(store, audit, risk, accounts, ai, auto_pause_min=cfg.TILT_AUTO_PAUSE_MIN)
-    stage = StageService(store, accounts, audit, backup=backup)
+    stage = StageService(store, accounts, audit, backup=backup, risk=risk, bridge=bridge, replication=replication)
     performance.on_trade_closed = tilt.on_trade
     digest = DigestService(store, audit, news, coach, accounts, risk, ai, brief_time=cfg.MORNING_BRIEF_TIME, review_time=cfg.SESSION_REVIEW_TIME)
     notify.commands = TelegramCommands(notify, accounts, risk, trade, market, bridge)
@@ -241,7 +241,7 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
 
     async def _after_sync() -> None:
         # independientes: un fallo en una vigilancia no debe apagar la otra
-        for name, fn in (("sincronización", sync.check), ("riesgo", risk.check), ("salidas huérfanas", trade.sweep_orphans), ("trailing pendiente", trade.apply_pending_trails), ("reconciliación", reconcile.after_sync)):
+        for name, fn in (("sincronización", sync.check), ("riesgo", risk.check), ("salidas huérfanas", trade.sweep_orphans), ("trailing pendiente", trade.apply_pending_trails), ("reconciliación", reconcile.after_sync), ("etapa", stage.tick)):
             try:
                 await fn()
             except Exception as exc:

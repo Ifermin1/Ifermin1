@@ -386,6 +386,11 @@ class StageRequest(BaseModel):
     exclude: list[str] | None = None
 
 
+class StageGoalRequest(BaseModel):
+    goal_usd: float = Field(ge=0)
+    goal_master: str | None = None     # flatten_all | rotate | master_only
+
+
 class StageResetRequest(BaseModel):
     before: str
     confirm: str = ""
