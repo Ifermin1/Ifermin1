@@ -595,6 +595,14 @@ perdería más de lo que le queda. Con el stop dinámico, **cada cuenta solo pue
 Ejemplo: seguidora con 400 $ de ventana, larga 2 NQ a 20000 y stop copiado en 19950 (pierde 2.000 $). El engine lo pone en
 19990,25: (400 − 10) / (20 $ × 2) = 9,75 puntos. Si ya lleva −300 $ realizados hoy, quedan 90 $: stop a 2,25 puntos.
 
+**Corte del día con orden límite** (misma tarjeta, *corte del día con orden límite*): si la cuenta tiene *Ganancia máx. del
+día*, el objetivo de cada posición (orden LIMIT) se coloca justo donde la ganancia neta del día llegará al corte, contando
+la comisión de cerrar: si el objetivo copiado está más lejos, se acerca; si no hay, se crea (`DYNCUT_MOVE`). Así el corte
+lo hace una orden al precio exacto, no un cierre a mercado 2 segundos después (el 2/11 el corte de 1510 cerró en 1557).
+Un objetivo copiado más cerca que el corte se respeta. Si el precio ya pasó ese punto, cierra el límite de riesgo a mercado
+como hasta ahora. *Ajuste del corte* desplaza el límite unos $ por encima o por debajo. Los stops siguen siendo a mercado:
+un stop-límite puede no ejecutarse en un hueco y dejar la cuenta sin protección.
+
 ### Gestor preventivo: cada cuenta con su dueño, su prop firm y sus reglas (Inicio y Riesgo)
 
 Es el "jefe de riesgo" de la consola: vigila cada cuenta **antes** de que la firma aplique una regla y nunca opera por su
@@ -861,6 +869,7 @@ cola y el último envío. La página del hub enseña el P&L del día de cada eng
 | `EVAL_PASSED` 🏆 | Evaluación superada: objetivo, días y consistencia cumplidos; cuenta cerrada y pausada. | Pedir la cuenta financiada; no operar más en esa. |
 | `STAGE_GOAL_SET` 🎯 | Objetivo de prueba aplicado a las cuentas de la etapa (o a una cuenta nueva). | Comprobar el saldo inicial en Riesgo si una cuenta entró con posición abierta. |
 | `STAGE_GOAL_MASTER` 🏁 | La maestra alcanzó el objetivo de prueba: según la regla, todo cerrado y copia parada, liderazgo pasado a otra cuenta (**opera en ella**) o solo la maestra cerrada. | Leer el aviso: dice en qué cuenta seguir. |
+| `DYNCUT_MOVE` 🎯 | El objetivo límite de esa cuenta se puso donde la ganancia neta del día llega justo al corte. | Nada. |
 | `DYNSTOP_MOVE` 🛡️ | El stop de esa cuenta se acercó a lo que le queda de su ventana (de → a, ventana, por qué límite). | Nada: así esa cuenta no pasa de su pérdida máxima. |
 | `DYNSTOP_NO_ROOM` ⚠️ | A la cuenta no le queda ventana para un stop razonable: se deja como está. | Decidir a mano: cerrar o aceptar que el límite de riesgo la cierre. |
 | `GUARDIAN_RED` 🔴 | El gestor preventivo detectó una infracción o un límite de liquidación cerca (causa, valor, límite y acción en el aviso). | Hacer la acción indicada; no abrir nada en esa cuenta hasta volver a verde. |

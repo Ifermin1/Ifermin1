@@ -235,7 +235,7 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
     tilt = TiltService(store, audit, risk, accounts, ai, auto_pause_min=cfg.TILT_AUTO_PAUSE_MIN)
     stage = StageService(store, accounts, audit, backup=backup, risk=risk, bridge=bridge, replication=replication)
     guardian = GuardianService(store, accounts, risk, proprules, audit, bridge=bridge)
-    dynstop = DynStopService(store, accounts, risk, trade, market, audit, bridge)
+    dynstop = DynStopService(store, accounts, risk, trade, market, audit, bridge, commissions=commissions)
     coach.guardian = guardian
     performance.on_trade_closed = tilt.on_trade
     digest = DigestService(store, audit, news, coach, accounts, risk, ai, brief_time=cfg.MORNING_BRIEF_TIME, review_time=cfg.SESSION_REVIEW_TIME)

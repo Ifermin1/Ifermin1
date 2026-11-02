@@ -56,3 +56,31 @@ async def test_dynstop_routes(client):
     r = await client.put("/api/dynstop", json={"margin_usd": 25, "enabled": True})
     assert r.status_code == 200 and r.json()["config"]["margin_usd"] == 25.0
     assert (await client.get("/api/dynstop")).json()["config"]["enabled"] is True
+
+
+async def test_daily_cut_places_limit_exactly_at_the_cut(container):
+    """Ganancia máxima del día 500 $: larga 2 NQ a 20000 → objetivo límite en 20012.5 (500 / (20 × 2) = 12,5 puntos)."""
+    b, risk = container.bridge, container.risk
+    b.noise = 0
+    await b.set_master("Sim101")
+    b._px["NQ DEC26"] = 20000.0
+    b.positions[("Sim102", "NQ DEC26")] = 2
+    b.working_orders.append(("Sim102", WorkingOrder(order_id="t1", master_order_id="m1", action="SELL", symbol="NQ DEC26", quantity=2, order_type="LIMIT", limit_price=20100.0)))
+    risk.upsert_limit(RiskLimit(account_id="Sim102", max_daily_profit=500))
+    await container.accounts.sync_once()
+    await container.dynstop.tick()
+    assert next(o for a, o in b.working_orders if a == "Sim102").limit_price == 20012.5
+    assert any(a.event_type == "DYNCUT_MOVE" for a in container.audit.recent(10))
+    # ya ganó 300 $ realizados: faltan 200 $ → 5 puntos
+    b.pnl["Sim102"] = 300.0
+    await container.accounts.sync_once()
+    container.dynstop._applied.clear()
+    await container.dynstop.tick()
+    assert next(o for a, o in b.working_orders if a == "Sim102").limit_price == 20005.0
+    # un objetivo copiado más cerca que el corte se respeta
+    i, (acc, wo) = next((i, x) for i, x in enumerate(b.working_orders) if x[0] == "Sim102")
+    b.working_orders[i] = (acc, wo.model_copy(update={"limit_price": 20003.0}))
+    await container.accounts.sync_once()
+    container.dynstop._applied.clear()
+    await container.dynstop.tick()
+    assert next(o for a, o in b.working_orders if a == "Sim102").limit_price == 20003.0
