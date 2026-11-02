@@ -26,6 +26,7 @@ TITLES: dict[str, tuple[str, str]] = {
     "TRAIL_START": ("🎯", "Trailing stop activado"), "TRAIL_MOVE": ("↗️", "Trailing: stop movido"), "TRAIL_END": ("🏁", "Trailing terminado"),
     "DAILY_LOSS_LIMIT": ("🛑", "Límite de pérdida diaria"), "DAILY_LOSS_WARNING": ("⚠️", "Cerca del límite de pérdida"),
     "DAILY_PROFIT_TARGET": ("🎯", "Corte del día alcanzado"), "DAILY_PROFIT_WARNING": ("🟢", "Cerca del corte del día"),
+    "EVAL_CONSISTENCY_STOP": ("⛔", "Tope de consistencia de hoy"), "EVAL_TARGET_WAIT": ("⏳", "Objetivo conseguido: faltan días"), "EVAL_PASSED": ("🏆", "Evaluación superada"), "EVAL_RESUMED": ("▶️", "Parada por consistencia levantada"),
     "STAGE_GOAL_MASTER": ("🏁", "Objetivo de prueba en la maestra"), "STAGE_GOAL_SET": ("🎯", "Objetivo de prueba aplicado"),
     "PROFIT_GOAL": ("🏆", "Objetivo de la evaluación alcanzado"), "PROFIT_GOAL_WARNING": ("🟢", "Cerca del objetivo de la evaluación"),
     "DRAWDOWN_LIMIT": ("🛑", "Límite de drawdown"), "DRAWDOWN_WARNING": ("⚠️", "Drawdown al 80 %"),
@@ -46,7 +47,7 @@ DEFAULT_EVENTS = ["DAILY_LOSS_LIMIT", "DAILY_LOSS_WARNING", "DAILY_PROFIT_TARGET
                   "DRAWDOWN_WARNING", "KILL_SWITCH_ON", "KILL_SWITCH_OFF", "KILL_SWITCH_PERSISTED", "FLATTEN", "SCHEDULED_FLATTEN", "NAKED_CLOSE",
                   "FOLLOWER_REJECTED", "ACCOUNT_LOCKED", "DESYNC", "OVERCLOSE_FIX", "ADDON_SILENT", "ADDON_DOWN", "ADDON_BACK",
                   "ADDON_RESTART", "GAP", "ERROR", "ENTRY_MISSED", "NEWS_SOON", "NEWS_RESULT", "MANUAL_REJECTED", "DAY_CLOSED", "AUTO_RISK_APPLIED",
-                  "DEGRADED_ON", "DEGRADED_OFF", "ADDON_STILL_DOWN", "NO_TICKS", "TICKS_BACK", "ENGINE_RESUMED", "ADDON_ALONE", "ADDON_SELF_RESTART", "COPILOT", "ASSISTANT_RUN", "MORNING_BRIEF", "SESSION_REVIEW", "TILT", "PROP_RULE_WARN", "STAGE_GOAL_MASTER"]
+                  "DEGRADED_ON", "DEGRADED_OFF", "ADDON_STILL_DOWN", "NO_TICKS", "TICKS_BACK", "ENGINE_RESUMED", "ADDON_ALONE", "ADDON_SELF_RESTART", "COPILOT", "ASSISTANT_RUN", "MORNING_BRIEF", "SESSION_REVIEW", "TILT", "PROP_RULE_WARN", "STAGE_GOAL_MASTER", "EVAL_CONSISTENCY_STOP", "EVAL_TARGET_WAIT", "EVAL_PASSED"]
 
 
 class NotifyConfig(BaseModel):

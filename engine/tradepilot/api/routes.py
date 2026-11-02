@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from tradepilot.api.auth import require_token
-from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest, ProtectRequest, TrailRequest, DayLossRequest, AutoRiskRequest, RiskPresets, ApplyPresetRequest, TagsRequest, OcoEntryRequest, TradeTemplates, ReviewRequest, CheckEntryRequest, AskRequest, PushSubscribeRequest, PushUnsubscribeRequest, ConfigImportRequest, AssistantRequest, PlanRequest, DigestConfigRequest, DigestRunRequest, TiltConfigRequest, TiltResumeRequest, PropRuleRequest, StageRequest, StageResetRequest, StageGoalRequest
+from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest, ProtectRequest, TrailRequest, DayLossRequest, AutoRiskRequest, RiskPresets, ApplyPresetRequest, TagsRequest, OcoEntryRequest, TradeTemplates, ReviewRequest, CheckEntryRequest, AskRequest, PushSubscribeRequest, PushUnsubscribeRequest, ConfigImportRequest, AssistantRequest, PlanRequest, DigestConfigRequest, DigestRunRequest, TiltConfigRequest, TiltResumeRequest, PropRuleRequest, StageRequest, StageResetRequest, StageGoalRequest, EvalRuleRequest
 from tradepilot.container import Container
 from tradepilot.domain.risk import RiskLimit, Schedule
 
@@ -405,6 +405,25 @@ def proprules_set(body: PropRuleRequest, request: Request):
     rule = c.proprules.set_rule(body.account_id, body.model_dump(exclude_unset=True, exclude={"account_id"}))
     c.audit.log("PROP_RULE_SET", f"{body.account_id}: reglas de prop firm ajustadas (consistencia {rule['consistency'] * 100:.0f} %, {rule['min_days']} días mín., retiro mín. {rule['payout_min']:,.0f} $)", target=body.account_id)
     return c.proprules.evaluate(body.account_id)
+
+
+@router.get("/eval/{account_id}")
+def eval_get(account_id: str, request: Request):
+    """Modo evaluación: reglas de la prueba de esa cuenta y su estado (días, consistencia, objetivo, gestor automático)."""
+    c = _c(request)
+    if c.proprules is None or c.accounts.find(account_id) is None:
+        raise HTTPException(404, "cuenta desconocida")
+    return c.proprules.evaluate(account_id)
+
+
+@router.put("/eval/{account_id}")
+def eval_set(account_id: str, body: EvalRuleRequest, request: Request):
+    c = _c(request)
+    if c.proprules is None or c.accounts.find(account_id) is None:
+        raise HTTPException(404, "cuenta desconocida")
+    rule = c.proprules.set_eval_rule(account_id, body.model_dump(exclude_unset=True))
+    c.audit.log("EVAL_RULE_SET", f"{account_id}: reglas de la evaluación ({'gestor automático ON' if rule['auto'] else 'gestor automático OFF'}, {rule['min_days']} días mín., consistencia {rule['consistency'] * 100:.0f} %, mantenimiento {rule['maint_contracts']} contr.)", target=account_id)
+    return c.proprules.evaluate(account_id)
 
 
 @router.get("/tilt")

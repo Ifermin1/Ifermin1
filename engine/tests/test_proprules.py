@@ -46,7 +46,9 @@ async def test_eval_account_tracks_goal_only(container):
     container.risk.upsert_limit(RiskLimit(account_id="Sim101", start_balance=50000.0, max_trailing_drawdown=2500.0, profit_goal=3000.0))
     snap.balance = 51000.0; snap.unrealized_pnl = 0.0
     r = container.proprules.evaluate("Sim101")
-    assert r["is_eval"] and [x["key"] for x in r["requirements"]] == ["goal"] and r["requirements"][0]["missing"] == 2000.0 and r["eligible"] is False
+    # evaluación: objetivo (y las reglas de la prueba de la firma, aquí los días mínimos orientativos de Apex)
+    assert r["is_eval"] and [x["key"] for x in r["requirements"]][0] == "goal" and r["requirements"][0]["missing"] == 2000.0 and r["eligible"] is False
+    assert r["status"] == "in_progress" and r["eval_rule"]["auto"] is False
 
 
 async def test_consistency_warning_once_per_day(container):

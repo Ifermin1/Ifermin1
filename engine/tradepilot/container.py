@@ -241,7 +241,7 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
 
     async def _after_sync() -> None:
         # independientes: un fallo en una vigilancia no debe apagar la otra
-        for name, fn in (("sincronización", sync.check), ("riesgo", risk.check), ("salidas huérfanas", trade.sweep_orphans), ("trailing pendiente", trade.apply_pending_trails), ("reconciliación", reconcile.after_sync), ("etapa", stage.tick)):
+        for name, fn in (("sincronización", sync.check), ("riesgo", risk.check), ("salidas huérfanas", trade.sweep_orphans), ("trailing pendiente", trade.apply_pending_trails), ("reconciliación", reconcile.after_sync), ("etapa", stage.tick), ("evaluación", proprules.guard)):
             try:
                 await fn()
             except Exception as exc:

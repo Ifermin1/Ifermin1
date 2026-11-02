@@ -30,6 +30,8 @@ function explain(l: RiskLimit, a: Account | undefined): { title: string; why: st
       return { tone: "ok", title: "Corte del día hecho", why: `Hoy va ${usd(a?.net_pnl)} neto y el objetivo diario era +${usd(l.max_daily_profit)}: ganancia asegurada, cerrada y sin copiar hasta mañana.`, next: "Reanudar la vuelve a poner a copiar hoy (si sigue por encima del objetivo, súbelo o quítalo en Riesgo)." };
     case "profit_goal":
       return { tone: "ok", title: "Objetivo de la evaluación alcanzado", why: `Lleva +${usd(l.profit_goal)} o más sobre el saldo inicial de ${usd(l.start_balance)}: evaluación superada, cerrada y pausada para no perderla.`, next: "Para seguir operándola, sube o quita el objetivo en Riesgo y reanuda." };
+    case "consistency":
+      return { tone: "warn", title: "Tope de consistencia de hoy", why: "El gestor de la evaluación la paró: lo ganado hoy ya es el máximo que permite la regla de consistencia (el mejor día no puede pasar del X % del total). Seguir hoy no suma: solo alarga la evaluación.", next: "Se reanuda sola mañana. Reanudar la levanta ya (bajo tu responsabilidad)." };
     case "tilt":
       return { tone: "warn", title: "Pausa por tilt", why: "El detector de tilt vio señales de operar por rabia (racha, tamaño creciente, reentradas) y la pausó unos minutos.", next: "Se reanuda sola al acabar la pausa; Reanudar la levanta ya." };
     default:

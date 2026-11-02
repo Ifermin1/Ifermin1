@@ -5,6 +5,7 @@ import { money, signedMoney } from "../lib/format";
 import { Card, Empty, Kpi } from "../components/ui";
 import { AccountPanel, livePnl, liveDrawdown } from "../components/AccountPanel";
 import { ProfileEditor, type ProfileResult } from "../components/ProfileEditor";
+import { EvalManager } from "../components/EvalManager";
 import { DD_SHORT, profileLabel } from "../lib/propfirms";
 import { Icon } from "../components/Icons";
 import type { Account, ExecOptions, Rule } from "../lib/api";
@@ -402,7 +403,9 @@ export function Accounts() {
                           </div>
                         )}
                         <AccountPanel a={a} role={m ? "master" : "follower"} link={link} limit={limit} prices={prices} busy={busy === id} lastFill={lastFill(id)} lastReject={lastReject(id)}
-                                      onFlatten={() => void flatten(id)} onResync={() => void resync(id)} onTarget={(t) => void setTarget(id, t)} onGoal={(g, s) => void setGoal(id, g, s)} />
+                                      onFlatten={() => void flatten(id)} onResync={() => void resync(id)} onTarget={(t) => void setTarget(id, t)} onGoal={(g, s) => void setGoal(id, g, s)}>
+                          <EvalManager a={a} limit={limit} />
+                        </AccountPanel>
                       </td></tr>
                     ),
                   ];

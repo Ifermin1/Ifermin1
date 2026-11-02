@@ -386,6 +386,14 @@ class StageRequest(BaseModel):
     exclude: list[str] | None = None
 
 
+class EvalRuleRequest(BaseModel):
+    auto: Optional[bool] = None
+    consistency: Optional[float] = Field(default=None, ge=0, le=1)
+    min_days: Optional[int] = Field(default=None, ge=0, le=90)
+    min_day_profit: Optional[float] = Field(default=None, ge=0)
+    maint_contracts: Optional[int] = Field(default=None, ge=0, le=50)
+
+
 class StageGoalRequest(BaseModel):
     goal_usd: float = Field(ge=0)
     goal_master: str | None = None     # flatten_all | rotate | master_only

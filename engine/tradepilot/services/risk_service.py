@@ -24,6 +24,7 @@ class RiskService:
         self.commissions = None               # CommissionService, lo inyecta el contenedor
         self.master_flatten_grace = 20.0      # segundos sin copiar fills de la maestra tras cerrarla
         self.on_halt = None                   # async (account, reason) -> None: lo fija StageService (objetivo de prueba)
+        self.goal_gate = None                 # (account) -> bool: False = objetivo alcanzado pero la evaluación aún no se cierra (días/consistencia pendientes)
         raw = store.get_kv("schedule")
         self.schedule = Schedule.model_validate(json.loads(raw)) if raw else Schedule()
         self.session_closed_day: str = store.get_kv("session_closed_day", "") or ""
@@ -250,7 +251,7 @@ class RiskService:
             fees = f" (bruto {snap.daily_pnl:,.2f}, comisiones {snap.commissions_today:,.2f})" if snap.commissions_today else ""
             # objetivo de la evaluación: ganancia neta acumulada = valor actual (saldo + flotante − comisiones de hoy) − saldo inicial
             gained = self.goal_progress(limit, snap)
-            if goal_on and gained is not None and gained >= limit.profit_goal:
+            if goal_on and gained is not None and gained >= limit.profit_goal and (self.goal_gate is None or self.goal_gate(acc)):
                 await self._halt_daily(limit, snap, "profit_goal", "PROFIT_GOAL",
                                        f"{acc}: ganancia neta acumulada +{gained:,.2f} sobre el saldo inicial {limit.start_balance:,.2f} alcanzó el "
                                        f"objetivo de +{limit.profit_goal:,.2f}. Cuenta pausada y cerrada: evaluación superada.",
@@ -336,6 +337,16 @@ class RiskService:
                 await self.on_halt(acc, reason)
             except Exception as exc:
                 self.audit.log("ERROR", f"Tras pausar {acc} ({reason}): {exc}", target=acc)
+
+    async def halt_account(self, account_id: str, reason: str, event: str, message: str, why: str, extra: dict | None = None) -> bool:
+        """Pausa y cierra una cuenta desde otro servicio (gestor de evaluación): mismo camino que los límites propios."""
+        limit = self.limits.get(account_id) or RiskLimit(account_id=account_id)
+        snap = self.accounts.accounts.get(account_id) if self.accounts else None
+        if snap is None or limit.trading_halted:
+            return False
+        await self._halt_daily(limit, snap, reason, event, message, why, 0.0, extra)
+        self.limits[account_id] = limit
+        return True
 
     async def _check_schedule(self) -> None:
         s = self.schedule
@@ -516,7 +527,8 @@ class RiskService:
             why = {"daily_loss": "límite de pérdida diaria",
                    "daily_profit": "objetivo de ganancia diaria alcanzado",
                    "profit_goal": "objetivo de la evaluación alcanzado",
-                   "drawdown": "límite de drawdown"}.get(limit.halted_reason, "pausa manual")
+                   "drawdown": "límite de drawdown",
+                   "consistency": "tope de consistencia de hoy: vuelve mañana"}.get(limit.halted_reason, "pausa manual")
             return False, f"cuenta {account_id} en pausa ({why}): se reanuda en Inicio → Cuentas en pausa o en Riesgo → Reanudar"
         if limit.max_position_size:
             if quantity > limit.max_position_size:

@@ -570,6 +570,29 @@ romper la consistencia"**; al llegar al 80 % de ese tope avisa al teléfono (`PR
 pares. Las cifras por firma son orientativas y cambian: *ajustar reglas de esta cuenta* las corrige para tu plan. Los
 retiros que anotas en *Análisis → Pendientes y registros* cuentan como pagados/pedidos.
 
+### Modo evaluación: las reglas de la prueba y el gestor automático (Cuentas → ▾ de la cuenta)
+
+Dentro del detalle de cada cuenta hay un recuadro **Modo evaluación**. Con el botón *Prop firm* pones la firma y el plan
+(eso rellena objetivo, pérdida diaria, drawdown y contratos en Riesgo); en el recuadro pones **las reglas de la prueba**
+(cifras orientativas por firma, edítalas con las de tu plan):
+
+- **Días mínimos operados** y, si tu firma lo exige, la **ganancia mínima** para que un día cuente.
+- **Consistencia**: el mejor día no puede pasar del X % del total ganado (0 = sin regla).
+- **Contratos en mantenimiento**: tamaño al que se baja cuando el objetivo llega antes que los días.
+
+La línea de estado dice en cada momento: objetivo (llevas / meta), días (3 de 7), consistencia (mejor día X % del total) y
+**cuánto puedes ganar hoy** sin romperla. Con el interruptor **gestor automático** encendido, el engine actúa solo:
+
+| Situación | Qué hace | Aviso |
+|---|---|---|
+| Lo ganado hoy llega al máximo que permite la consistencia | Cierra la posición y **para la cuenta hasta mañana** (se reanuda sola; en Inicio → Cuentas en pausa puedes levantarla antes) | `EVAL_CONSISTENCY_STOP` |
+| Objetivo conseguido pero faltan días o consistencia | **No la cierra**: baja el tope a los contratos de mantenimiento y avisa qué falta, para que sigas operando pequeño hasta cumplirlo | `EVAL_TARGET_WAIT` |
+| Objetivo + días + consistencia cumplidos | Cierra y pausa la cuenta como **superada** (no la toques hasta tener la financiada) | `EVAL_PASSED` |
+| Al 80 % del máximo de hoy | Aviso para bajar tamaño o parar | `PROP_RULE_WARN` |
+
+La pérdida diaria y el drawdown los sigue vigilando Riesgo como siempre. Con el gestor apagado solo ves el estado. Las
+cuentas financiadas usan las reglas de payout de *Riesgo → Reglas de prop firm y payout*.
+
 ### Detector de tilt (Riesgo → Detector de tilt)
 
 Con cada operación cerrada, el engine mira si una cuenta está operando por rabia: **3 pérdidas seguidas**, **tamaño
@@ -776,6 +799,9 @@ cola y el último envío. La página del hub enseña el P&L del día de cada eng
 | `NEWS_RESULT` 📊 | Se ha publicado el dato: real frente a previsión, análisis del resultado y reacción del precio. | Espera a que el mercado digiera el dato antes de copiar con tamaño normal; mira la pestaña Noticias para el detalle. |
 | `ENTRY_MISSED` | Una entrada límite con tolerancia no se llenó en el plazo y estaba configurada para cancelar. La seguidora no tiene esa operación. | Decidir si entrar a mano o subir la tolerancia / usar "a mercado lo que falte". |
 | `SKIPPED` "cierre de emergencia de la maestra" | Durante 20 s tras cerrar la maestra por emergencia, sus fills no se copian. | Nada; es la protección contra salidas dobles. |
+| `EVAL_CONSISTENCY_STOP` ⛔ | El gestor de la evaluación cerró y paró la cuenta hasta mañana: hoy ya ganó el máximo que permite la consistencia. | Nada; mañana se levanta sola. |
+| `EVAL_TARGET_WAIT` ⏳ | Objetivo de la evaluación conseguido pero faltan días o consistencia: tamaño bajado a mantenimiento. | Operar pequeño hasta cumplir lo que falta (lo dice el aviso). |
+| `EVAL_PASSED` 🏆 | Evaluación superada: objetivo, días y consistencia cumplidos; cuenta cerrada y pausada. | Pedir la cuenta financiada; no operar más en esa. |
 | `STAGE_GOAL_SET` 🎯 | Objetivo de prueba aplicado a las cuentas de la etapa (o a una cuenta nueva). | Comprobar el saldo inicial en Riesgo si una cuenta entró con posición abierta. |
 | `STAGE_GOAL_MASTER` 🏁 | La maestra alcanzó el objetivo de prueba: según la regla, todo cerrado y copia parada, liderazgo pasado a otra cuenta (**opera en ella**) o solo la maestra cerrada. | Leer el aviso: dice en qué cuenta seguir. |
 | `STAGE_START` / `STAGE_UPDATE` / `STAGE_END` | Etapa empezada, ajustada o terminada (Análisis → Etapa): desde qué fecha y con qué cuentas cuentan las estadísticas. | Nada; nunca borra. |
