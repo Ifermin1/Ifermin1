@@ -33,6 +33,7 @@ from tradepilot.services.watchdog_service import WatchdogService
 from tradepilot.services.backup_service import BackupService
 from tradepilot.services.stage_service import StageService
 from tradepilot.services.guardian_service import GuardianService
+from tradepilot.services.dynstop_service import DynStopService
 from tradepilot.services.metrics_service import MetricsService
 from tradepilot.services.copilot_service import CopilotService
 from tradepilot.services.assistant_service import AssistantService
@@ -78,6 +79,7 @@ class Container:
     proprules: PropRulesService | None = None
     stage: StageService | None = None
     guardian: GuardianService | None = None
+    dynstop: DynStopService | None = None
 
     async def start(self) -> None:
         if self.advisor is not None:
@@ -233,6 +235,7 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
     tilt = TiltService(store, audit, risk, accounts, ai, auto_pause_min=cfg.TILT_AUTO_PAUSE_MIN)
     stage = StageService(store, accounts, audit, backup=backup, risk=risk, bridge=bridge, replication=replication)
     guardian = GuardianService(store, accounts, risk, proprules, audit, bridge=bridge)
+    dynstop = DynStopService(store, accounts, risk, trade, market, audit, bridge)
     coach.guardian = guardian
     performance.on_trade_closed = tilt.on_trade
     digest = DigestService(store, audit, news, coach, accounts, risk, ai, brief_time=cfg.MORNING_BRIEF_TIME, review_time=cfg.SESSION_REVIEW_TIME)
@@ -247,10 +250,10 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
 
     async def _after_sync() -> None:
         # independientes: un fallo en una vigilancia no debe apagar la otra
-        for name, fn in (("sincronización", sync.check), ("riesgo", risk.check), ("salidas huérfanas", trade.sweep_orphans), ("trailing pendiente", trade.apply_pending_trails), ("reconciliación", reconcile.after_sync), ("etapa", stage.tick), ("evaluación", proprules.guard), ("gestor preventivo", guardian.tick)):
+        for name, fn in (("sincronización", sync.check), ("riesgo", risk.check), ("salidas huérfanas", trade.sweep_orphans), ("trailing pendiente", trade.apply_pending_trails), ("reconciliación", reconcile.after_sync), ("etapa", stage.tick), ("evaluación", proprules.guard), ("gestor preventivo", guardian.tick), ("stop dinámico", dynstop.tick)):
             try:
                 await fn()
             except Exception as exc:
                 logger.exception(f"Error en vigilancia de {name}: {exc}")
     accounts.after_sync = _after_sync
-    return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal, commissions, performance, notify, news, trade, market, trail, auto_risk, advisor, coach, push, report, hub, reconcile, watchdog, backup, metrics, copilot, assistant, digest, tilt, proprules, stage=stage, guardian=guardian)
+    return Container(cfg, bus, store, bridge, audit, risk, accounts, replication, sync, journal, commissions, performance, notify, news, trade, market, trail, auto_risk, advisor, coach, push, report, hub, reconcile, watchdog, backup, metrics, copilot, assistant, digest, tilt, proprules, stage=stage, guardian=guardian, dynstop=dynstop)

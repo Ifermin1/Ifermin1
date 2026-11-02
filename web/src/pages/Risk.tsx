@@ -14,6 +14,7 @@ import { PropRulesCard } from "../components/PropRulesCard";
 import { DrawdownMeter, ddTone } from "../components/AccountPanel";
 import { PausedAccountsCard } from "../components/PausedAccountsCard";
 import { GuardianCard } from "../components/GuardianCard";
+import { DynStopCard } from "../components/DynStopCard";
 
 const MODE_LABEL: Record<string, string> = { intraday: "dinámico", eod: "EOD", closed: "cerrado", static: "estático" };
 
@@ -182,6 +183,7 @@ export function Risk() {
 
       <PausedAccountsCard />
       <GuardianCard />
+      <DynStopCard />
 
       {risk?.addon_silent && (
         <Card className="alert-card"><strong>Sin heartbeat del addon.</strong> NinjaTrader no está enviando nada desde hace más de 15 s: las operaciones de la maestra no se están copiando. Revisa que NinjaTrader esté abierto y el addon cargado.</Card>

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from tradepilot.api.auth import require_token
-from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest, ProtectRequest, TrailRequest, DayLossRequest, AutoRiskRequest, RiskPresets, ApplyPresetRequest, TagsRequest, OcoEntryRequest, TradeTemplates, ReviewRequest, CheckEntryRequest, AskRequest, PushSubscribeRequest, PushUnsubscribeRequest, ConfigImportRequest, AssistantRequest, PlanRequest, DigestConfigRequest, DigestRunRequest, TiltConfigRequest, TiltResumeRequest, PropRuleRequest, StageRequest, StageResetRequest, StageGoalRequest, EvalRuleRequest, GuardianConfigRequest
+from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest, ProtectRequest, TrailRequest, DayLossRequest, AutoRiskRequest, RiskPresets, ApplyPresetRequest, TagsRequest, OcoEntryRequest, TradeTemplates, ReviewRequest, CheckEntryRequest, AskRequest, PushSubscribeRequest, PushUnsubscribeRequest, ConfigImportRequest, AssistantRequest, PlanRequest, DigestConfigRequest, DigestRunRequest, TiltConfigRequest, TiltResumeRequest, PropRuleRequest, StageRequest, StageResetRequest, StageGoalRequest, EvalRuleRequest, GuardianConfigRequest, DynStopConfigRequest
 from tradepilot.container import Container
 from tradepilot.domain.risk import RiskLimit, Schedule
 
@@ -424,6 +424,25 @@ def eval_set(account_id: str, body: EvalRuleRequest, request: Request):
     rule = c.proprules.set_eval_rule(account_id, body.model_dump(exclude_unset=True))
     c.audit.log("EVAL_RULE_SET", f"{account_id}: reglas de la evaluación ({'gestor automático ON' if rule['auto'] else 'gestor automático OFF'}, {rule['min_days']} días mín., consistencia {rule['consistency'] * 100:.0f} %, mantenimiento {rule['maint_contracts']} contr.)", target=account_id)
     return c.proprules.evaluate(account_id)
+
+
+@router.get("/dynstop")
+def dynstop_get(request: Request):
+    """Stop dinámico por cuenta: configuración, contadores y última acción por cuenta."""
+    c = _c(request)
+    if c.dynstop is None:
+        raise HTTPException(503, "no disponible")
+    return c.dynstop.state()
+
+
+@router.put("/dynstop")
+def dynstop_set(body: DynStopConfigRequest, request: Request):
+    c = _c(request)
+    if c.dynstop is None:
+        raise HTTPException(503, "no disponible")
+    cfg = c.dynstop.set_config(**body.model_dump(exclude_unset=True))
+    c.audit.log("DYNSTOP_CONFIG", f"Stop dinámico {'ON' if cfg['enabled'] else 'OFF'}: margen {cfg['margin_usd']:,.0f} $, drawdown {'sí' if cfg['use_drawdown'] else 'no'}, maestra {'sí' if cfg['include_master'] else 'no'}, mínimo {cfg['min_ticks']} ticks, crear si falta {'sí' if cfg['create_if_missing'] else 'no'}")
+    return c.dynstop.state()
 
 
 @router.get("/guardian")

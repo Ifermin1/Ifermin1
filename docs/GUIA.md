@@ -577,6 +577,24 @@ romper la consistencia"**; al llegar al 80 % de ese tope avisa al teléfono (`PR
 pares. Las cifras por firma son orientativas y cambian: *ajustar reglas de esta cuenta* las corrige para tu plan. Los
 retiros que anotas en *Análisis → Pendientes y registros* cuentan como pagados/pedidos.
 
+### Stop dinámico por cuenta (Riesgo → Stop dinámico por cuenta)
+
+La maestra puede tener una ventana de 500 $ y una seguidora solo 400 $: el stop copiado de la maestra, en esa seguidora,
+perdería más de lo que le queda. Con el stop dinámico, **cada cuenta solo puede perder lo que le queda de SU ventana**:
+
+- Ventana = la menor entre lo que le queda del **stop loss diario** (límite − pérdida neta realizada de hoy) y el **margen
+  de drawdown** (hasta el suelo, menos el flotante y el colchón), **menos el margen de seguridad** (10 $ por defecto).
+- Cada 2 segundos, por cada cuenta con posición: si el stop vivo pierde más que la ventana, el engine **acerca el stop de
+  esa cuenta** al precio donde la pérdida = ventana (`DYNSTOP_MOVE`, con "de → a" y la ventana). Nunca lo aleja, nunca
+  toca otras cuentas, y si la cuenta no tiene stop, lo crea. La maestra queda fuera salvo que la incluyas.
+- Si la ventana ya no da ni para unos ticks de distancia al precio (ya no queda riesgo que proteger), **no toca el stop**
+  y lo anota (`DYNSTOP_NO_ROOM`, una vez al día): ahí manda el límite de riesgo, que cerrará la cuenta si llega.
+- Cuando la maestra mueve su stop, la copia cambia y, si vuelve a salirse de la ventana, se corrige en el siguiente ciclo.
+  Convive con el trailing: los dos solo acercan.
+
+Ejemplo: seguidora con 400 $ de ventana, larga 2 NQ a 20000 y stop copiado en 19950 (pierde 2.000 $). El engine lo pone en
+19990,25: (400 − 10) / (20 $ × 2) = 9,75 puntos. Si ya lleva −300 $ realizados hoy, quedan 90 $: stop a 2,25 puntos.
+
 ### Gestor preventivo: cada cuenta con su dueño, su prop firm y sus reglas (Inicio y Riesgo)
 
 Es el "jefe de riesgo" de la consola: vigila cada cuenta **antes** de que la firma aplique una regla y nunca opera por su
@@ -843,6 +861,8 @@ cola y el último envío. La página del hub enseña el P&L del día de cada eng
 | `EVAL_PASSED` 🏆 | Evaluación superada: objetivo, días y consistencia cumplidos; cuenta cerrada y pausada. | Pedir la cuenta financiada; no operar más en esa. |
 | `STAGE_GOAL_SET` 🎯 | Objetivo de prueba aplicado a las cuentas de la etapa (o a una cuenta nueva). | Comprobar el saldo inicial en Riesgo si una cuenta entró con posición abierta. |
 | `STAGE_GOAL_MASTER` 🏁 | La maestra alcanzó el objetivo de prueba: según la regla, todo cerrado y copia parada, liderazgo pasado a otra cuenta (**opera en ella**) o solo la maestra cerrada. | Leer el aviso: dice en qué cuenta seguir. |
+| `DYNSTOP_MOVE` 🛡️ | El stop de esa cuenta se acercó a lo que le queda de su ventana (de → a, ventana, por qué límite). | Nada: así esa cuenta no pasa de su pérdida máxima. |
+| `DYNSTOP_NO_ROOM` ⚠️ | A la cuenta no le queda ventana para un stop razonable: se deja como está. | Decidir a mano: cerrar o aceptar que el límite de riesgo la cierre. |
 | `GUARDIAN_RED` 🔴 | El gestor preventivo detectó una infracción o un límite de liquidación cerca (causa, valor, límite y acción en el aviso). | Hacer la acción indicada; no abrir nada en esa cuenta hasta volver a verde. |
 | `MAE_WARN` 🟡 / `MAE_BREACH` ⛔ | Pérdida flotante al 20 % (preventivo) o por encima del 30 % (oficial) del beneficio de referencia del día. | No promediar; cerrar o reducir. Con el cierre automático activado, el engine cierra al superar el oficial. |
 | `DAY_LIMIT_RESET` ▶️ | Nuevo día: la pausa de ayer por stop loss diario o ganancia máxima del día se levanta sola. | Nada. |

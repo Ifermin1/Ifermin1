@@ -117,6 +117,10 @@ export type AskResult = { question: string; answer: string; numbers: string[]; m
 export type EntryCheck = { verdict: "green" | "amber" | "red"; reasons: { level: "red" | "amber"; text: string }[]; checked_at: string; ai: { verdict?: "green" | "amber" | "red"; reason?: string; suggestion?: string; model?: string; ms?: number; error?: string } | null };
 export type PropRule = { consistency: number; min_days: number; min_day_profit: number; safety_net: boolean; safety_extra: number; payout_min: number; payout_max: number; payout_max_pct: number; winning_days: number;
                          payout_max_until: number; consistency_until: number };
+/** Stop dinámico por cuenta: configuración y última acción por cuenta. */
+export type DynStopConfig = { enabled: boolean; margin_usd: number; include_master: boolean; use_drawdown: boolean; min_ticks: number; create_if_missing: boolean };
+export type DynStopState = { config: DynStopConfig; stats: { moves: number; created: number };
+                             accounts: Record<string, { at: string; symbol?: string; room: number | null; limited_by?: string; stop?: number | null; loss_at_stop?: number | null; note: string }> };
 /** Gestor preventivo: semáforo por cuenta, cartera y choques. */
 export type GuardianAlert = { level: "red" | "amber"; code: string; cause: string; value: number | null; limit: number | null; margin: number | null; action: string; source: string };
 export type GuardianAccount = { account_id: string; alias: string; owner: string; firm: string; plan: string; enabled: boolean; balance: number; equity: number; floating: number; net_pnl: number;
@@ -278,6 +282,8 @@ export function makeClient(s: Session) {
     tradeStatus: () => req<TradeStatus>("/api/trade/status"),
     tradeOrders: (limit = 50) => req<StoredOrder[]>(`/api/trade/orders?limit=${limit}`),
     propRules: () => req<{ accounts: PropRuleStatus[]; generated_at: string }>("/api/proprules"),
+    dynstop: () => req<DynStopState>("/api/dynstop"),
+    dynstopSet: (cfg: Partial<DynStopConfig>) => req<DynStopState>("/api/dynstop", { method: "PUT", body: JSON.stringify(cfg) }),
     guardian: (owner = "") => req<Guardian>(`/api/guardian${owner ? `?owner=${encodeURIComponent(owner)}` : ""}`),
     guardianSet: (cfg: Partial<GuardianConfig>) => req<Guardian>("/api/guardian", { method: "PUT", body: JSON.stringify(cfg) }),
     evalGet: (account_id: string) => req<PropRuleStatus>(`/api/eval/${encodeURIComponent(account_id)}`),

@@ -50,6 +50,15 @@ class PropRuleRequest(BaseModel):
     consistency_until: Optional[int] = Field(default=None, ge=0, le=20)  # la consistencia aplica solo hasta el retiro N (0 = siempre)
 
 
+class DynStopConfigRequest(BaseModel):
+    enabled: Optional[bool] = None
+    margin_usd: Optional[float] = Field(default=None, ge=0, le=1000)
+    include_master: Optional[bool] = None
+    use_drawdown: Optional[bool] = None
+    min_ticks: Optional[int] = Field(default=None, ge=1, le=100)
+    create_if_missing: Optional[bool] = None
+
+
 class GuardianConfigRequest(BaseModel):
     mae_pct: Optional[float] = Field(default=None, ge=0.05, le=1)
     mae_prevent_pct: Optional[float] = Field(default=None, ge=0.05, le=1)
