@@ -58,9 +58,9 @@ const orderPrice = (o: WorkingOrder) => o.stop_price || o.limit_price;
 
 /** Importe editable en el panel con barra de progreso: corte del día (neto) u objetivo de la evaluación (acumulado).
  *  Al alcanzarlo el engine pausa la cuenta y cierra su posición. Mismo valor que en Riesgo → Límites por cuenta. */
-function TargetRow({ label, title, value, progress, halted, haltedText, busy, placeholder, testId, sub, onChange }: {
+function TargetRow({ label, title, value, progress, halted, haltedText, busy, placeholder, testId, sub, onChange, invert }: {
   label: string; title: string; value: number; progress: number; halted: boolean; haltedText: string; busy?: boolean; placeholder: string; testId: string;
-  sub?: ReactNode; onChange: (v: number) => void;
+  sub?: ReactNode; onChange: (v: number) => void; invert?: boolean;
 }) {
   const [draft, setDraft] = useState(String(value || ""));
   useEffect(() => { setDraft(String(value || "")); }, [value]);
@@ -76,8 +76,8 @@ function TargetRow({ label, title, value, progress, halted, haltedText, busy, pl
       </label>
       {pct !== null && (
         <div className="ap-target-meter" title={`${pct.toFixed(0)} %`}>
-          <div className="meter"><i className={halted ? "ok" : pct >= 80 ? "warn" : "accent"} style={{ width: `${pct}%` }} /></div>
-          <span className={`small ${halted ? "ok" : "muted"}`}>{halted ? haltedText : left! > 0 ? `${pct.toFixed(0)} % · quedan ${money(left!)}` : "alcanzado"}</span>
+          <div className="meter"><i className={halted ? (invert ? "bad" : "ok") : pct >= 80 ? (invert ? "bad" : "warn") : invert ? "ok" : "accent"} style={{ width: `${pct}%` }} /></div>
+          <span className={`small ${halted ? (invert ? "bad" : "ok") : "muted"}`}>{halted ? haltedText : left! > 0 ? `${pct.toFixed(0)} % · ${invert ? "margen" : "quedan"} ${money(left!)}` : "alcanzado"}</span>
         </div>
       )}
       {sub}
@@ -85,12 +85,13 @@ function TargetRow({ label, title, value, progress, halted, haltedText, busy, pl
   );
 }
 
-export function AccountPanel({ a, role, link, limit, lastFill, lastReject, prices, busy, onFlatten, onResync, controls, children, compact, onTarget, onGoal }: {
+export function AccountPanel({ a, role, link, limit, lastFill, lastReject, prices, busy, onFlatten, onResync, controls, children, compact, onTarget, onGoal, onDailyLoss }: {
   a: Account; role: "master" | "follower"; link?: Rule; limit?: RiskLimit; lastFill?: AuditEvent; lastReject?: AuditEvent;
   prices: PriceMap; busy?: boolean; onFlatten?: () => void; onResync?: () => void; controls?: ReactNode; children?: ReactNode; compact?: boolean;
   /** Si se pasan, el panel muestra el corte del día (neto) y el objetivo de la evaluación editables. */
   onTarget?: (target: number) => void;
   onGoal?: (goal: number, start: number) => void;
+  onDailyLoss?: (loss: number) => void;
 }) {
   const copying = role === "follower" && !!link?.enabled;
   const gross = livePnl(a, prices);
@@ -127,17 +128,22 @@ export function AccountPanel({ a, role, link, limit, lastFill, lastReject, price
           <span className={`ap-pnl-value ${tone}`}>{pnl.live && "≈ "}{signedMoney(pnl.value)}</span>
           <span className="muted small">{money(a.balance)} · {ago(a.updated_at)}</span>
         </div>
-        {onTarget && <TargetRow label="Corte del día" testId="target-row" placeholder="sin corte" value={limit?.max_daily_profit ?? 0} progress={pnl.value}
+        {onDailyLoss && <TargetRow label="Stop loss diario (pérdida máx. del día)" testId="loss-row" placeholder="sin stop diario" value={limit?.max_daily_loss ?? 0} progress={Math.max(0, -pnl.value)} invert
+                                   halted={!!limit?.trading_halted && limit.halted_reason === "daily_loss"} haltedText="stop diario hecho · pausada y cerrada" busy={busy} onChange={onDailyLoss}
+                                   title="PÉRDIDA máxima del día en NETO (bruto − comisiones). Al llegar, el engine cierra la posición de esta cuenta y deja de copiarle hasta mañana. Mismo valor que 'Pérdida diaria' en Riesgo. Pon aquí el límite de pérdida diaria de tu prop firm (o uno más estricto)."
+                                   sub={<span className="muted small">pérdida: al llegar se cierra y para hasta mañana</span>} />}
+        {onTarget && <TargetRow label="Ganancia máx. del día (corte)" testId="target-row" placeholder="sin corte" value={limit?.max_daily_profit ?? 0} progress={pnl.value}
                                 halted={!!limit?.trading_halted && limit.halted_reason === "daily_profit"} haltedText="corte hecho · pausada y cerrada" busy={busy} onChange={onTarget}
-                                title="Corte de ganancias del día en NETO (bruto − comisiones): al llegar, el engine cierra la posición de esta cuenta y deja de copiarle hasta mañana. Mismo valor que 'Corte del día' en Riesgo." />}
+                                title="GANANCIA máxima del día en NETO (bruto − comisiones): al llegar, el engine cierra la posición y deja de copiarle hasta mañana para asegurar el día. NO es el objetivo de la evaluación (ese va en la fila de abajo). Mismo valor que 'Corte del día' en Riesgo."
+                                sub={<span className="muted small">ganancia diaria para asegurar el día · no es el objetivo de la evaluación</span>} />}
         {onGoal && (() => {
           const start = limit?.start_balance || a.plan_size || 0;
           const gained = start > 0 ? a.balance + a.unrealized_pnl - fees - start : 0;
-          return <TargetRow label="Objetivo evaluación" testId="goal-row" placeholder="sin objetivo" value={limit?.profit_goal ?? 0} progress={gained}
+          return <TargetRow label="Objetivo de la evaluación (acumulado)" testId="goal-row" placeholder="sin objetivo" value={limit?.profit_goal ?? 0} progress={gained}
                             halted={!!limit?.trading_halted && limit.halted_reason === "profit_goal"} haltedText="evaluación superada · pausada y cerrada" busy={busy}
                             onChange={(g) => onGoal(g, start || Math.round(a.balance - pnl.value))}
                             title="Objetivo de la evaluación: ganancia neta acumulada sobre el saldo inicial (saldo + flotante − comisiones de hoy − inicial). Al llegar, el engine cierra la posición y deja de copiar a esta cuenta."
-                            sub={(limit?.profit_goal ?? 0) > 0 ? <span className="muted small">desde {money(start || 0)} · llevas <b className={gained >= 0 ? "ok" : "bad"}>{signedMoney(gained)}</b></span> : undefined} />;
+                            sub={<span className="muted small">{(limit?.profit_goal ?? 0) > 0 ? <>desde {money(start || 0)} · llevas <b className={gained >= 0 ? "ok" : "bad"}>{signedMoney(gained)}</b> · </> : null}ganancia total de la prueba sobre el saldo inicial, no de un día</span>} />;
         })()}
         {(fees > 0 || a.contracts_today > 0) && (
           <div className="ap-fees muted small" data-testid="fees" title="Comisiones estimadas: contratos ejecutados hoy × tarifa por contrato y lado (Riesgo → Comisiones)">

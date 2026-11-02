@@ -782,3 +782,4 @@ table.trades tbody tr.sel td { background: var(--hl); box-shadow: inset 0 0 0 1p
 .eval-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .eval-form { display: grid; gap: 8px; }
 .eval-form .rule-form { grid-template-columns: 1fr 1fr; }
+.daily-cell { display: grid; gap: 3px; }

@@ -123,16 +123,17 @@ export function Accounts() {
   });
 
   // ---- límites: corte del día, objetivo, perfil ----
-  const limitBody = (acc: string, patch: Partial<{ max_daily_profit: number; profit_goal: number; start_balance: number }>) => {
+  const limitBody = (acc: string, patch: Partial<{ max_daily_profit: number; max_daily_loss: number; profit_goal: number; start_balance: number }>) => {
     const l = limits.get(acc);
     const body = { account_id: acc, max_daily_loss: l?.max_daily_loss ?? 0, max_daily_profit: l?.max_daily_profit ?? 0, profit_goal: l?.profit_goal ?? 0, start_balance: l?.start_balance ?? 0,
                    max_position_size: l?.max_position_size ?? 0, max_trailing_drawdown: l?.max_trailing_drawdown ?? 0, drawdown_mode: l?.drawdown_mode ?? "intraday" as const,
                    drawdown_floor_cap: l?.drawdown_floor_cap ?? 0, drawdown_buffer: l?.drawdown_buffer ?? 0, ...patch };
-    const cleared = ("max_daily_profit" in patch && l?.halted_reason === "daily_profit") || ("profit_goal" in patch && l?.halted_reason === "profit_goal");
+    const cleared = ("max_daily_profit" in patch && l?.halted_reason === "daily_profit") || ("profit_goal" in patch && l?.halted_reason === "profit_goal") || ("max_daily_loss" in patch && l?.halted_reason === "daily_loss");
     return { ...body, trading_halted: !!l?.trading_halted && !cleared };
   };
   const startOf = (a: Account) => limits.get(a.account_id)?.start_balance || a.plan_size || Math.round(a.balance - a.net_pnl);
   const setTarget = (acc: string, target: number) => guard(acc, async () => { await client!.upsertLimit(limitBody(acc, { max_daily_profit: target })); await refreshRisk(); });
+  const setDailyLoss = (acc: string, loss: number) => guard(acc, async () => { await client!.upsertLimit(limitBody(acc, { max_daily_loss: loss })); await refreshRisk(); });
   const setGoal = (acc: string, goal: number, start: number) => guard(acc, async () => {
     if (goal > 0 && !(start > 0)) { const v = prompt(`Saldo inicial de ${acc} (desde dónde se cuenta el objetivo):`, String(Math.round(accounts.find((a) => a.account_id === acc)?.balance ?? 0))); if (v === null) return; start = Number(v.replace(",", ".")) || 0; if (!(start > 0)) throw new Error("Saldo inicial no válido."); }
     await client!.upsertLimit(limitBody(acc, { profit_goal: goal, start_balance: goal > 0 ? start : (limits.get(acc)?.start_balance ?? 0) })); await refreshRisk();
@@ -309,7 +310,7 @@ export function Accounts() {
             <button className="chip-btn" disabled={!!busy} onClick={() => void linkMany(selIds)}>Vincular</button>
             <button className="chip-btn" disabled={!!busy} onClick={() => void setCopyMany(selIds, false)} data-testid="bulk-pause">Pausar copia</button>
             <button className="chip-btn" disabled={!!busy} onClick={() => void setCopyMany(selIds, true)} data-testid="bulk-resume">Reanudar copia</button>
-            <button className="chip-btn" disabled={!!busy} onClick={() => void setTargetMany(selIds)}>Corte del día…</button>
+            <button className="chip-btn" disabled={!!busy} onClick={() => void setTargetMany(selIds)} title="Ganancia máxima del día (no el objetivo de la evaluación)">Ganancia máx. del día…</button>
             <button className="chip-btn" disabled={!!busy} onClick={() => void setGoalMany(selIds)}>Objetivo…</button>
             <button className="chip-btn" disabled={!!busy} onClick={() => { setProfileAlso(selIds.slice(1)); setOpen(selIds[0]); setOpenProfile(selIds[0]); setOpenOpts(null); }} data-testid="bulk-profile">Prop firm…</button>
             <button className="chip-btn" disabled={!!busy} onClick={() => void presetMany(selIds)} data-testid="bulk-preset">Preset…</button>
@@ -328,7 +329,7 @@ export function Accounts() {
             <table className="acc-table" data-testid="acc-table">
               <thead><tr>
                 <th><input type="checkbox" title="Marcar las visibles" checked={selVisible} onChange={(e) => setMsel(e.target.checked ? new Set(visible.map((r) => r.a.account_id)) : new Set())} /></th>
-                <th>Cuenta</th><th>Estado</th><th title="Interruptor: copiar o no. × = contratos por cada 1 de la maestra (enteros; 0.5 = la mitad)">Copia · × contratos</th><th className="num">P&L hoy</th><th>Corte del día</th><th>Objetivo evaluación</th><th>Drawdown</th><th>Posición</th><th></th>
+                <th>Cuenta</th><th>Estado</th><th title="Interruptor: copiar o no. × = contratos por cada 1 de la maestra (enteros; 0.5 = la mitad)">Copia · × contratos</th><th className="num">P&L hoy</th><th title="Pérdida máxima del día (stop loss diario) y ganancia máxima del día (corte): al llegar a cualquiera, la cuenta se cierra y para hasta mañana">Stop diario · corte</th><th title="Ganancia total de la prueba sobre el saldo inicial. No es diario">Objetivo evaluación</th><th>Drawdown</th><th>Posición</th><th></th>
               </tr></thead>
               <tbody>
                 {visible.map(({ a, link, limit, pnl, live, dd, start, gained, copying }) => {
@@ -362,7 +363,10 @@ export function Accounts() {
                         </>}
                       </div></td>
                       <td className={`num ${pnl > 0 ? "ok" : pnl < 0 ? "bad" : ""}`}>{live && "≈ "}{signedMoney(pnl)}</td>
-                      <td>{limit?.max_daily_profit ? <Meter value={pnl} of={limit.max_daily_profit} done={halted === "daily_profit"} text={halted === "daily_profit" ? "hecho" : `${(pct(pnl, limit.max_daily_profit) ?? 0).toFixed(0)} % de ${money(limit.max_daily_profit)}`} /> : <span className="muted">—</span>}</td>
+                      <td className="daily-cell">
+                        {limit?.max_daily_loss ? <Meter value={Math.max(0, -pnl)} of={limit.max_daily_loss} invert done={halted === "daily_loss"} text={halted === "daily_loss" ? "stop diario hecho" : `SL −${money(limit.max_daily_loss)} · ${(pct(Math.max(0, -pnl), limit.max_daily_loss) ?? 0).toFixed(0)} %`} /> : <span className="muted small">sin stop diario</span>}
+                        {limit?.max_daily_profit ? <Meter value={pnl} of={limit.max_daily_profit} done={halted === "daily_profit"} text={halted === "daily_profit" ? "corte hecho" : `corte +${money(limit.max_daily_profit)} · ${(pct(pnl, limit.max_daily_profit) ?? 0).toFixed(0)} %`} /> : <span className="muted small">sin corte</span>}
+                      </td>
                       <td>{limit?.profit_goal && gained !== null ? <Meter value={gained} of={limit.profit_goal} done={halted === "profit_goal"} text={halted === "profit_goal" ? "superada" : `${signedMoney(gained)} de ${money(limit.profit_goal)} (desde ${money(start)})`} /> : <span className="muted">—</span>}</td>
                       <td>{dd.pct !== null ? <Meter value={dd.pct} of={100} invert text={`${dd.pct.toFixed(0)} % · quedan ${money(dd.room ?? 0)}`} /> : <span className={`small ${dd.drawdown > 0 ? "bad" : "muted"}`}>{dd.drawdown > 0 ? `−${money(dd.drawdown)}` : "0"}</span>}</td>
                       <td><div className="pos-cell">{a.open_positions.length ? a.open_positions.map((p) => <span key={p.symbol} className={`small ${p.quantity > 0 ? "ok" : "bad"}`}>{p.quantity > 0 ? "L" : "C"} {Math.abs(p.quantity)} {p.symbol.split(" ")[0]}</span>) : <span className="muted small">plana</span>}</div></td>
@@ -403,7 +407,7 @@ export function Accounts() {
                           </div>
                         )}
                         <AccountPanel a={a} role={m ? "master" : "follower"} link={link} limit={limit} prices={prices} busy={busy === id} lastFill={lastFill(id)} lastReject={lastReject(id)}
-                                      onFlatten={() => void flatten(id)} onResync={() => void resync(id)} onTarget={(t) => void setTarget(id, t)} onGoal={(g, s) => void setGoal(id, g, s)}>
+                                      onFlatten={() => void flatten(id)} onResync={() => void resync(id)} onTarget={(t) => void setTarget(id, t)} onGoal={(g, s) => void setGoal(id, g, s)} onDailyLoss={(v) => void setDailyLoss(id, v)}>
                           <EvalManager a={a} limit={limit} />
                         </AccountPanel>
                       </td></tr>
