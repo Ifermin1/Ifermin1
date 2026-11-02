@@ -93,3 +93,26 @@ async def test_eval_routes(client, container):
     r = await client.get("/api/eval/Sim102")
     assert r.json()["eval_rule"]["auto"] is True
     assert (await client.get("/api/eval/NoExiste")).status_code == 404
+
+
+async def test_daily_profit_cut_lifts_itself_next_day(container):
+    """La pausa por ganancia máxima del día (o stop loss diario) caduca sola al día siguiente."""
+    b, risk = container.bridge, container.risk
+    b.noise = 0
+    await container.accounts.sync_once()
+    risk.upsert_limit(RiskLimit(account_id="Sim103", max_daily_profit=100))
+    b.pnl["Sim103"] = 150.0
+    await container.accounts.sync_once()
+    await risk.check()
+    lim = risk.limits["Sim103"]
+    assert lim.trading_halted and lim.halted_reason == "daily_profit"
+    # mismo día: sigue pausada aunque el P&L baje
+    b.pnl["Sim103"] = 0.0
+    await container.accounts.sync_once()
+    await risk.check()
+    assert risk.limits["Sim103"].trading_halted
+    # día siguiente
+    risk.limits["Sim103"] = risk.limits["Sim103"].model_copy(update={"halted_at": datetime.now() - timedelta(days=1)})
+    await risk.check()
+    assert not risk.limits["Sim103"].trading_halted
+    assert any(a.event_type == "DAY_LIMIT_RESET" for a in container.audit.recent(10))

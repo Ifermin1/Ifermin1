@@ -269,7 +269,8 @@ si solo quieres vigilar y cortar.
     **cierra la posición de esa cuenta y deja de copiarle hasta mañana**. Pon el límite de pérdida diaria de tu prop firm
     o uno más estricto. Es el mismo valor que "Pérdida diaria" en Riesgo.
   - **Ganancia máx. del día (corte)**: GANANCIA neta del día a la que el engine cierra y para hasta mañana para asegurar
-    el día. **No es el objetivo de la evaluación**; es opcional (vacío = sin corte). Se reanuda en Inicio → Cuentas en pausa.
+    el día. **No es el objetivo de la evaluación**; es opcional (vacío = sin corte). Al día siguiente la pausa se levanta
+    sola (`DAY_LIMIT_RESET`); para levantarla hoy: Inicio → Cuentas en pausa, o borra/sube el importe.
   - **Objetivo de la evaluación (acumulado)**: ganancia neta **total de la prueba** sobre el saldo inicial (saldo +
     flotante − comisiones de hoy − inicial), no de un día. Al alcanzarla (y, con el gestor de evaluación, cumplidos los
     días y la consistencia) el engine cierra y pausa la cuenta: evaluación superada. El saldo inicial sale del perfil de
@@ -810,6 +811,7 @@ cola y el último envío. La página del hub enseña el P&L del día de cada eng
 | `EVAL_PASSED` 🏆 | Evaluación superada: objetivo, días y consistencia cumplidos; cuenta cerrada y pausada. | Pedir la cuenta financiada; no operar más en esa. |
 | `STAGE_GOAL_SET` 🎯 | Objetivo de prueba aplicado a las cuentas de la etapa (o a una cuenta nueva). | Comprobar el saldo inicial en Riesgo si una cuenta entró con posición abierta. |
 | `STAGE_GOAL_MASTER` 🏁 | La maestra alcanzó el objetivo de prueba: según la regla, todo cerrado y copia parada, liderazgo pasado a otra cuenta (**opera en ella**) o solo la maestra cerrada. | Leer el aviso: dice en qué cuenta seguir. |
+| `DAY_LIMIT_RESET` ▶️ | Nuevo día: la pausa de ayer por stop loss diario o ganancia máxima del día se levanta sola. | Nada. |
 | `STAGE_START` / `STAGE_UPDATE` / `STAGE_END` | Etapa empezada, ajustada o terminada (Análisis → Etapa): desde qué fecha y con qué cuentas cuentan las estadísticas. | Nada; nunca borra. |
 | `HISTORY_PURGED` 🗑️ | Borrado del historial anterior a una fecha, con el detalle de filas y la copia previa. | Nada; si fue un error, restaura la copia (Riesgo → Copias). |
 | `ENTRY_MODE_SET` | Alguien pulsó *Entrar al precio del maestro* o *Entrar a mercado* en *Inicio*: cambió el modo de entrada de todas las seguidoras. | Nada. Comprueba en *Cuentas → ⚙* si quieres afinar tolerancia o espera por cuenta. |

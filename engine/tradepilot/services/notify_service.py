@@ -26,7 +26,7 @@ TITLES: dict[str, tuple[str, str]] = {
     "TRAIL_START": ("🎯", "Trailing stop activado"), "TRAIL_MOVE": ("↗️", "Trailing: stop movido"), "TRAIL_END": ("🏁", "Trailing terminado"),
     "DAILY_LOSS_LIMIT": ("🛑", "Límite de pérdida diaria"), "DAILY_LOSS_WARNING": ("⚠️", "Cerca del límite de pérdida"),
     "DAILY_PROFIT_TARGET": ("🎯", "Corte del día alcanzado"), "DAILY_PROFIT_WARNING": ("🟢", "Cerca del corte del día"),
-    "EVAL_CONSISTENCY_STOP": ("⛔", "Tope de consistencia de hoy"), "EVAL_TARGET_WAIT": ("⏳", "Objetivo conseguido: faltan días"), "EVAL_PASSED": ("🏆", "Evaluación superada"), "EVAL_RESUMED": ("▶️", "Parada por consistencia levantada"),
+    "DAY_LIMIT_RESET": ("▶️", "Pausa del día levantada"), "EVAL_CONSISTENCY_STOP": ("⛔", "Tope de consistencia de hoy"), "EVAL_TARGET_WAIT": ("⏳", "Objetivo conseguido: faltan días"), "EVAL_PASSED": ("🏆", "Evaluación superada"), "EVAL_RESUMED": ("▶️", "Parada por consistencia levantada"),
     "STAGE_GOAL_MASTER": ("🏁", "Objetivo de prueba en la maestra"), "STAGE_GOAL_SET": ("🎯", "Objetivo de prueba aplicado"),
     "PROFIT_GOAL": ("🏆", "Objetivo de la evaluación alcanzado"), "PROFIT_GOAL_WARNING": ("🟢", "Cerca del objetivo de la evaluación"),
     "DRAWDOWN_LIMIT": ("🛑", "Límite de drawdown"), "DRAWDOWN_WARNING": ("⚠️", "Drawdown al 80 %"),

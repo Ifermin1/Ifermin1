@@ -241,6 +241,13 @@ class RiskService:
             return
         today = self._today()
         for acc, limit in list(self.limits.items()):
+            # las pausas DEL DÍA (stop loss diario, ganancia máxima del día) caducan solas al día siguiente
+            if limit.trading_halted and limit.halted_reason in ("daily_loss", "daily_profit") and limit.halted_at and limit.halted_at.strftime("%Y-%m-%d") < today:
+                why = "ganancia máxima del día" if limit.halted_reason == "daily_profit" else "stop loss diario"
+                limit.trading_halted, limit.halted_reason, limit.halted_at = False, "", None
+                self.store.save_risk_limit(limit)
+                self.audit.log("DAY_LIMIT_RESET", f"{acc}: nuevo día, la pausa de ayer por {why} se levanta sola; vuelve a copiar", target=acc)
+                self.bus.publish_nowait(TOPIC_RISK, self.state().model_dump(mode="json"))
             goal_on = limit.profit_goal > 0 and limit.start_balance > 0
             if limit.max_daily_loss <= 0 and limit.max_daily_profit <= 0 and not goal_on:
                 continue

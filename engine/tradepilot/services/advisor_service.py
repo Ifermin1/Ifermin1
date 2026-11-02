@@ -14,6 +14,7 @@ class AdvisorService:
         self.accounts, self.risk, self.replication, self.store = accounts, risk, replication, store
         self.presets_provider = presets_provider or (lambda: [])
         self.now = datetime.now
+        self.day_key = None      # PerformanceService.day_key (día de trading: tras el cierre cuenta como el siguiente); lo fija el contenedor
 
     def _rule_of(self, acc: str):
         master = (self.accounts.bridge.health.master_account or "") if getattr(self.accounts, "bridge", None) else ""
@@ -25,7 +26,7 @@ class AdvisorService:
     def _today_trades(self, acc: str) -> list[dict]:
         if self.store is None:
             return []
-        day = self.now().strftime("%Y-%m-%d")
+        day = self.day_key(self.now()) if self.day_key is not None else self.now().strftime("%Y-%m-%d")
         try:
             return self.store.get_trades(day, day, acc)
         except Exception:

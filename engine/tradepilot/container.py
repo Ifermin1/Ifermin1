@@ -215,6 +215,7 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
     auto_risk = AutoRiskService(risk, accounts, audit, cfg)
     accounts.on_account_seen = auto_risk.on_account_seen
     advisor = AdvisorService(accounts, risk, replication, store)
+    advisor.day_key = performance.day_key       # mismo día de trading con el que se guardan las operaciones
     coach = CoachService(store, accounts, risk, news, market, ai, trade)
     trail = TrailService(trade, accounts, market, ai, audit, bridge, store, interval_s=cfg.TRAIL_INTERVAL_S, ai_interval_s=cfg.AI_TRAIL_INTERVAL_S, ai_model=cfg.AI_TRAIL_MODEL)
     trade.trail = trail
