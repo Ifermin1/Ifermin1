@@ -577,6 +577,38 @@ romper la consistencia"**; al llegar al 80 % de ese tope avisa al teléfono (`PR
 pares. Las cifras por firma son orientativas y cambian: *ajustar reglas de esta cuenta* las corrige para tu plan. Los
 retiros que anotas en *Análisis → Pendientes y registros* cuentan como pagados/pedidos.
 
+### Gestor preventivo: cada cuenta con su dueño, su prop firm y sus reglas (Inicio y Riesgo)
+
+Es el "jefe de riesgo" de la consola: vigila cada cuenta **antes** de que la firma aplique una regla y nunca opera por su
+cuenta (solo avisa; la única acción automática es el cierre por MAE si lo activas). Por cuenta necesita tres cosas:
+
+1. **Dueño** (Cuentas → ▾ → campo *Dueño*): la persona de la cuenta. Sirve para filtrar Cuentas y el gestor por dueño.
+2. **Prop firm y plan** (botón *Prop firm*): rellena drawdown, objetivo, pérdida diaria y contratos.
+3. **Reglas**: las de la evaluación (Modo evaluación) o las de payout (Riesgo → Reglas de prop firm). Para **Apex Legacy
+   PA** vienen cargadas y son editables: 8 días operados, 5 días con ≥ 50 $, consistencia 30 % hasta el 5.º retiro,
+   colchón = drawdown + 100 $ (50K: 52.600), retiro mínimo 500 $ y máximo 2.000 $ en los cinco primeros. Son orientativas:
+   confírmalas en la ayuda de Apex (fecha de verificación: 2/11/2026).
+
+La tarjeta **Gestor preventivo** (resumida en Inicio, completa en Riesgo) muestra por cuenta: balance, equity, suelo de
+liquidación (🔒 si está bloqueado), buffer, **MAE**, consistencia, contratos, retiro y el semáforo:
+
+- 🟢 cumple y con margen · 🟡 se acerca a un límite preventivo o falta información · 🔴 infracción o liquidación cerca.
+- Pulsa la fila: cada aviso trae **causa, valor, límite, margen, acción** y si es regla **oficial** de la firma (con la
+  fuente) o **límite preventivo** tuyo.
+- **MAE**: la pérdida flotante no puede pasar del 30 % del beneficio de referencia al abrir el día (saldo al abrir − saldo
+  inicial). Amarillo desde el 20 % (preventivo), rojo al 100 % (`MAE_BREACH`, al teléfono). Sin beneficio de referencia,
+  avisa de que toda pérdida flotante va contra el drawdown. Opcional: *cerrar la posición al superar el MAE oficial*.
+- **Riesgo/beneficio 5:1**: el semáforo de entrada (Operar) marca en rojo una orden cuyo stop sea más de 5 veces el
+  objetivo (regla Apex Legacy) y en amarillo si es más de 2 veces.
+- **Inactividad**: días desde la última operación frente a la política (30 por defecto; rojo al llegar).
+- **Retiro pendiente**: el margen se muestra como si ya estuviera descontado.
+- Arriba, el **veredicto** de la cartera (*OPERATIVA HABILITADA SEGÚN EL PLAN / CON RIESGO ELEVADO / RECOMENDACIÓN DE
+  NO OPERAR*), equity y margen totales, flotante, contratos abiertos en NQ equivalentes y qué pasaría si el **NQ cae 10,
+  20, 30 o 50 puntos** (pérdida y qué cuentas tocarían su suelo). *Límites preventivos* permite ajustar los porcentajes.
+
+El cierre de sesión automático (Inicio → Briefing y cierre) incluye el semáforo por cuenta y el veredicto. Los rojos se
+auditan una vez al día (`GUARDIAN_RED`) y llegan al teléfono.
+
 ### Modo evaluación: las reglas de la prueba y el gestor automático (Cuentas → ▾ de la cuenta)
 
 Dentro del detalle de cada cuenta hay un recuadro **Modo evaluación**. Con el botón *Prop firm* pones la firma y el plan
@@ -811,6 +843,8 @@ cola y el último envío. La página del hub enseña el P&L del día de cada eng
 | `EVAL_PASSED` 🏆 | Evaluación superada: objetivo, días y consistencia cumplidos; cuenta cerrada y pausada. | Pedir la cuenta financiada; no operar más en esa. |
 | `STAGE_GOAL_SET` 🎯 | Objetivo de prueba aplicado a las cuentas de la etapa (o a una cuenta nueva). | Comprobar el saldo inicial en Riesgo si una cuenta entró con posición abierta. |
 | `STAGE_GOAL_MASTER` 🏁 | La maestra alcanzó el objetivo de prueba: según la regla, todo cerrado y copia parada, liderazgo pasado a otra cuenta (**opera en ella**) o solo la maestra cerrada. | Leer el aviso: dice en qué cuenta seguir. |
+| `GUARDIAN_RED` 🔴 | El gestor preventivo detectó una infracción o un límite de liquidación cerca (causa, valor, límite y acción en el aviso). | Hacer la acción indicada; no abrir nada en esa cuenta hasta volver a verde. |
+| `MAE_WARN` 🟡 / `MAE_BREACH` ⛔ | Pérdida flotante al 20 % (preventivo) o por encima del 30 % (oficial) del beneficio de referencia del día. | No promediar; cerrar o reducir. Con el cierre automático activado, el engine cierra al superar el oficial. |
 | `DAY_LIMIT_RESET` ▶️ | Nuevo día: la pausa de ayer por stop loss diario o ganancia máxima del día se levanta sola. | Nada. |
 | `STAGE_START` / `STAGE_UPDATE` / `STAGE_END` | Etapa empezada, ajustada o terminada (Análisis → Etapa): desde qué fecha y con qué cuentas cuentan las estadísticas. | Nada; nunca borra. |
 | `HISTORY_PURGED` 🗑️ | Borrado del historial anterior a una fecha, con el detalle de filas y la copia previa. | Nada; si fue un error, restaura la copia (Riesgo → Copias). |

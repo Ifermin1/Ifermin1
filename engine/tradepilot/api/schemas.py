@@ -46,6 +46,17 @@ class PropRuleRequest(BaseModel):
     payout_max: Optional[float] = Field(default=None, ge=0)
     payout_max_pct: Optional[float] = Field(default=None, ge=1, le=100)
     winning_days: Optional[int] = Field(default=None, ge=0, le=60)
+    payout_max_until: Optional[int] = Field(default=None, ge=0, le=20)   # el tope por retiro aplica solo a los N primeros (0 = siempre)
+    consistency_until: Optional[int] = Field(default=None, ge=0, le=20)  # la consistencia aplica solo hasta el retiro N (0 = siempre)
+
+
+class GuardianConfigRequest(BaseModel):
+    mae_pct: Optional[float] = Field(default=None, ge=0.05, le=1)
+    mae_prevent_pct: Optional[float] = Field(default=None, ge=0.05, le=1)
+    mae_floor_usd: Optional[float] = Field(default=None, ge=0)
+    auto_flatten_mae: Optional[bool] = None
+    rr_max: Optional[float] = Field(default=None, ge=1, le=20)
+    inactivity_days: Optional[int] = Field(default=None, ge=1, le=120)
 
 
 class TiltConfigRequest(BaseModel):
@@ -162,6 +173,7 @@ class AccountSettings(BaseModel):
     plan: Optional[str] = Field(default=None, max_length=40)
     plan_size: Optional[float] = Field(default=None, ge=0)
     tags: Optional[list[str]] = None     # grupos/etiquetas; se sustituyen todas
+    owner: Optional[str] = Field(default=None, max_length=40)   # dueño (persona) de la cuenta
 
 
 class RiskPreset(BaseModel):

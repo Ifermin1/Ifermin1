@@ -107,6 +107,7 @@ class AccountSnapshot(DomainModel):
     plan: str = ""
     plan_size: float = 0.0
     tags: list[str] = []               # grupos/etiquetas libres ("50K", "PA", "alto riesgo")
+    owner: str = ""                    # dueño de la cuenta (persona): para filtrar y para el gestor preventivo por dueño
     connected: Optional[bool] = None
     connection: str = ""
     reported: bool = True              # False = el bróker no la reportó en la última sincronización

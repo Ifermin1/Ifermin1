@@ -783,3 +783,11 @@ table.trades tbody tr.sel td { background: var(--hl); box-shadow: inset 0 0 0 1p
 .eval-form { display: grid; gap: 8px; }
 .eval-form .rule-form { grid-template-columns: 1fr 1fr; }
 .daily-cell { display: grid; gap: 3px; }
+
+/* gestor preventivo */
+.guardian-verdict { margin: 0 0 8px; } .guardian-verdict.bad b { color: var(--bad); } .guardian-verdict.warn b { color: var(--warn); } .guardian-verdict.ok b { color: var(--ok); }
+.guardian-table { width: 100%; border-collapse: collapse; font-size: 12.5px; } .guardian-table th, .guardian-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.guardian-table tbody tr:not(.guardian-detail) { cursor: pointer; } .guardian-table tr.st-red > td:first-child { box-shadow: inset 3px 0 var(--bad); } .guardian-table tr.st-amber > td:first-child { box-shadow: inset 3px 0 var(--warn); } .guardian-table tr.st-green > td:first-child { box-shadow: inset 3px 0 var(--ok); }
+.guardian-detail td { background: var(--panel-2); }
+.guardian-cfg { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin: 8px 0; }
+.chip.bad { border-color: var(--bad); color: var(--bad); }

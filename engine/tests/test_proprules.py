@@ -35,7 +35,7 @@ async def test_apex_pa_requirements_and_missing(container):
     r = container.proprules.evaluate("Sim101")
     assert r["profit"] == 3200.0 and r["traded_days"] >= 8
     assert all(x["status"] == "ok" for x in r["requirements"]), r["requirements"]
-    assert r["eligible"] is True and r["available"] == 3200.0
+    assert r["eligible"] is True and r["available"] == 2000.0   # Apex Legacy: tope de 2.000 $ en los 5 primeros retiros
     # ajuste por cuenta
     rule = container.proprules.set_rule("Sim101", {"min_days": 10})
     assert rule["min_days"] == 10 and container.proprules.evaluate("Sim101")["eligible"] is False

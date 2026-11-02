@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from tradepilot.api.auth import require_token
-from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest, ProtectRequest, TrailRequest, DayLossRequest, AutoRiskRequest, RiskPresets, ApplyPresetRequest, TagsRequest, OcoEntryRequest, TradeTemplates, ReviewRequest, CheckEntryRequest, AskRequest, PushSubscribeRequest, PushUnsubscribeRequest, ConfigImportRequest, AssistantRequest, PlanRequest, DigestConfigRequest, DigestRunRequest, TiltConfigRequest, TiltResumeRequest, PropRuleRequest, StageRequest, StageResetRequest, StageGoalRequest, EvalRuleRequest
+from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest, ProtectRequest, TrailRequest, DayLossRequest, AutoRiskRequest, RiskPresets, ApplyPresetRequest, TagsRequest, OcoEntryRequest, TradeTemplates, ReviewRequest, CheckEntryRequest, AskRequest, PushSubscribeRequest, PushUnsubscribeRequest, ConfigImportRequest, AssistantRequest, PlanRequest, DigestConfigRequest, DigestRunRequest, TiltConfigRequest, TiltResumeRequest, PropRuleRequest, StageRequest, StageResetRequest, StageGoalRequest, EvalRuleRequest, GuardianConfigRequest
 from tradepilot.container import Container
 from tradepilot.domain.risk import RiskLimit, Schedule
 
@@ -107,7 +107,7 @@ async def set_master(body: MasterRequest, request: Request):
 @router.patch("/accounts/{account_id}")
 async def account_settings(account_id: str, body: AccountSettings, request: Request):
     """Activar/desactivar una cuenta o ponerle alias desde la consola."""
-    return await _c(request).accounts.set_settings(account_id, body.enabled, body.alias, body.auto, body.firm, body.plan, body.plan_size, body.tags)
+    return await _c(request).accounts.set_settings(account_id, body.enabled, body.alias, body.auto, body.firm, body.plan, body.plan_size, body.tags, body.owner)
 
 
 @router.put("/accounts/tags")
@@ -424,6 +424,25 @@ def eval_set(account_id: str, body: EvalRuleRequest, request: Request):
     rule = c.proprules.set_eval_rule(account_id, body.model_dump(exclude_unset=True))
     c.audit.log("EVAL_RULE_SET", f"{account_id}: reglas de la evaluación ({'gestor automático ON' if rule['auto'] else 'gestor automático OFF'}, {rule['min_days']} días mín., consistencia {rule['consistency'] * 100:.0f} %, mantenimiento {rule['maint_contracts']} contr.)", target=account_id)
     return c.proprules.evaluate(account_id)
+
+
+@router.get("/guardian")
+def guardian_get(request: Request, owner: str | None = None):
+    """Gestor preventivo: semáforo por cuenta (drawdown, MAE, consistencia, contratos, retiro, inactividad), cartera y choques."""
+    c = _c(request)
+    if c.guardian is None:
+        raise HTTPException(503, "gestor no disponible")
+    return c.guardian.portfolio(owner or None)
+
+
+@router.put("/guardian")
+def guardian_set(body: GuardianConfigRequest, request: Request):
+    c = _c(request)
+    if c.guardian is None:
+        raise HTTPException(503, "gestor no disponible")
+    cfg = c.guardian.set_config(**body.model_dump(exclude_unset=True))
+    c.audit.log("GUARDIAN_CONFIG", f"Gestor preventivo: MAE oficial {cfg['mae_pct'] * 100:.0f} % / preventivo {cfg['mae_prevent_pct'] * 100:.0f} %, suelo MAE {cfg['mae_floor_usd']:,.0f} $, cierre automático {'ON' if cfg['auto_flatten_mae'] else 'OFF'}, R:B máx {cfg['rr_max']:g}:1, inactividad {cfg['inactivity_days']} días")
+    return c.guardian.portfolio()
 
 
 @router.get("/tilt")

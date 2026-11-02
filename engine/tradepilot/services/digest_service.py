@@ -168,6 +168,14 @@ class DigestService:
             lines.append(f"• {p.get('title')}" + (f" ({p['cost_usd']:+,.0f} $)" if isinstance(p.get("cost_usd"), (int, float)) else ""))
         for i, t in enumerate((rv.get("tomorrow") or [])[:3], 1):
             lines.append(f"{i}. {t}")
+        g = getattr(self, "guardian", None)
+        if g is not None:
+            try:
+                rep = g.report()
+                lines.append("Gestor preventivo: " + rep["verdict"] + f" (🟢 {rep['counts']['green']} · 🟡 {rep['counts']['amber']} · 🔴 {rep['counts']['red']})")
+                lines.extend(rep["lines"][:12])
+            except Exception as exc:
+                logger.warning(f"Cierre: gestor preventivo: {exc}")
         text = "\n".join(l for l in lines if l)
         self._mark("review", day, text)
         self.audit.log("SESSION_REVIEW", text, details={"source": r.get("source"), "model": r.get("model"), "reason": reason})

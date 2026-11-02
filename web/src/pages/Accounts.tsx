@@ -178,6 +178,9 @@ export function Accounts() {
   const setEnabled = (acc: string, enabled: boolean) => guard(acc, async () => { await client!.setAccount(acc, { enabled }); });
   const setAuto = (acc: string) => guard(acc, async () => { await client!.setAccount(acc, { auto: true }); });
   const setAlias = (acc: string, alias: string) => guard(acc, async () => { await client!.setAccount(acc, { alias }); });
+  const setOwner = (acc: string, owner: string) => guard(acc, async () => { await client!.setAccount(acc, { owner }); });
+  const [owner, setOwnerFilter] = useState("");
+  const allOwners = useMemo(() => [...new Set(accounts.map((a) => a.owner).filter(Boolean))].sort((x, y) => x.localeCompare(y)), [accounts]);
   const changeMaster = (acc: string) => guard("__master", async () => {
     if (!acc || acc === detected) return;
     if (!confirm(`¿Hacer líder a ${acc}?\n\nA partir de ahora se copiarán las operaciones de ${acc}. Las seguidoras de ${detected ?? "la líder anterior"} dejan de copiar hasta que las vincules a la nueva (botón "Vincular todas").`)) return;
@@ -235,6 +238,7 @@ export function Accounts() {
   const allTags = useMemo(() => [...new Set(accounts.flatMap((a) => a.tags ?? []))].sort((x, y) => x.localeCompare(y)), [accounts]);
   const visible = rows.filter(({ a, link }) => {
     if (tag && !(a.tags ?? []).some((t) => t.toLowerCase() === tag.toLowerCase())) return false;
+    if (owner && (a.owner || "").toLowerCase() !== owner.toLowerCase()) return false;
     if (needle && !a.account_id.toLowerCase().includes(needle) && !a.alias.toLowerCase().includes(needle) && !a.firm.toLowerCase().includes(needle) && !(a.tags ?? []).some((t) => t.toLowerCase().includes(needle))) return false;
     if (filter === "all") return true;
     if (filter === "hidden") return !a.enabled;
@@ -299,6 +303,7 @@ export function Accounts() {
         <input placeholder="Buscar cuenta, alias o prop firm…" value={q} onChange={(e) => setQ(e.target.value)} data-testid="acc-search" />
         <div className="view-tabs" data-testid="acc-filter">
           {([["copying", `Copiando (${counts.copyingAll})`], ["visible", `Visibles (${counts.visible})`], ["hidden", `Ocultas (${counts.hidden})`], ["all", `Todas (${rows.length})`]] as const).map(([k, l]) => <button key={k} className={filter === k ? "active" : ""} onClick={() => setFilter(k)}>{l}</button>)}
+          {allOwners.length > 0 && <span className="chips tag-filter" data-testid="owner-filter"><span className="muted small">dueño</span>{allOwners.map((o) => <button key={o} className={`chip-btn ${owner === o ? "active" : ""}`} onClick={() => setOwnerFilter(owner === o ? "" : o)}>{o} <span className="muted">{accounts.filter((a) => a.owner === o).length}</span></button>)}</span>}
           {allTags.length > 0 && <span className="chips tag-filter" data-testid="tag-filter"><span className="muted small">grupo</span>{allTags.map((t) => <button key={t} className={`chip-btn ${tag === t ? "active" : ""}`} onClick={() => setTag(tag === t ? "" : t)}>{t} <span className="muted">{accounts.filter((a) => (a.tags ?? []).includes(t)).length}</span></button>)}
             {tag && <button className="chip-btn" onClick={() => { setMsel(new Set(visible.map((r) => r.a.account_id))); }} title="Marcar todas las del grupo para actuar sobre ellas">marcar el grupo</button>}</span>}
         </div>
@@ -342,6 +347,7 @@ export function Accounts() {
                       <td><div className="acc-cell">
                         <b>{m && <span className="crown-badge inline" title="Cuenta líder"><Icon name="crown" size={13} /></span>}{label(a)}</b>{a.alias && <span className="muted small">{id}</span>}
                         {prof && <span className="chip profile small">{prof} · {DD_SHORT[dd.mode === "static" ? "static" : dd.mode === "eod" ? "eod" : "intraday"]}</span>}
+                        {a.owner && <span className="chip small" title="dueño">👤 {a.owner}</span>}
                         {(a.tags ?? []).length > 0 && <span className="chips">{a.tags.map((t) => <button key={t} className={`chip tag ${tag === t ? "active" : ""}`} onClick={() => setTag(tag === t ? "" : t)} title="Filtrar por este grupo">{t}</button>)}</span>}
                       </div></td>
                       <td><div className="status-cell">
@@ -389,6 +395,8 @@ export function Accounts() {
                             {!a.reported && <button className="ghost danger small-btn" onClick={() => void forget(id)}>Olvidar</button>}
                           </div>
                           <label className="inline small">Alias <input className="alias" defaultValue={a.alias} placeholder="p. ej. Eval MFF 50k" maxLength={40} onBlur={(e) => { if (e.target.value !== a.alias) void setAlias(id, e.target.value); }} /></label>
+                          <label className="inline small" title="Dueño (persona) de la cuenta: para filtrar y para el gestor preventivo por dueño">Dueño <input className="alias" defaultValue={a.owner} placeholder="p. ej. Ibrahim" maxLength={40} list="owners-list" data-testid={`owner-${id}`} onBlur={(e) => { if (e.target.value !== a.owner) void setOwner(id, e.target.value); }} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} /></label>
+                          <datalist id="owners-list">{allOwners.map((o) => <option key={o} value={o} />)}</datalist>
                         </div>
                         {openProfile === id && <ProfileEditor a={a} limit={limit} followers={followers.filter((r) => r.a.account_id !== id).map((r) => r.a)} preselect={profileAlso} busy={busy === id}
                                                               onApply={(r, also) => applyProfile(id, r, also)} onClose={() => { setOpenProfile(null); setProfileAlso([]); }} />}

@@ -22,10 +22,13 @@ from loguru import logger
 # cuenta como "día ganador" (0 = cualquier día con operaciones); safety_net: ganancia mínima extra sobre el drawdown
 # (Apex: dd + 100 $); payout_min/max: límites por retiro ($; max 0 = sin tope); payout_max_pct: % del beneficio retirable
 RULES: dict[str, dict] = {
-    "apex": {"consistency": 0.30, "min_days": 8, "min_day_profit": 0, "safety_net": True, "safety_extra": 100, "payout_min": 500, "payout_max": 0, "payout_max_pct": 100, "winning_days": 0},
-    "topstep": {"consistency": 0.50, "min_days": 0, "min_day_profit": 200, "safety_net": False, "safety_extra": 0, "payout_min": 125, "payout_max": 5000, "payout_max_pct": 50, "winning_days": 5},
-    "mff": {"consistency": 0.40, "min_days": 1, "min_day_profit": 0, "safety_net": False, "safety_extra": 0, "payout_min": 250, "payout_max": 0, "payout_max_pct": 100, "winning_days": 0},
-    "tpt": {"consistency": 0.50, "min_days": 5, "min_day_profit": 0, "safety_net": False, "safety_extra": 0, "payout_min": 500, "payout_max": 0, "payout_max_pct": 100, "winning_days": 0},
+    # Apex Legacy PA (orientativo, confirmado con la ayuda de Apex el 2/11/2026): 8 días operados, 5 días con ≥ 50 $, consistencia
+    # 30 % hasta el 5.º retiro, colchón = drawdown + 100 $ (50K: 52.600), retiro mín. 500 $, máx. 2.000 $ en los 5 primeros.
+    "apex": {"consistency": 0.30, "min_days": 8, "min_day_profit": 50, "safety_net": True, "safety_extra": 100, "payout_min": 500, "payout_max": 2000, "payout_max_pct": 100, "winning_days": 5,
+             "payout_max_until": 5, "consistency_until": 5},
+    "topstep": {"consistency": 0.50, "min_days": 0, "min_day_profit": 200, "safety_net": False, "safety_extra": 0, "payout_min": 125, "payout_max": 5000, "payout_max_pct": 50, "winning_days": 5, "payout_max_until": 0, "consistency_until": 0},
+    "mff": {"consistency": 0.40, "min_days": 1, "min_day_profit": 0, "safety_net": False, "safety_extra": 0, "payout_min": 250, "payout_max": 0, "payout_max_pct": 100, "winning_days": 0, "payout_max_until": 0, "consistency_until": 0},
+    "tpt": {"consistency": 0.50, "min_days": 5, "min_day_profit": 0, "safety_net": False, "safety_extra": 0, "payout_min": 500, "payout_max": 0, "payout_max_pct": 100, "winning_days": 0, "payout_max_until": 0, "consistency_until": 0},
 }
 # Reglas de la EVALUACIÓN por firma (orientativas, editables por cuenta): días mínimos operados, consistencia (mejor día ≤ X %
 # del total ganado; 0 = sin regla), qué cuenta como día operado (min_day_profit) y contratos al pasar a "mantenimiento"
@@ -37,7 +40,7 @@ EVAL_RULES: dict[str, dict] = {
     "tpt": {"consistency": 0.50, "min_days": 5, "min_day_profit": 0, "maint_contracts": 1},
 }
 DEFAULT_EVAL = {"consistency": 0.0, "min_days": 0, "min_day_profit": 0, "maint_contracts": 1}
-DEFAULT_RULE = {"consistency": 0.40, "min_days": 5, "min_day_profit": 0, "safety_net": False, "safety_extra": 0, "payout_min": 500, "payout_max": 0, "payout_max_pct": 100, "winning_days": 0}
+DEFAULT_RULE = {"consistency": 0.40, "min_days": 5, "min_day_profit": 0, "safety_net": False, "safety_extra": 0, "payout_min": 500, "payout_max": 0, "payout_max_pct": 100, "winning_days": 0, "payout_max_until": 0, "consistency_until": 0}
 EVAL_PLANS = {"eval", "combine", "starter", "expert", "test", "static"}
 
 
@@ -217,6 +220,10 @@ class PropRulesService:
                 add("days", f"Días operados (mín. {rule['min_days']})", len(traded) >= rule["min_days"], f"{len(traded)} de {rule['min_days']}", max(0, rule["min_days"] - len(traded)))
             if rule["winning_days"] > 0:
                 add("winning_days", f"Días ganadores de ≥ {rule['min_day_profit']:,.0f} $ (mín. {rule['winning_days']})", len(winning) >= rule["winning_days"], f"{len(winning)} de {rule['winning_days']}", max(0, rule["winning_days"] - len(winning)))
+            cons_until = int(rule.get("consistency_until") or 0)
+            if cons_until > 0 and len(payouts) >= cons_until:
+                thr = 1.0       # la consistencia deja de aplicar a partir de ese retiro (Apex Legacy: tras el 5.º)
+                max_today = None
             if thr < 1:
                 ok = best_share is not None and best_share <= thr
                 need_total = (best_day / thr) if thr > 0 else 0
@@ -229,7 +236,8 @@ class PropRulesService:
         available = 0.0
         if not is_eval and profit > 0:
             available = profit * rule["payout_max_pct"] / 100
-            if rule["payout_max"] > 0:
+            cap_until = int(rule.get("payout_max_until") or 0)
+            if rule["payout_max"] > 0 and (cap_until == 0 or len(payouts) < cap_until):
                 available = min(available, rule["payout_max"])
         return {"account_id": snap.account_id, "alias": snap.alias, "firm": snap.firm, "plan": snap.plan, "is_eval": is_eval, "start_balance": start, "balance": snap.balance, "profit": profit,
                 "total_days": total, "today": days.get(today, 0.0), "traded_days": len(traded), "winning_days": len(winning), "best_day": best_day, "best_day_share": round(best_share * 100, 1) if best_share is not None else None,

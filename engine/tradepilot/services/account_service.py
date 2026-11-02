@@ -55,7 +55,7 @@ class AccountService:
                 enabled=bool(row["enabled"]), enabled_source=row["enabled_source"] or "auto",
                 alias=row["alias"] or "", reported=False, firm=(row["firm"] if "firm" in row.keys() else "") or "",
                 plan=(row["plan"] if "plan" in row.keys() else "") or "", plan_size=float((row["plan_size"] if "plan_size" in row.keys() else 0) or 0),
-                tags=_tags(row["tags"] if "tags" in row.keys() else None),
+                tags=_tags(row["tags"] if "tags" in row.keys() else None), owner=(row["owner"] if "owner" in row.keys() else "") or "",
                 updated_at=datetime.fromisoformat(row["last_seen"]) if row["last_seen"] else datetime.now())
         self._task: asyncio.Task | None = None
         self._running = False
@@ -362,7 +362,7 @@ class AccountService:
 
     async def publish_accounts(self, force: bool = False) -> None:
         """Publica el snapshot solo si cambió algo relevante (con cientos de cuentas importa)."""
-        sig = tuple((a.account_id, a.balance, a.connected, a.enabled, a.alias, a.firm, a.plan, a.plan_size, tuple(a.tags), a.reported, a.desync, round(a.daily_pnl),
+        sig = tuple((a.account_id, a.balance, a.connected, a.enabled, a.alias, a.firm, a.plan, a.plan_size, tuple(a.tags), a.owner, a.reported, a.desync, round(a.daily_pnl),
                      round(a.drawdown.peak), a.drawdown.floor, a.drawdown.pct, a.contracts_today,
                      tuple((p.symbol, p.quantity) for p in a.open_positions),
                      tuple((o.order_id, o.quantity, o.filled, o.limit_price, o.stop_price, o.state) for o in a.working_orders))
@@ -378,7 +378,7 @@ class AccountService:
 
     async def set_settings(self, account_id: str, enabled: bool | None = None, alias: str | None = None,
                            auto: bool = False, firm: str | None = None, plan: str | None = None,
-                           plan_size: float | None = None, tags: list[str] | None = None) -> AccountSnapshot:
+                           plan_size: float | None = None, tags: list[str] | None = None, owner: str | None = None) -> AccountSnapshot:
         """enabled fija la cuenta a mano (source=user); auto=True vuelve a la política automática; firm/plan/plan_size
         guardan el perfil del prop firm (los tres a la vez)."""
         snap = self.accounts.get(account_id)
@@ -399,8 +399,10 @@ class AccountService:
             profile = (snap.firm, snap.plan, snap.plan_size)
         if tags is not None:
             snap.tags = normalize_tags(tags)
+        if owner is not None:
+            snap.owner = owner.strip()[:40]
         if self.store:
-            self.store.set_account_settings(account_id, enabled, alias, source, profile, snap.tags if tags is not None else None)
+            self.store.set_account_settings(account_id, enabled, alias, source, profile, snap.tags if tags is not None else None, snap.owner if owner is not None else None)
         await self.publish_accounts()
         return snap
 

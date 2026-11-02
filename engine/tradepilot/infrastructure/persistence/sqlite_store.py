@@ -106,7 +106,7 @@ class SQLiteStore:
                 self._conn.execute("ALTER TABLE accounts ADD COLUMN enabled_source TEXT DEFAULT 'auto'")
             if "last_connected" not in cols:
                 self._conn.execute("ALTER TABLE accounts ADD COLUMN last_connected TEXT")
-            for col, ddl in (("firm", "TEXT DEFAULT ''"), ("plan", "TEXT DEFAULT ''"), ("plan_size", "REAL DEFAULT 0"), ("tags", "TEXT DEFAULT '[]'")):
+            for col, ddl in (("firm", "TEXT DEFAULT ''"), ("plan", "TEXT DEFAULT ''"), ("plan_size", "REAL DEFAULT 0"), ("tags", "TEXT DEFAULT '[]'"), ("owner", "TEXT DEFAULT ''")):
                 if col not in cols:
                     self._conn.execute(f"ALTER TABLE accounts ADD COLUMN {col} {ddl}")
             rule_cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(replication_rules)").fetchall()}
@@ -230,7 +230,8 @@ class SQLiteStore:
                 (account_id, enabled, when, when, balance, when if connected else None))
 
     def set_account_settings(self, account_id: str, enabled: bool | None = None, alias: str | None = None,
-                             source: str | None = None, profile: tuple[str, str, float] | None = None, tags: list[str] | None = None) -> None:
+                             source: str | None = None, profile: tuple[str, str, float] | None = None, tags: list[str] | None = None,
+                             owner: str | None = None) -> None:
         with self._lock, self._conn:
             self._conn.execute("INSERT OR IGNORE INTO accounts (account_id, enabled, alias) VALUES (?, 1, '')", (account_id,))
             if profile is not None:
@@ -243,6 +244,8 @@ class SQLiteStore:
                 self._conn.execute("UPDATE accounts SET enabled_source = ? WHERE account_id = ?", (source, account_id))
             if alias is not None:
                 self._conn.execute("UPDATE accounts SET alias = ? WHERE account_id = ?", (alias, account_id))
+            if owner is not None:
+                self._conn.execute("UPDATE accounts SET owner = ? WHERE account_id = ?", (owner, account_id))
 
     def delete_account(self, account_id: str) -> None:
         with self._lock, self._conn:

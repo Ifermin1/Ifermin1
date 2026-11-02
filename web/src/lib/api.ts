@@ -20,7 +20,7 @@ export type Drawdown = { equity: number; mode: "intraday" | "eod" | "closed" | "
                          floor: number | null; room: number | null; pct: number | null; buffer: number; locked: boolean };
 export type Account = { account_id: string; balance: number; net_liquidity: number; daily_pnl: number; contracts_today: number; commissions_today: number; net_pnl: number;
                         open_positions: Position[]; updated_at: string;
-                        enabled: boolean; enabled_source: "auto" | "user"; alias: string; firm: string; plan: string; plan_size: number; tags: string[]; connected: boolean | null; connection: string; reported: boolean;
+                        enabled: boolean; enabled_source: "auto" | "user"; alias: string; firm: string; plan: string; plan_size: number; tags: string[]; owner: string; connected: boolean | null; connection: string; reported: boolean;
                         realized_pnl: number; unrealized_pnl: number; desync: boolean; desync_detail: string; working_orders: WorkingOrder[]; drawdown: Drawdown };
 /** Tick de precio del addon (topic market.price), indexado por raíz del símbolo (NQ, MNQ…). */
 export type Price = { symbol: string; last: number; bid: number; ask: number; at: number };
@@ -115,7 +115,21 @@ export type ReviewResult = { day: string; source: "ia" | "regla"; model: string;
                              review: { summary: string; patterns: { title: string; evidence: string; cost_usd: number | null }[]; tomorrow: string[]; score: number; mood: "bien" | "regular" | "mal" } };
 export type AskResult = { question: string; answer: string; numbers: string[]; model: string | null; ms: number; context: { n_trades: number; period_days: number } };
 export type EntryCheck = { verdict: "green" | "amber" | "red"; reasons: { level: "red" | "amber"; text: string }[]; checked_at: string; ai: { verdict?: "green" | "amber" | "red"; reason?: string; suggestion?: string; model?: string; ms?: number; error?: string } | null };
-export type PropRule = { consistency: number; min_days: number; min_day_profit: number; safety_net: boolean; safety_extra: number; payout_min: number; payout_max: number; payout_max_pct: number; winning_days: number };
+export type PropRule = { consistency: number; min_days: number; min_day_profit: number; safety_net: boolean; safety_extra: number; payout_min: number; payout_max: number; payout_max_pct: number; winning_days: number;
+                         payout_max_until: number; consistency_until: number };
+/** Gestor preventivo: semáforo por cuenta, cartera y choques. */
+export type GuardianAlert = { level: "red" | "amber"; code: string; cause: string; value: number | null; limit: number | null; margin: number | null; action: string; source: string };
+export type GuardianAccount = { account_id: string; alias: string; owner: string; firm: string; plan: string; enabled: boolean; balance: number; equity: number; floating: number; net_pnl: number;
+                                floor: number | null; room: number | null; dd_pct: number | null; dd_locked: boolean; peak: number;
+                                mae: { reference_profit: number | null; limit: number | null; floating: number; pct: number | null; evaluable: boolean };
+                                consistency: { today: number; max_today: number | null; room: number | null; best_share: number | null; thr: number | null } | null;
+                                contracts: { open: number; max: number; nq_equiv: number };
+                                payout: { eligible: boolean; available: number; n_payouts: number; is_eval: boolean; status: string | null; missing: string[]; pending: number } | null;
+                                last_trade_day: string | null; inactive_days: number | null; status: "green" | "amber" | "red"; alerts: GuardianAlert[] };
+export type GuardianConfig = { mae_pct: number; mae_prevent_pct: number; mae_floor_usd: number; auto_flatten_mae: boolean; rr_max: number; inactivity_days: number };
+export type Guardian = { accounts: GuardianAccount[]; counts: { green: number; amber: number; red: number }; owners: string[]; unassigned: number;
+                         totals: { equity: number; room: number; floating: number; net_pnl: number; nq_equiv: number; open_contracts: number };
+                         shocks: { points: number; pnl: number; liquidated: string[] }[]; config: GuardianConfig; verdict: string; generated_at: string };
 export type PropRuleStatus = { account_id: string; alias: string; firm: string; plan: string; is_eval: boolean; start_balance: number; balance: number; profit: number; today: number; traded_days: number; winning_days: number;
                                best_day: number; best_day_share: number | null; max_today: number | null; today_room: number | null; payouts_requested: number; payouts_paid: number; n_payouts: number; available: number; eligible: boolean;
                                requirements: { key: string; label: string; status: "ok" | "pending"; detail: string; missing: number | null }[]; rule: PropRule;
@@ -219,7 +233,7 @@ export function makeClient(s: Session) {
     createRule: (b: Pick<Rule, "master_account" | "follower_account" | "multiplier" | "symbol_filter" | "enabled">) => req<Rule>("/api/rules", { method: "POST", body: JSON.stringify(b) }),
     updateRule: (id: string, b: Partial<Rule>) => req<Rule>(`/api/rules/${id}`, { method: "PATCH", body: JSON.stringify(b) }),
     deleteRule: (id: string) => req<void>(`/api/rules/${id}`, { method: "DELETE" }),
-    setAccount: (id: string, body: { enabled?: boolean; alias?: string; auto?: boolean; firm?: string; plan?: string; plan_size?: number; tags?: string[] }) =>
+    setAccount: (id: string, body: { enabled?: boolean; alias?: string; auto?: boolean; firm?: string; plan?: string; plan_size?: number; tags?: string[]; owner?: string }) =>
       req<Account>(`/api/accounts/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) }),
     forgetAccount: (id: string) => req<void>(`/api/accounts/${encodeURIComponent(id)}`, { method: "DELETE" }),
     setMaster: (account: string) => req<{ master_account: string }>("/api/master", { method: "POST", body: JSON.stringify({ account }) }),
@@ -264,6 +278,8 @@ export function makeClient(s: Session) {
     tradeStatus: () => req<TradeStatus>("/api/trade/status"),
     tradeOrders: (limit = 50) => req<StoredOrder[]>(`/api/trade/orders?limit=${limit}`),
     propRules: () => req<{ accounts: PropRuleStatus[]; generated_at: string }>("/api/proprules"),
+    guardian: (owner = "") => req<Guardian>(`/api/guardian${owner ? `?owner=${encodeURIComponent(owner)}` : ""}`),
+    guardianSet: (cfg: Partial<GuardianConfig>) => req<Guardian>("/api/guardian", { method: "PUT", body: JSON.stringify(cfg) }),
     evalGet: (account_id: string) => req<PropRuleStatus>(`/api/eval/${encodeURIComponent(account_id)}`),
     evalSet: (account_id: string, rule: Partial<EvalRule>) => req<PropRuleStatus>(`/api/eval/${encodeURIComponent(account_id)}`, { method: "PUT", body: JSON.stringify(rule) }),
     propRuleSet: (account_id: string, rule: Partial<PropRule>) => req<PropRuleStatus>("/api/proprules", { method: "PUT", body: JSON.stringify({ account_id, ...rule }) }),

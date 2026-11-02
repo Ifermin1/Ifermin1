@@ -229,6 +229,17 @@ class CoachService:
                 add("amber", f"stop de {sl} ticks por debajo de la mitad del ATR ({atr_now:.0f} ticks): probable ruido")
             if not sl and not str(order.get("note") or "").startswith("cierre"):
                 add("amber", "entrada sin stop automático")
+        # riesgo/beneficio: regla oficial de Apex Legacy (riesgo ≤ 5 × beneficio objetivo) y sentido común
+        sl_t, tp_t = int(order.get("sl_ticks") or 0), int(order.get("tp_ticks") or 0)
+        rr_max = float(getattr(getattr(self, "guardian", None), "config", {}).get("rr_max", 5.0) or 5.0)
+        if sl_t and tp_t:
+            ratio = sl_t / tp_t
+            if ratio > rr_max:
+                add("red", f"riesgo {ratio:.1f} veces el beneficio objetivo (stop {sl_t} / objetivo {tp_t} ticks): supera el máximo {rr_max:g}:1 de la firma")
+            elif ratio > 2:
+                add("amber", f"riesgo {ratio:.1f} veces el beneficio objetivo: relación pobre para la estrategia")
+        elif sl_t and not tp_t and not str(order.get("note") or "").startswith("cierre"):
+            add("amber", "sin objetivo: no se puede verificar la relación riesgo/beneficio (máximo 5:1)")
         verdict = "red" if any(r["level"] == "red" for r in reasons) else "amber" if any(r["level"] == "amber" for r in reasons) else "green"
         out = {"verdict": verdict, "reasons": reasons, "checked_at": self.now().astimezone().isoformat(timespec="seconds"), "ai": None}
         if use_ai and self.ai.enabled:
