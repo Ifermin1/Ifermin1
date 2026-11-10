@@ -24,6 +24,7 @@ class SyncService:
         self.grace = grace_seconds
         self.rules_provider = lambda: []          # lo inyecta el contenedor (evita import circular)
         self.replication = None                   # ReplicationService, lo inyecta el contenedor
+        self.risk = None                          # RiskService, lo inyecta el contenedor: la posición esperada nunca pasa del tope de contratos
         self._mismatch_since: dict[str, float] = {}
         # Sobrecierre: una seguidora con posición contraria a la esperada (o con posición y la maestra plana) tras una
         # copia se cierra sola. El addon >= 2.4 lo corrige en milisegundos; esto es el respaldo del engine.
@@ -48,6 +49,12 @@ class SyncService:
         for p in (msnap.open_positions if msnap else []):
             root = rule.map_root(p.symbol.split(" ")[0])
             expected[root] = expected.get(root, 0) + int(round(p.quantity * rule.multiplier))
+        # Una seguidora con tope de contratos no puede tener más que el tope: lo esperado se recorta a él (si no, cada
+        # igualación intentaría pasarse y el tope lo volvería a cerrar).
+        lim = self.risk.limits.get(follower) if self.risk is not None else None
+        cap = int(lim.max_position_size) if lim and lim.max_position_size > 0 else 0
+        if cap:
+            expected = {k: max(-cap, min(cap, v)) for k, v in expected.items()}
         return expected
 
     def actual_positions(self, follower: str) -> dict[str, int]:

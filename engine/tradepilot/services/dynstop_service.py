@@ -89,6 +89,12 @@ class DynStopService:
         if not self.config["enabled"] or self.accounts is None or self.bridge is None:
             return
         master = (self.bridge.health.master_account or "").lower() if getattr(self.bridge, "health", None) else ""
+        # un stop creado aquí cuya posición ya no existe se olvida (lo cancela el barrido de salidas huérfanas): así no se
+        # confunde con una cancelación a mano si la cuenta vuelve a abrir ese símbolo
+        for (acc, sym) in list(self._created):
+            snap = self.accounts.accounts.get(acc)
+            if snap is None or not any(p.symbol.lower() == sym and p.quantity for p in snap.open_positions):
+                self._created.pop((acc, sym), None)
         for snap in list(self.accounts.accounts.values()):
             if not snap.enabled or not snap.open_positions:
                 continue
