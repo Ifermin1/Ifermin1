@@ -1,4 +1,5 @@
 import json
+import time
 from datetime import datetime, timedelta
 
 from loguru import logger
@@ -25,6 +26,8 @@ class RiskService:
         self.master_flatten_grace = 20.0      # segundos sin copiar fills de la maestra tras cerrarla
         self.on_halt = None                   # async (account, reason) -> None: lo fija StageService (objetivo de prueba)
         self.goal_gate = None                 # (account) -> bool: False = objetivo alcanzado pero la evaluación aún no se cierra (días/consistencia pendientes)
+        self.trade = None                     # TradeService (lo inyecta el contenedor): para reducir a mercado un exceso sobre el tope
+        self._cap_fixed: dict[tuple, float] = {}
         raw = store.get_kv("schedule")
         self.schedule = Schedule.model_validate(json.loads(raw)) if raw else Schedule()
         self.session_closed_day: str = store.get_kv("session_closed_day", "") or ""
@@ -149,6 +152,42 @@ class RiskService:
         await self._check_drawdown()
         await self._check_schedule()
         await self._check_day_loss()
+        await self._check_position_cap()
+
+    async def _check_position_cap(self) -> None:
+        """Una cuenta nunca se queda por encima de su tope de contratos: el exceso se cierra a mercado (POSITION_CAP_FIX).
+        Pasa si dos copias entran antes de que el bróker refleje la primera, o si alguien opera a mano en la seguidora."""
+        if not self.accounts or self.bridge is None or getattr(self, "trade", None) is None:
+            return
+        now = time.monotonic()
+        for acc, limit in list(self.limits.items()):
+            if limit.max_position_size <= 0:
+                continue
+            snap = self.accounts.accounts.get(acc)
+            if snap is None or not snap.reported:
+                continue
+            by_root: dict[str, list] = {}
+            for p in snap.open_positions:
+                if p.quantity:
+                    by_root.setdefault(p.symbol.split(" ")[0].upper(), []).append(p)
+            for root, ps in by_root.items():
+                qty = sum(p.quantity for p in ps)
+                excess = abs(qty) - limit.max_position_size
+                if excess <= 0:
+                    continue
+                key = (acc, root)
+                if now - self._cap_fixed.get(key, -1e9) < 20:
+                    continue
+                self._cap_fixed[key] = now
+                symbol = ps[0].symbol
+                try:
+                    order = self.trade.validate({"client_id": f"cap{int(time.time() * 1000)}", "account": acc, "symbol": symbol, "action": "SELL" if qty > 0 else "BUY",
+                                                 "quantity": excess, "order_type": "MARKET", "closing": True, "note": "tope de contratos"})
+                    await self.bridge.manual_order(order)
+                    self.audit.log("POSITION_CAP_FIX", f"{acc}: {abs(qty)} {root} abiertos con tope {limit.max_position_size}: se cierran {excess} a mercado para volver al tope",
+                                   target=acc, details={"position": qty, "max": limit.max_position_size, "excess": excess})
+                except Exception as exc:
+                    self.audit.log("ERROR", f"{acc}: no se pudo reducir el exceso de {excess} {root} sobre el tope: {exc}", target=acc)
 
     async def _check_heartbeat(self) -> None:
         if self.bridge is None or self.bridge.health.mode != "ninja":
@@ -520,8 +559,9 @@ class RiskService:
         self.bus.publish_nowait(TOPIC_RISK, self.state().model_dump(mode="json"))
         return True
 
-    def allows(self, account_id: str, quantity: int, symbol: str = "", action: str = "") -> tuple[bool, str | None]:
-        """¿Se puede enviar una orden de `quantity` a `account_id`?"""
+    def allows(self, account_id: str, quantity: int, symbol: str = "", action: str = "", position_hint: int | None = None) -> tuple[bool, str | None]:
+        """¿Se puede enviar una orden de `quantity` a `account_id`? `position_hint` = posición contando las copias en vuelo
+        (el bróker va 2 s por detrás: dos entradas de la maestra en 1 s dejaron a una seguidora con 4 contratos y tope 3)."""
         if self.kill_switch:
             return False, self.kill_switch_detail()
         ok, reason = self._in_window()
@@ -541,10 +581,13 @@ class RiskService:
             if quantity > limit.max_position_size:
                 return False, f"qty {quantity} supera el máximo {limit.max_position_size} de {account_id}"
             if self.accounts and symbol:
-                pos = self.accounts.position(account_id, symbol)
+                actual = self.accounts.position(account_id, symbol)
                 sign = 1 if action.upper().startswith("BUY") else -1
-                resulting = abs(pos + sign * quantity)
-                if resulting > limit.max_position_size and resulting > abs(pos):
-                    return False, (f"posición resultante {resulting} supera el máximo {limit.max_position_size} de {account_id} "
-                                   f"(actual {pos:+d})")
+                for pos, label in ((actual, "actual"), (position_hint, "con las copias en vuelo")):
+                    if pos is None:
+                        continue
+                    resulting = abs(pos + sign * quantity)
+                    if resulting > limit.max_position_size and resulting > abs(pos):
+                        return False, (f"posición resultante {resulting} supera el máximo {limit.max_position_size} de {account_id} "
+                                       f"({label} {pos:+d})")
         return True, None

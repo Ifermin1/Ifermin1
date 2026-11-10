@@ -43,6 +43,7 @@ class TradeService:
         self.stats = {"orders": 0, "rejected": 0, "cancels": 0, "modifies": 0, "unconfirmed": 0, "protects": 0, "orphans": 0}
         self._exits: dict[tuple[str, str], str] = {}                      # (cuenta, orderKey) -> símbolo: salidas creadas por Proteger/brackets, para cancelarlas si la posición ya cerró
         self._cancelled_by_us: OrderedDict[str, float] = OrderedDict()   # orderKey -> cuándo: para no auditar dos veces la cancelación
+        self._exit_missing_since: dict[tuple[str, str], float] = {}      # salida registrada que GET_ORDERS aún no muestra: cuándo dejó de verse
         self._pending_trails: dict[tuple[str, str], dict] = {}            # (cuenta, símbolo) -> trailing a activar cuando exista la posición
         self.trail = None                                                  # TrailService (lo fija el contenedor)
         self.metrics = None                                                # MetricsService (lo fija el contenedor)
@@ -476,8 +477,15 @@ class TradeService:
                 continue
             alive = next((o for o in snap.working_orders if o.order_id == oid), None)
             if alive is None:
-                self._exits.pop((acc, oid), None)
+                # Recién creada, el bróker tarda un ciclo en listarla: si se diera por muerta aquí quedaría huérfana para
+                # siempre y, al dispararse con la posición ya cerrada, ABRIRÍA una posición nueva (9/11 22:00). Solo se olvida
+                # si lleva más de 30 s sin aparecer (ejecutada o cancelada de verdad).
+                since = self._exit_missing_since.setdefault((acc, oid), time.monotonic())
+                if time.monotonic() - since > 30:
+                    self._exits.pop((acc, oid), None)
+                    self._exit_missing_since.pop((acc, oid), None)
                 continue
+            self._exit_missing_since.pop((acc, oid), None)
             if any(p.symbol.lower() == symbol.lower() and p.quantity for p in snap.open_positions):
                 continue
             self._exits.pop((acc, oid), None)

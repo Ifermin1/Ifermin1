@@ -592,6 +592,12 @@ perdería más de lo que le queda. Con el stop dinámico, **cada cuenta solo pue
 - Cuando la maestra mueve su stop, la copia cambia y, si vuelve a salirse de la ventana, se corrige en el siguiente ciclo.
   Convive con el trailing: los dos solo acercan.
 
+Tres reglas de seguridad del stop dinámico, aprendidas el 9/11: (1) un stop creado por el engine **se cancela solo** en cuanto
+la posición se cierra por otro camino (si no, al dispararse abriría una posición nueva); (2) si cancelas a mano un stop
+creado por el engine, **no lo vuelve a crear** en 15 minutos y te avisa de que la cuenta queda sin stop (`DYNSTOP_HOLD`);
+(3) el tope de contratos cuenta **las copias en vuelo**: dos entradas de la maestra en el mismo segundo no pueden dejar a
+una seguidora por encima de su máximo, y si aun así ocurre, el exceso se cierra a mercado (`POSITION_CAP_FIX`).
+
 Ejemplo: seguidora con 400 $ de ventana, larga 2 NQ a 20000 y stop copiado en 19950 (pierde 2.000 $). El engine lo pone en
 19990,25: (400 − 10) / (20 $ × 2) = 9,75 puntos. Si ya lleva −300 $ realizados hoy, quedan 90 $: stop a 2,25 puntos.
 
@@ -870,6 +876,8 @@ cola y el último envío. La página del hub enseña el P&L del día de cada eng
 | `STAGE_GOAL_SET` 🎯 | Objetivo de prueba aplicado a las cuentas de la etapa (o a una cuenta nueva). | Comprobar el saldo inicial en Riesgo si una cuenta entró con posición abierta. |
 | `STAGE_GOAL_MASTER` 🏁 | La maestra alcanzó el objetivo de prueba: según la regla, todo cerrado y copia parada, liderazgo pasado a otra cuenta (**opera en ella**) o solo la maestra cerrada. | Leer el aviso: dice en qué cuenta seguir. |
 | `DYNCUT_MOVE` 🎯 | El objetivo límite de esa cuenta se puso donde la ganancia neta del día llega justo al corte. | Nada. |
+| `POSITION_CAP_FIX` ✂️ | Una cuenta quedó por encima de su tope de contratos (dos copias seguidas, u operativa a mano): el exceso se cerró a mercado. | Nada; si pasa a menudo, revisa el tope o el multiplicador. |
+| `DYNSTOP_HOLD` ⚠️ | El stop que creó el engine se canceló a mano: no se vuelve a crear en 15 min y la cuenta queda sin stop. | Cerrar la posición o poner un stop a mano. |
 | `DYNSTOP_MOVE` 🛡️ | El stop de esa cuenta se acercó a lo que le queda de su ventana (de → a, ventana, por qué límite). | Nada: así esa cuenta no pasa de su pérdida máxima. |
 | `DYNSTOP_NO_ROOM` ⚠️ | A la cuenta no le queda ventana para un stop razonable: se deja como está. | Decidir a mano: cerrar o aceptar que el límite de riesgo la cierre. |
 | `GUARDIAN_RED` 🔴 | El gestor preventivo detectó una infracción o un límite de liquidación cerca (causa, valor, límite y acción en el aviso). | Hacer la acción indicada; no abrir nada en esa cuenta hasta volver a verde. |

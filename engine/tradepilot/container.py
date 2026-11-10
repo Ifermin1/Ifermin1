@@ -214,6 +214,7 @@ def build_container(cfg: Settings | None = None, bridge: BrokerBridge | None = N
         except Exception as exc:
             logger.warning(f"No se pudo generar el histórico de demostración: {exc}")
     trade = TradeService(bridge, accounts, risk, audit, cfg, store)
+    risk.trade = trade                # para reducir a mercado un exceso sobre el tope de contratos
     replication.on_manual_status = trade.on_manual_status
     market = MarketService(bus)
     auto_risk = AutoRiskService(risk, accounts, audit, cfg)

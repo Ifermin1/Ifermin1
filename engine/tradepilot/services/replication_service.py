@@ -379,7 +379,7 @@ class ReplicationService:
                                    "un cierre nunca invierte la posición", source=event.account, target=follower)
                     qty = abs(exp)
             if check_risk:
-                ok, reason = self.risk.allows(follower, qty, symbol, event.action)
+                ok, reason = self.risk.allows(follower, qty, symbol, event.action, position_hint=exp)
                 if ok and self.accounts is not None and not self.accounts.is_enabled(follower):
                     ok, reason = False, f"cuenta {follower} desactivada en la consola"
                 if ok and self._desync_blocks(follower, event):
