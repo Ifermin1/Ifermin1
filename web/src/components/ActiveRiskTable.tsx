@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useStore } from "../lib/store";
 import type { Account, RiskLimit } from "../lib/api";
 import { money, signedMoney } from "../lib/format";
@@ -32,13 +32,12 @@ export function ActiveRiskTable({ onlyCopying = false }: { onlyCopying?: boolean
   const active = accounts.filter(isActive).filter((a) => showAll || copying(a))
     .sort((x, y) => (x.account_id.toLowerCase() === master ? -1 : y.account_id.toLowerCase() === master ? 1 : 0) || Number(copying(y)) - Number(copying(x)) || (x.alias || x.account_id).localeCompare(y.alias || y.account_id));
   const inactive = accounts.filter((a) => !isActive(a)).length;
-  useEffect(() => {        // los borradores siguen al engine salvo la fila que se está editando
-    setDrafts((d) => { const n = { ...d }; for (const a of accounts) if (!n[a.account_id]) n[a.account_id] = toDraft(limits.get(a.account_id) ?? EMPTY); return n; });
-  }, [accounts.length, risk?.limits.length]);   // eslint-disable-line react-hooks/exhaustive-deps
   if (!client) return null;
 
+  // solo hay borrador para la fila que se está editando; el resto enseña siempre lo que tiene el engine
   const dirty = (a: Account) => { const l = limits.get(a.account_id) ?? EMPTY; const d = drafts[a.account_id]; return !!d && JSON.stringify(d) !== JSON.stringify(toDraft(l)); };
-  const set = (id: string, patch: Partial<Draft>) => setDrafts((d) => ({ ...d, [id]: { ...(d[id] ?? toDraft(EMPTY)), ...patch } }));
+  const set = (id: string, patch: Partial<Draft>) => setDrafts((d) => ({ ...d, [id]: { ...(d[id] ?? toDraft(limits.get(id) ?? EMPTY)), ...patch } }));
+  const discard = (id: string) => setDrafts((x) => { const n = { ...x }; delete n[id]; return n; });
   const run = async (id: string, fn: () => Promise<unknown>, ok: string) => {
     if (!(await guard())) return;
     setBusy(id); setErr(null); setMsg(null);
@@ -64,7 +63,7 @@ export function ActiveRiskTable({ onlyCopying = false }: { onlyCopying?: boolean
       <p className="muted small" style={{ margin: "0 0 8px" }}>Solo las cuentas <b>en juego</b> (habilitadas, conectadas y con saldo). Cambia un valor y pulsa <b>Guardar</b> en su fila; 0 o vacío = sin límite. El stop diario y el corte son netos del día; el objetivo es acumulado sobre el saldo inicial; el drawdown es el del prop firm (suelo = máximo − drawdown).</p>
       {active.length === 0 ? <Empty>{accounts.length ? "Ninguna cuenta activa ahora mismo (conectadas con saldo)." : "Esperando cuentas del bróker…"}</Empty> : (
         <div className="table-wrap"><table className="active-risk" data-testid="active-risk">
-          <thead><tr><th>Cuenta</th><th className="num">Hoy (neto)</th><th>Drawdown</th><th className="num" title="Pérdida neta del día a la que se pausa y cierra">Stop diario $</th><th className="num" title="Ganancia neta del día a la que se cierra y asegura">Corte día $</th>
+          <thead><tr><th>Cuenta · drawdown</th><th className="num">Hoy (neto)</th><th className="num" title="Pérdida neta del día a la que se pausa y cierra">Stop diario $</th><th className="num" title="Ganancia neta del día a la que se cierra y asegura">Corte día $</th>
             <th className="num" title="Ganancia acumulada sobre el saldo inicial (evaluación)">Objetivo $</th><th className="num" title="Saldo desde el que cuenta el objetivo (vacío = saldo de ahora al guardar)">Desde $</th><th className="num">Máx. contr.</th><th className="num" title="Drawdown máximo del prop firm y colchón al que el engine cierra antes">DD máx. $ · colchón</th><th>Estado</th><th></th></tr></thead>
           <tbody>{active.map((a) => {
             const l = limits.get(a.account_id); const d = drafts[a.account_id] ?? toDraft(l ?? EMPTY);
@@ -72,9 +71,9 @@ export function ActiveRiskTable({ onlyCopying = false }: { onlyCopying?: boolean
             const id = a.account_id; const b = busy === id; const dirtyRow = dirty(a);
             return (
               <tr key={id} className={`${l?.trading_halted ? "halted" : ""} ${dirtyRow ? "dirty" : ""}`} data-testid={`ar-${id}`}>
-                <td><b>{isM && <Icon name="crown" size={11} />} {a.alias || id}</b>{a.alias && <div className="muted small">{id}</div>}<div className="muted small">{isM ? "líder" : copying(a) ? "copiando" : "sin copiar"}{a.owner ? ` · ${a.owner}` : ""}{a.firm ? ` · ${a.firm.toUpperCase()}` : ""}</div></td>
+                <td><b>{isM && <Icon name="crown" size={11} />} {a.alias || id}</b>{a.alias && <span className="muted small"> {id}</span>}<div className="muted small">{isM ? "líder" : copying(a) ? "copiando" : "sin copiar"}{a.owner ? ` · ${a.owner}` : ""}{a.firm ? ` · ${a.firm.toUpperCase()}` : ""}</div>
+                  <div className="meter-cell">{dd.pct !== null ? <DrawdownMeter d={dd} /> : <span className="muted small">drawdown sin límite</span>}</div></td>
                 <td className={`num ${net > 0 ? "ok" : net < 0 ? "bad" : "muted"}`}>{pnl.live && "≈ "}{signedMoney(net)}<div className="muted small">{money(a.balance)}</div></td>
-                <td className="meter-cell">{dd.pct !== null ? <DrawdownMeter d={dd} /> : <span className="muted small">sin límite</span>}</td>
                 <td className="num"><input inputMode="decimal" value={d.max_daily_loss} onChange={(e) => set(id, { max_daily_loss: e.target.value })} disabled={readOnly || b} data-testid={`ar-loss-${id}`} /></td>
                 <td className="num"><input inputMode="decimal" value={d.max_daily_profit} onChange={(e) => set(id, { max_daily_profit: e.target.value })} disabled={readOnly || b} data-testid={`ar-cut-${id}`} /></td>
                 <td className="num"><input inputMode="decimal" value={d.profit_goal} onChange={(e) => set(id, { profit_goal: e.target.value })} disabled={readOnly || b} data-testid={`ar-goal-${id}`} /></td>
@@ -85,11 +84,12 @@ export function ActiveRiskTable({ onlyCopying = false }: { onlyCopying?: boolean
                   <input inputMode="decimal" value={d.drawdown_buffer} placeholder="colch." onChange={(e) => set(id, { drawdown_buffer: e.target.value })} disabled={readOnly || b} title="Colchón: el engine pausa y cierra cuando quedan estos $ hasta el suelo" /></span></td>
                 <td>{l?.trading_halted ? <span className={`badge ${l.halted_reason === "daily_profit" || l.halted_reason === "profit_goal" ? "ok" : "bad"}`}>pausada · {REASON[l.halted_reason] ?? (l.halted_reason || "a mano")}</span> : l ? <span className="badge ok">vigilada</span> : <span className="badge muted">sin límites</span>}</td>
                 <td className="row-actions">
-                  {!readOnly && <button className={dirtyRow ? "primary small-btn" : "ghost small-btn"} disabled={b || (!dirtyRow && !!l)} onClick={() => void save(a)} data-testid={`ar-save-${id}`}>Guardar</button>}
-                  {!readOnly && l && (l.trading_halted
+                  {!readOnly && (dirtyRow || !l) && <button className="primary small-btn" disabled={b} onClick={() => void save(a)} data-testid={`ar-save-${id}`}>Guardar</button>}
+                  {!readOnly && dirtyRow && <button className="ghost small-btn" disabled={b} onClick={() => discard(id)} title="Descartar los cambios de esta fila">↶</button>}
+                  {!readOnly && l && !dirtyRow && (l.trading_halted
                     ? <button className="ghost small-btn" disabled={b} onClick={() => void save(a, false)} data-testid={`ar-resume-${id}`}>Reanudar</button>
                     : <button className="ghost small-btn" disabled={b} onClick={() => { if (confirm(`¿Pausar ${a.alias || id}? No recibirá copias hasta reanudarla.`)) void save(a, true); }} data-testid={`ar-pause-${id}`}>Pausar</button>)}
-                  {!readOnly && l && <button className="ghost small-btn danger" disabled={b} onClick={() => clear(a)} title="Quitar todos los límites">✕</button>}
+                  {!readOnly && l && !dirtyRow && <button className="ghost small-btn danger" disabled={b} onClick={() => clear(a)} title="Quitar todos los límites">✕</button>}
                 </td>
               </tr>
             );

@@ -813,7 +813,7 @@ table.active-risk td input { width: 58px; padding: 4px 5px; text-align: right; f
 table.active-risk td, table.active-risk th { padding: 7px 6px; }
 table.active-risk td select { padding: 5px 4px; font-size: 12px; width: auto; }
 table.active-risk td, table.active-risk th { white-space: nowrap; }
-table.active-risk td:first-child { white-space: normal; min-width: 150px; }
+table.active-risk td:first-child { white-space: normal; min-width: 170px; } table.active-risk td:first-child .meter-cell { min-width: 0; margin-top: 2px; }
 table.active-risk .dd-edit { display: inline-flex; gap: 4px; align-items: center; }
 table.active-risk .dd-edit input:last-child { width: 54px; }
 table.active-risk tr.dirty td { background: rgba(250,204,21,.06); }
