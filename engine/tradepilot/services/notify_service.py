@@ -26,7 +26,7 @@ TITLES: dict[str, tuple[str, str]] = {
     "TRAIL_START": ("🎯", "Trailing stop activado"), "TRAIL_MOVE": ("↗️", "Trailing: stop movido"), "TRAIL_END": ("🏁", "Trailing terminado"),
     "DAILY_LOSS_LIMIT": ("🛑", "Límite de pérdida diaria"), "DAILY_LOSS_WARNING": ("⚠️", "Cerca del límite de pérdida"),
     "DAILY_PROFIT_TARGET": ("🎯", "Corte del día alcanzado"), "DAILY_PROFIT_WARNING": ("🟢", "Cerca del corte del día"),
-    "POSITION_CAP_FIX": ("✂️", "Exceso sobre el tope de contratos cerrado"), "DYNSTOP_HOLD": ("⚠️", "Stop cancelado a mano: cuenta sin stop"), "DYNCUT_MOVE": ("🎯", "Objetivo puesto en el corte del día"), "DYNSTOP_MOVE": ("🛡️", "Stop ajustado a la ventana de la cuenta"), "DYNSTOP_NO_ROOM": ("⚠️", "Sin ventana para el stop"), "GUARDIAN_RED": ("🔴", "Gestor preventivo: rojo"), "MAE_WARN": ("🟡", "Pérdida flotante cerca del MAE"), "MAE_BREACH": ("⛔", "MAE superado"),
+    "POSITION_CAP_FIX": ("✂️", "Exceso sobre el tope de contratos cerrado"), "POSITION_CAP_STUCK": ("🧱", "Tope de contratos: el bróker rechaza reducir"), "DYNSTOP_HOLD": ("⚠️", "Stop cancelado a mano: cuenta sin stop"), "DYNCUT_MOVE": ("🎯", "Objetivo puesto en el corte del día"), "DYNSTOP_MOVE": ("🛡️", "Stop ajustado a la ventana de la cuenta"), "DYNSTOP_NO_ROOM": ("⚠️", "Sin ventana para el stop"), "GUARDIAN_RED": ("🔴", "Gestor preventivo: rojo"), "MAE_WARN": ("🟡", "Pérdida flotante cerca del MAE"), "MAE_BREACH": ("⛔", "MAE superado"),
     "DAY_LIMIT_RESET": ("▶️", "Pausa del día levantada"), "EVAL_CONSISTENCY_STOP": ("⛔", "Tope de consistencia de hoy"), "EVAL_TARGET_WAIT": ("⏳", "Objetivo conseguido: faltan días"), "EVAL_PASSED": ("🏆", "Evaluación superada"), "EVAL_RESUMED": ("▶️", "Parada por consistencia levantada"),
     "STAGE_GOAL_MASTER": ("🏁", "Objetivo de prueba en la maestra"), "STAGE_GOAL_SET": ("🎯", "Objetivo de prueba aplicado"),
     "PROFIT_GOAL": ("🏆", "Objetivo de la evaluación alcanzado"), "PROFIT_GOAL_WARNING": ("🟢", "Cerca del objetivo de la evaluación"),
@@ -46,7 +46,7 @@ TITLES: dict[str, tuple[str, str]] = {
 }
 DEFAULT_EVENTS = ["DAILY_LOSS_LIMIT", "DAILY_LOSS_WARNING", "DAILY_PROFIT_TARGET", "DAILY_PROFIT_WARNING", "PROFIT_GOAL", "DRAWDOWN_LIMIT",
                   "DRAWDOWN_WARNING", "KILL_SWITCH_ON", "KILL_SWITCH_OFF", "KILL_SWITCH_PERSISTED", "FLATTEN", "SCHEDULED_FLATTEN", "NAKED_CLOSE",
-                  "FOLLOWER_REJECTED", "ACCOUNT_LOCKED", "DESYNC", "OVERCLOSE_FIX", "ADDON_SILENT", "ADDON_DOWN", "ADDON_BACK",
+                  "FOLLOWER_REJECTED", "ACCOUNT_LOCKED", "DESYNC", "POSITION_CAP_STUCK", "OVERCLOSE_FIX", "ADDON_SILENT", "ADDON_DOWN", "ADDON_BACK",
                   "ADDON_RESTART", "GAP", "ERROR", "ENTRY_MISSED", "NEWS_SOON", "NEWS_RESULT", "MANUAL_REJECTED", "DAY_CLOSED", "AUTO_RISK_APPLIED",
                   "DEGRADED_ON", "DEGRADED_OFF", "ADDON_STILL_DOWN", "NO_TICKS", "TICKS_BACK", "ENGINE_RESUMED", "ADDON_ALONE", "ADDON_SELF_RESTART", "COPILOT", "ASSISTANT_RUN", "MORNING_BRIEF", "SESSION_REVIEW", "TILT", "PROP_RULE_WARN", "STAGE_GOAL_MASTER", "EVAL_CONSISTENCY_STOP", "EVAL_TARGET_WAIT", "EVAL_PASSED", "GUARDIAN_RED", "MAE_WARN", "MAE_BREACH", "DYNSTOP_MOVE", "DYNSTOP_NO_ROOM", "DYNCUT_MOVE", "POSITION_CAP_FIX", "DYNSTOP_HOLD"]
 

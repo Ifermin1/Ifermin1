@@ -28,8 +28,9 @@ from loguru import logger
 
 from tradepilot.domain.symbols import point_value, tick_size
 
-DEFAULT = {"enabled": True, "margin_usd": 10.0, "include_master": False, "use_drawdown": True, "min_ticks": 4, "create_if_missing": True,
-           "profit_cut": True, "profit_margin_usd": 0.0}
+DEFAULT = {"enabled": True, "margin_usd": 10.0, "include_master": False, "use_drawdown": True, "min_ticks": 4, "create_if_missing": False,
+           "profit_cut": True, "profit_margin_usd": 0.0, "create_grace_seconds": 20}
+CONFIG_VERSION = 2   # v2: create_if_missing pasó a False por defecto (el 11/11 creó stops que se ejecutaron al instante en una cuenta operada a mano)
 
 
 class DynStopService:
@@ -41,23 +42,45 @@ class DynStopService:
         raw = store.get_kv("dynstop.config") if store else None
         if raw:
             try:
-                self.config.update({k: v for k, v in json.loads(raw).items() if k in self.config})
-            except ValueError:
+                saved = json.loads(raw)
+                self.config.update({k: v for k, v in saved.items() if k in self.config})
+                if int(saved.get("version") or 1) < CONFIG_VERSION:
+                    # configuración guardada con el valor antiguo por defecto: crear stops a ciegas vuelve a quedar apagado;
+                    # quien lo quiera lo enciende a sabiendas en Riesgo → Stop dinámico
+                    self.config["create_if_missing"] = False
+                    self._save()
+            except (ValueError, TypeError):
                 pass
         self.last: dict[str, dict] = {}            # cuenta -> última acción/estado para la consola
         self._applied: dict[tuple, tuple[float, float]] = {}   # (cuenta, order_id) -> (stop puesto, monotonic)
         self._noted: dict[str, str] = {}           # cuenta -> día del aviso "sin ventana"
         self._created: dict[tuple, tuple[str, float]] = {}   # (cuenta, símbolo) -> (order_id del stop creado aquí, cuándo)
         self._hold: dict[tuple, float] = {}        # (cuenta, símbolo) -> hasta cuándo no se vuelve a crear (lo cancelaron a mano)
+        self._seen: dict[tuple, float] = {}        # (cuenta, símbolo) -> monotonic en que se vio la posición por primera vez (gracia antes de crear)
         self.stats = {"moves": 0, "created": 0, "cuts": 0}
 
     def set_config(self, **changes) -> dict:
         for k, v in changes.items():
             if k in self.config and v is not None:
                 self.config[k] = type(DEFAULT[k])(v)
-        if self.store:
-            self.store.set_kv("dynstop.config", json.dumps(self.config))
+        self._save()
         return self.config
+
+    def _save(self) -> None:
+        if self.store:
+            self.store.set_kv("dynstop.config", json.dumps({**self.config, "version": CONFIG_VERSION}))
+
+    def _can_create(self, snap, pos) -> tuple[bool, str]:
+        """Crear una orden de salida que no existe solo cuando está permitido y la posición lleva un rato abierta: justo tras la
+        entrada el precio medio y la cantidad del bróker aún bailan, y un stop calculado con datos a medias se ejecuta al instante."""
+        if not self.config["create_if_missing"]:
+            return False, "sin stop y la creación automática está apagada (Riesgo → Stop dinámico)"
+        key = (snap.account_id, pos.symbol.lower(), "seen")
+        first = self._seen.setdefault(key, time.monotonic())
+        age = time.monotonic() - first
+        if age < self.config["create_grace_seconds"]:
+            return False, f"sin stop: posición recién abierta, se espera {self.config['create_grace_seconds'] - age:.0f} s antes de crear uno"
+        return True, ""
 
     # ---- ventana de pérdida por cuenta (desde el precio medio, en $) ----
     def room_for(self, snap) -> tuple[float | None, str]:
@@ -95,8 +118,12 @@ class DynStopService:
             snap = self.accounts.accounts.get(acc)
             if snap is None or not any(p.symbol.lower() == sym and p.quantity for p in snap.open_positions):
                 self._created.pop((acc, sym), None)
+        for key in list(self._seen):
+            snap = self.accounts.accounts.get(key[0])
+            if snap is None or not any(p.symbol.lower() == key[1] and p.quantity for p in snap.open_positions):
+                self._seen.pop(key, None)          # la posición cerró: la próxima vuelve a esperar la gracia
         for snap in list(self.accounts.accounts.values()):
-            if not snap.enabled or not snap.open_positions:
+            if not snap.open_positions or (self.risk is not None and not self.risk.is_live(snap)):
                 continue
             if master and snap.account_id.lower() == master and not self.config["include_master"]:
                 continue
@@ -149,7 +176,7 @@ class DynStopService:
         if cur is not None:
             await self.bridge.modify_order(snap.account_id, cur.order_id, cur.quantity or qty, cand, 0.0)
             how = f"objetivo movido de {cur.limit_price:.10g} a {cand:.10g}"
-        elif self.config["create_if_missing"]:
+        elif self._can_create(snap, pos)[0]:
             order = self.trade.validate({"client_id": f"cut{int(time.time() * 1000)}", "account": snap.account_id, "symbol": pos.symbol, "action": "SELL" if long else "BUY",
                                          "quantity": qty, "order_type": "LIMIT", "limit_price": cand, "closing": True, "note": "corte diario"})
             reply = await self.bridge.manual_order(order)
@@ -220,9 +247,13 @@ class DynStopService:
                 await self.bridge.modify_order(snap.account_id, cur.order_id, cur.quantity or qty, 0.0, cand)
                 self.stats["moves"] += 1
                 how = f"stop movido de {cur.stop_price:.10g} a {cand:.10g}"
-            elif self.config["create_if_missing"]:
+            elif cur is None:
+                ok, note = self._can_create(snap, pos)
                 if self._hold.get(ckey, 0) > time.monotonic():
-                    self.last[snap.account_id]["note"] = "sin stop: se canceló a mano hace poco, no se vuelve a crear"
+                    ok, note = False, "sin stop: se canceló a mano hace poco, no se vuelve a crear"
+                if not ok:
+                    self.last[snap.account_id]["note"] = note
+                    self._applied.pop(key, None)
                     continue
                 order = self.trade.validate({"client_id": f"dyn{int(time.time() * 1000)}", "account": snap.account_id, "symbol": pos.symbol, "action": "SELL" if long else "BUY",
                                              "quantity": qty, "order_type": "STOPMARKET", "stop_price": cand, "closing": True, "note": "stop dinámico"})

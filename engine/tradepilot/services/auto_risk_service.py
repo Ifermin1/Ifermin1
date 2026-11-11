@@ -21,9 +21,15 @@ class AutoRiskService:
     def enabled(self) -> bool:
         return bool(getattr(self.settings, "AUTO_RISK", True))
 
+    @staticmethod
+    def is_active(snap) -> bool:
+        """Perfil de riesgo solo para cuentas activas: habilitadas, conectadas y con saldo. Las que el bróker lista en 0,00
+        (cerradas, sin fondear o aún sin cargar) no se perfilan: no copian y solo generarían pausas y avisos fantasma."""
+        return bool(snap is not None and snap.enabled and snap.connected is not False and (snap.balance or 0) > 0)
+
     def needs(self, account_id: str) -> bool:
         snap = self.accounts.find(account_id)
-        if snap is None or not snap.enabled:
+        if not self.is_active(snap):
             return False
         lim = self.risk.limits.get(snap.account_id)
         has_limits = lim is not None and (lim.max_trailing_drawdown > 0 or lim.max_daily_loss > 0 or lim.max_position_size > 0)
@@ -62,7 +68,7 @@ class AutoRiskService:
     async def on_account_seen(self, account_id: str) -> None:
         """Llamado por AccountService al descubrir o activar una cuenta. Solo actúa solo cuando el nombre delata la firma
         (APEX…, TST…): a una cuenta Sim o de nombre desconocido no se le inventa un plan; para esas está el botón de Riesgo."""
-        if not self.enabled or firm_from_account(account_id) is None:
+        if not self.enabled or firm_from_account(account_id) is None or not self.is_active(self.accounts.find(account_id)):
             return
         try:
             await self.apply(account_id)

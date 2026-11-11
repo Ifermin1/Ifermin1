@@ -57,6 +57,7 @@ class DynStopConfigRequest(BaseModel):
     use_drawdown: Optional[bool] = None
     min_ticks: Optional[int] = Field(default=None, ge=1, le=100)
     create_if_missing: Optional[bool] = None
+    create_grace_seconds: Optional[int] = Field(default=None, ge=0, le=600)
     profit_cut: Optional[bool] = None
     profit_margin_usd: Optional[float] = Field(default=None, ge=-500, le=500)
 

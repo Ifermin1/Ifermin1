@@ -65,6 +65,12 @@ class GuardianService:
             return None
         return max((r["day"] for r in rows), default=None)
 
+    def _live(self, snap) -> bool:
+        """El gestor solo vigila cuentas activas (habilitadas, conectadas y con saldo): las demás no copian ni tienen qué proteger."""
+        if self.risk is not None and hasattr(self.risk, "is_live"):
+            return self.risk.is_live(snap)
+        return bool(snap is not None and snap.enabled and snap.reported)
+
     def evaluate(self, account_id: str) -> dict | None:
         snap = self.accounts.find(account_id) if self.accounts is not None else None
         if snap is None:
@@ -170,7 +176,7 @@ class GuardianService:
     def portfolio(self, owner: str | None = None) -> dict:
         rows = []
         for a in (self.accounts.accounts.values() if self.accounts is not None else []):
-            if not a.enabled or (owner and (a.owner or "").lower() != owner.lower()):
+            if not self._live(a) or (owner and (a.owner or "").lower() != owner.lower()):
                 continue
             r = self.evaluate(a.account_id)
             if r:
@@ -210,7 +216,7 @@ class GuardianService:
     async def tick(self) -> None:
         today = self.now().strftime("%Y-%m-%d")
         for a in list(self.accounts.accounts.values() if self.accounts is not None else []):
-            if not a.enabled or not a.reported:
+            if not self._live(a):
                 continue
             r = self.evaluate(a.account_id)
             if not r:

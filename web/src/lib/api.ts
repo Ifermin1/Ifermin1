@@ -118,7 +118,7 @@ export type EntryCheck = { verdict: "green" | "amber" | "red"; reasons: { level:
 export type PropRule = { consistency: number; min_days: number; min_day_profit: number; safety_net: boolean; safety_extra: number; payout_min: number; payout_max: number; payout_max_pct: number; winning_days: number;
                          payout_max_until: number; consistency_until: number };
 /** Stop dinámico por cuenta: configuración y última acción por cuenta. */
-export type DynStopConfig = { enabled: boolean; margin_usd: number; include_master: boolean; use_drawdown: boolean; min_ticks: number; create_if_missing: boolean; profit_cut: boolean; profit_margin_usd: number };
+export type DynStopConfig = { enabled: boolean; margin_usd: number; include_master: boolean; use_drawdown: boolean; min_ticks: number; create_if_missing: boolean; create_grace_seconds: number; profit_cut: boolean; profit_margin_usd: number };
 export type DynStopState = { config: DynStopConfig; stats: { moves: number; created: number; cuts: number };
                              accounts: Record<string, { at: string; symbol?: string; room: number | null; limited_by?: string; stop?: number | null; loss_at_stop?: number | null; note: string;
                                                         cut?: { target: number | null; current?: number | null; need?: number; note: string } }> };

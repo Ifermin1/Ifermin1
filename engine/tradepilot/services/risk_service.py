@@ -9,6 +9,9 @@ from tradepilot.domain.risk import Commissions, RiskLimit, RiskState, Schedule
 from tradepilot.infrastructure.persistence.sqlite_store import SQLiteStore
 from tradepilot.services.audit_service import AuditService
 
+CAP_MAX_TRIES = 3          # reducciones del exceso sobre el tope antes de avisar POSITION_CAP_STUCK y esperar
+CAP_HOLD_SECONDS = 900     # cuánto se espera tras POSITION_CAP_STUCK (15 min)
+
 
 class RiskService:
     """Kill switch global + límites por cuenta + cierre de emergencia. El replicador consulta
@@ -28,6 +31,8 @@ class RiskService:
         self.goal_gate = None                 # (account) -> bool: False = objetivo alcanzado pero la evaluación aún no se cierra (días/consistencia pendientes)
         self.trade = None                     # TradeService (lo inyecta el contenedor): para reducir a mercado un exceso sobre el tope
         self._cap_fixed: dict[tuple, float] = {}
+        self._cap_tries: dict[tuple, int] = {}      # (cuenta, raíz) -> intentos seguidos sin que el exceso baje
+        self._cap_hold: dict[tuple, float] = {}     # (cuenta, raíz) -> monotonic hasta el que no se insiste (POSITION_CAP_STUCK)
         raw = store.get_kv("schedule")
         self.schedule = Schedule.model_validate(json.loads(raw)) if raw else Schedule()
         self.session_closed_day: str = store.get_kv("session_closed_day", "") or ""
@@ -144,6 +149,12 @@ class RiskService:
         self.audit.log("SESSION_REOPENED", "Bloqueo del cierre programado levantado manualmente")
         self.bus.publish_nowait(TOPIC_RISK, self.state().model_dump(mode="json"))
 
+    @staticmethod
+    def is_live(snap) -> bool:
+        """Solo se vigila lo que está vivo: una cuenta desactivada, desconectada o que el bróker reporta en 0,00 (cerrada por el
+        prop firm, sin fondear, o la plataforma aún no la cargó) no tiene nada que proteger y solo generaría pausas fantasma."""
+        return bool(snap is not None and snap.reported and snap.enabled and snap.connected is not False and (snap.balance or 0) > 0)
+
     async def check(self) -> None:
         """Se ejecuta tras cada sincronización de cuentas: heartbeat, pérdida diaria, cierre programado."""
         await self._check_heartbeat()
@@ -164,7 +175,7 @@ class RiskService:
             if limit.max_position_size <= 0:
                 continue
             snap = self.accounts.accounts.get(acc)
-            if snap is None or not snap.reported:
+            if not self.is_live(snap):
                 continue
             by_root: dict[str, list] = {}
             for p in snap.open_positions:
@@ -173,12 +184,24 @@ class RiskService:
             for root, ps in by_root.items():
                 qty = sum(p.quantity for p in ps)
                 excess = abs(qty) - limit.max_position_size
-                if excess <= 0:
-                    continue
                 key = (acc, root)
-                if now - self._cap_fixed.get(key, -1e9) < 20:
+                if excess <= 0:
+                    self._cap_tries.pop(key, None)
+                    self._cap_hold.pop(key, None)
+                    continue
+                if self._cap_hold.get(key, 0) > now or now - self._cap_fixed.get(key, -1e9) < 20:
                     continue
                 self._cap_fixed[key] = now
+                self._cap_tries[key] = self._cap_tries.get(key, 0) + 1
+                if self._cap_tries[key] > CAP_MAX_TRIES:
+                    # tres intentos y el exceso sigue: el bróker rechaza la orden (p. ej. su propio límite cuenta la cantidad bruta
+                    # y la reducción lo superaría). Insistir cada 20 s solo llena el registro: se avisa una vez y se espera 15 min.
+                    self._cap_hold[key] = now + CAP_HOLD_SECONDS
+                    self._cap_tries[key] = 0
+                    self.audit.log("POSITION_CAP_STUCK", f"{acc}: sigue con {abs(qty)} {root} y tope {limit.max_position_size} tras {CAP_MAX_TRIES} intentos de reducir; "
+                                   "el bróker no acepta la orden. No se insiste en 15 min: reduce a mano desde NinjaTrader o sube el tope si el "
+                                   "prop firm lo permite.", target=acc, details={"position": qty, "max": limit.max_position_size, "excess": excess})
+                    continue
                 symbol = ps[0].symbol
                 try:
                     order = self.trade.validate({"client_id": f"cap{int(time.time() * 1000)}", "account": acc, "symbol": symbol, "action": "SELL" if qty > 0 else "BUY",
@@ -291,7 +314,7 @@ class RiskService:
             if limit.max_daily_loss <= 0 and limit.max_daily_profit <= 0 and not goal_on:
                 continue
             snap = self.accounts.accounts.get(acc)
-            if snap is None or limit.trading_halted:
+            if snap is None or limit.trading_halted or not self.is_live(snap):
                 continue
             pnl = snap.net_pnl      # neto: bruto de NinjaTrader menos las comisiones estimadas del día
             fees = f" (bruto {snap.daily_pnl:,.2f}, comisiones {snap.commissions_today:,.2f})" if snap.commissions_today else ""
@@ -335,7 +358,7 @@ class RiskService:
                 self._dd_warned.discard(acc)
                 continue
             snap = self.accounts.accounts.get(acc)
-            if snap is None or not snap.reported:
+            if not self.is_live(snap):
                 continue
             dd = snap.drawdown
             if dd.floor is None or dd.room is None:

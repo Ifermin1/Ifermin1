@@ -98,6 +98,8 @@ class AccountService:
                 logger.info(f"Cuenta {info.account_id} {'activada (conectada)' if auto_enabled else 'oculta (desconectada)'}")
                 if auto_enabled:
                     seen.append(info.account_id)
+            elif snap.enabled and (snap.balance or 0) <= 0 < (info.balance or 0):
+                seen.append(info.account_id)        # la cuenta pasó de 0,00 a tener saldo (la plataforma la cargó): ahora sí cuenta como activa
             snap.balance = snap.net_liquidity = info.balance
             snap.realized_pnl, snap.unrealized_pnl = info.realized_pnl, info.unrealized_pnl
             snap.daily_pnl = info.realized_pnl + info.unrealized_pnl

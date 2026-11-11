@@ -62,7 +62,9 @@ async def test_dynstop_does_not_recreate_a_hand_cancelled_stop(container):
     b._px["NQ DEC26"] = 20000.0
     b.positions[("Sim102", "NQ DEC26")] = 2
     risk.upsert_limit(RiskLimit(account_id="Sim102", max_daily_loss=400))
+    dyn.set_config(create_if_missing=True)                  # desde el 11/11 la creación va apagada por defecto
     await container.accounts.sync_once()
+    dyn._seen[("Sim102", "nq dec26", "seen")] = time.monotonic() - 60   # posición abierta hace rato: pasa la gracia
     await dyn.tick()
     assert dyn.stats["created"] == 1
     key = ("Sim102", "nq dec26")
