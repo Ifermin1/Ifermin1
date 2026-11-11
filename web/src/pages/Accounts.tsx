@@ -6,6 +6,7 @@ import { Card, Empty, Kpi } from "../components/ui";
 import { AccountPanel, livePnl, liveDrawdown } from "../components/AccountPanel";
 import { ProfileEditor, type ProfileResult } from "../components/ProfileEditor";
 import { EvalManager } from "../components/EvalManager";
+import { GroupsCard } from "../components/GroupsCard";
 import { DD_SHORT, profileLabel } from "../lib/propfirms";
 import { Icon } from "../components/Icons";
 import type { Account, ExecOptions, Rule } from "../lib/api";
@@ -291,6 +292,8 @@ export function Accounts() {
         {err && busy === null && <p className="error" data-testid="acc-error">{err}</p>}
         {msg && !err && <p className="ok small" data-testid="acc-msg">{msg}</p>}
       </Card>
+
+      <GroupsCard />
 
       <div className="kpis an-kpis acc-kpis" data-testid="acc-kpis">
         <Kpi label="Copiando" icon="copy" value={`${counts.copying} / ${followers.length}`} tone={counts.copying ? "ok" : "muted"} ring={followers.length ? (100 * counts.copying) / followers.length : null} sub="seguidoras visibles" />

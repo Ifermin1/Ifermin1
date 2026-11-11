@@ -139,6 +139,11 @@ export function Shell({ route, onRoute, children }: { route: Route; onRoute: (r:
             <Badge ok={wsStatus === "open" ? true : wsStatus === "connecting" ? null : false}>en vivo</Badge>
           </div>
           <div className="muted small">{session?.baseUrl}</div>
+          {health?.group && (
+            <div className="small" data-testid="group-chip" title={health.group.drift ? "La líder o las reglas cambiaron a mano desde que activaste este grupo (Cuentas → Grupos)" : "Grupo de líderes activo (Cuentas → Grupos para cambiarlo)"}>
+              <span className={`chip ${health.group.drift ? "bad" : ""}`}>Grupo {health.group.name} · {health.group.followers} seguidoras{health.group.drift ? " · cambiado a mano" : ""}</span>
+            </div>
+          )}
           {health?.stage && (
             <div className="small" data-testid="stage-chip" title="Etapa activa: las estadísticas cuentan desde esa fecha (Análisis → Etapa para cambiarla)">
               <span className="chip">Etapa {health.stage.name} · desde {health.stage.start_date.slice(8, 10)}/{health.stage.start_date.slice(5, 7)}{health.stage.mode === "new_accounts" ? " · solo cuentas nuevas" : ""}</span>

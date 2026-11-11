@@ -5,6 +5,7 @@ export type Health = {
   app: string; mode: "mock" | "ninja"; addon_outdated: boolean; min_addon_version: string; web_build: string | null;
   public_url: string | null; token_weak: boolean; role?: "full" | "read"; read_token_set?: boolean;
   stage?: { name: string; mode: "date" | "new_accounts"; start_date: string } | null;
+  group?: { id: string; name: string; master: string; followers: number; drift: boolean } | null;
   watchdog?: { degraded: boolean; degraded_since: string | null; no_ticks: boolean; market_open: boolean; last_tick_age_s: number | null; last_resume: { at: string; kind: string; gap_s: number } | null; loop_lag_ms: number } | null;
   bridge: { mode: string; connected: boolean; last_msg_in: string | null; last_msg_out: string | null;
             last_sync: string | null; last_heartbeat: string | null; master_account: string | null; addon_version: string | null; error_count: number; master_feed_up: boolean; follower_feed_up: boolean; sync_up: boolean };
@@ -61,6 +62,9 @@ export type MonthStats = { from: string; to: string; days: DayStat[]; trades: Tr
 export type StageMode = "date" | "new_accounts";
 export type GoalMaster = "flatten_all" | "rotate" | "master_only";
 export type StageGoal = { goal: number; gained: number | null; pct: number | null; reached: boolean; start_balance: number };
+export type GroupFollower = { account: string; multiplier: number };
+export type Group = { id: string; name: string; master: string; followers: GroupFollower[]; created_at: string; updated_at: string };
+export type Groups = { groups: Group[]; active_id: string; current: { master: string; followers: GroupFollower[] }; drift: boolean; note: string };
 export type Stage = { active: boolean; name: string; mode: StageMode; start_date: string; started_at: string | null; previous: string[]; include: string[]; exclude: string[];
                       goal_usd: number; goal_master: GoalMaster; master: string | null;
                       accounts: { account_id: string; alias: string; enabled: boolean; is_new: boolean; in_scope: boolean; goal: StageGoal }[];
@@ -342,6 +346,12 @@ export function makeClient(s: Session) {
     savePresets: (presets: RiskPreset[]) => req<{ presets: RiskPreset[]; defaults: RiskPreset[] }>("/api/ui/risk-presets", { method: "PUT", body: JSON.stringify({ presets }) }),
     applyPreset: (preset_id: string, accounts: string[]) => req<{ applied: string[]; preset: RiskPreset }>("/api/risk/preset", { method: "POST", body: JSON.stringify({ preset_id, accounts }) }),
     advice: () => req<AdviceList>("/api/advice"),
+    groups: () => req<Groups>("/api/groups"),
+    groupCreate: (body: { name: string; master: string; followers: GroupFollower[] }) => req<Group>("/api/groups", { method: "POST", body: JSON.stringify(body) }),
+    groupSaveCurrent: (name: string) => req<Group>("/api/groups/current", { method: "POST", body: JSON.stringify({ name }) }),
+    groupUpdate: (id: string, body: { name: string; master: string; followers: GroupFollower[] }) => req<Group>(`/api/groups/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+    groupActivate: (id: string) => req<{ group: Group; on: string[]; off: string[] }>(`/api/groups/${id}/activate`, { method: "POST" }),
+    groupDelete: (id: string) => req<void>(`/api/groups/${id}`, { method: "DELETE" }),
     stage: () => req<Stage>("/api/stage"),
     stageSet: (body: { action: "start" | "update" | "stop"; name?: string; mode?: StageMode; start_date?: string; include?: string[]; exclude?: string[] }) => req<Stage>("/api/stage", { method: "PUT", body: JSON.stringify(body) }),
     stageGoal: (goal_usd: number, goal_master: GoalMaster) => req<Stage>("/api/stage/goal", { method: "PUT", body: JSON.stringify({ goal_usd, goal_master }) }),

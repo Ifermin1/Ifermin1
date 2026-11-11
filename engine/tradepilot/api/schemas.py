@@ -426,3 +426,18 @@ class StageGoalRequest(BaseModel):
 class StageResetRequest(BaseModel):
     before: str
     confirm: str = ""
+
+
+class GroupFollower(BaseModel):
+    account: str = Field(min_length=1)
+    multiplier: float = Field(default=1.0, gt=0)
+
+
+class GroupRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    master: str = Field(min_length=1)
+    followers: list[GroupFollower] = Field(default_factory=list)
+
+
+class GroupSaveCurrentRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=60)

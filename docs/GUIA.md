@@ -357,7 +357,25 @@ si solo quieres vigilar y cortar.
 
 ---
 
-### Grupos, presets y recomendaciones
+### Grupos de líderes: varias configuraciones de copia guardadas (Cuentas → Grupos)
+
+Un **grupo de líderes** es una configuración completa de copia con nombre: la líder y sus seguidoras con el
+multiplicador de cada una. Sirve para tener varias (mañana/tarde, cuentas 50K/100K, las de cada dueño…) y cambiar de una
+a otra con un clic, sin volver a vincular cuenta por cuenta.
+
+- **Guardar lo de ahora como grupo**: toma la líder actual y las seguidoras que copian en este momento y lo guarda con el
+  nombre que escribas. Es la forma rápida de empezar: configura una vez, guarda.
+- **Nuevo grupo / Editar**: eliges la líder en un desplegable y marcas las seguidoras con su multiplicador (entero).
+- **Activar**: cambia la líder en el addon (como *Hacer líder*), crea o enciende las reglas de las seguidoras del grupo con
+  su multiplicador y **apaga** las reglas simples de las demás líderes. No borra reglas ni toca los límites de riesgo de
+  ninguna cuenta: el grupo anterior sigue guardado tal cual para volver a él.
+- La barra lateral muestra el grupo activo. Si cambias la líder o alguna regla a mano, aparece **cambiado a mano**: puedes
+  *Volver a aplicar* el grupo, o guardar lo de ahora como otro grupo.
+- Límite del addon: NinjaTrader copia **una sola líder a la vez**. Dos grupos con líderes distintas no pueden estar
+  activos a la vez; copiar dos líderes simultáneamente necesitaría un addon nuevo.
+- Queda en Auditoría como `GROUP_SAVED`, `GROUP_ACTIVATED` (con quién empieza y quién deja de copiar) y `GROUP_DELETED`.
+
+### Grupos (etiquetas), presets y recomendaciones
 
 - **Grupos (etiquetas)**: en *Cuentas*, marca varias cuentas → *Etiquetar…* y escribe el grupo (`50K`, `PA`, `alto
   riesgo`). Los grupos aparecen como filtro junto a las pestañas (*grupo 50K · 2*) y como chips en cada fila; *marcar el
@@ -894,6 +912,7 @@ cola y el último envío. La página del hub enseña el P&L del día de cada eng
 | `DYNCUT_MOVE` 🎯 | El objetivo límite de esa cuenta se puso donde la ganancia neta del día llega justo al corte. | Nada. |
 | `POSITION_CAP_FIX` ✂️ | Una cuenta quedó por encima de su tope de contratos (dos copias seguidas, u operativa a mano): el exceso se cerró a mercado. | Nada; si pasa a menudo, revisa el tope o el multiplicador. |
 | `DYNSTOP_HOLD` ⚠️ | El stop que creó el engine se canceló a mano: no se vuelve a crear en 15 min y la cuenta queda sin stop. | Cerrar la posición o poner un stop a mano. |
+| `GROUP_ACTIVATED` 👑 | Se activó un grupo de líderes: la líder cambió y solo copian sus seguidoras; el resto de reglas quedan apagadas. | Nada. Si no era lo que querías, activa el grupo anterior. |
 | `POSITION_CAP_STUCK` 🧱 | La cuenta sigue por encima del tope tras 3 intentos de reducir: el bróker rechaza la orden. No se insiste en 15 min. | Reducir a mano desde NinjaTrader o subir el tope. |
 | `DYNSTOP_MOVE` 🛡️ | El stop de esa cuenta se acercó a lo que le queda de su ventana (de → a, ventana, por qué límite). | Nada: así esa cuenta no pasa de su pérdida máxima. |
 | `DYNSTOP_NO_ROOM` ⚠️ | A la cuenta no le queda ventana para un stop razonable: se deja como está. | Decidir a mano: cerrar o aceptar que el límite de riesgo la cierre. |

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from tradepilot.api.auth import require_token
-from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest, ProtectRequest, TrailRequest, DayLossRequest, AutoRiskRequest, RiskPresets, ApplyPresetRequest, TagsRequest, OcoEntryRequest, TradeTemplates, ReviewRequest, CheckEntryRequest, AskRequest, PushSubscribeRequest, PushUnsubscribeRequest, ConfigImportRequest, AssistantRequest, PlanRequest, DigestConfigRequest, DigestRunRequest, TiltConfigRequest, TiltResumeRequest, PropRuleRequest, StageRequest, StageResetRequest, StageGoalRequest, EvalRuleRequest, GuardianConfigRequest, DynStopConfigRequest
+from tradepilot.api.schemas import AccountSettings, FlattenAllRequest, FlattenRequest, KillSwitchRequest, ScheduleRequest, LinkRequest, MasterRequest, MockEventRequest, RiskLimitUpsert, PeakRequest, CommissionsRequest, RuleCreate, RuleUpdate, EntryPreset, NotifyRequest, DiscoverChatRequest, CashEventCreate, CashEventUpdate, AnalysisParams, ManualOrderRequest, CancelOrderRequest, ModifyOrderRequest, ClosePositionRequest, ProtectRequest, TrailRequest, DayLossRequest, AutoRiskRequest, RiskPresets, ApplyPresetRequest, TagsRequest, OcoEntryRequest, TradeTemplates, ReviewRequest, CheckEntryRequest, AskRequest, PushSubscribeRequest, PushUnsubscribeRequest, ConfigImportRequest, AssistantRequest, PlanRequest, DigestConfigRequest, DigestRunRequest, TiltConfigRequest, TiltResumeRequest, PropRuleRequest, StageRequest, StageResetRequest, StageGoalRequest, EvalRuleRequest, GuardianConfigRequest, DynStopConfigRequest, GroupRequest, GroupSaveCurrentRequest
 from tradepilot.container import Container
 from tradepilot.domain.risk import RiskLimit, Schedule
 
@@ -81,6 +81,7 @@ def health(request: Request):
         "risk": c.risk.state(),
         "watchdog": c.watchdog.state() if c.watchdog is not None else None,
         "stage": c.stage.summary() if c.stage is not None else None,     # etapa activa (modo prueba): nombre, modo y fecha
+        "group": c.groups.summary() if c.groups is not None else None,   # grupo de líderes activo (nombre, líder, nº seguidoras, si cambió a mano)
         "stats": c.replication.stats,
         "ws_clients": request.app.state.ws_hub.count,
     }
@@ -1260,3 +1261,65 @@ def stage_reset(body: StageResetRequest, request: Request):
         return c.stage.reset_history(body.before, body.confirm)
     except ValueError as exc:
         raise HTTPException(422, str(exc))
+
+
+# ---- grupos de líderes ----
+def _groups(request: Request):
+    c = _c(request)
+    if c.groups is None:
+        raise HTTPException(503, "grupos no disponibles")
+    return c, c.groups
+
+
+@router.get("/groups")
+def groups_get(request: Request):
+    return _groups(request)[1].state()
+
+
+@router.post("/groups", status_code=201)
+def groups_create(body: GroupRequest, request: Request):
+    _, g = _groups(request)
+    try:
+        return g.save(body.name, body.master, [f.model_dump() for f in body.followers])
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/groups/current", status_code=201)
+def groups_save_current(body: GroupSaveCurrentRequest, request: Request):
+    _, g = _groups(request)
+    try:
+        return g.save_current(body.name)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.put("/groups/{group_id}")
+def groups_update(group_id: str, body: GroupRequest, request: Request):
+    _, g = _groups(request)
+    try:
+        return g.save(body.name, body.master, [f.model_dump() for f in body.followers], group_id=group_id)
+    except KeyError:
+        raise HTTPException(404, "grupo no encontrado")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/groups/{group_id}/activate")
+async def groups_activate(group_id: str, request: Request):
+    c, g = _groups(request)
+    try:
+        out = await g.activate(group_id)
+    except KeyError:
+        raise HTTPException(404, "grupo no encontrado")
+    except RuntimeError as exc:
+        raise HTTPException(400, str(exc))
+    await c.bus.publish("broker.health", c.accounts.health().model_dump(mode="json"))
+    return out
+
+
+@router.delete("/groups/{group_id}", status_code=204)
+def groups_delete(group_id: str, request: Request):
+    _, g = _groups(request)
+    if not g.delete(group_id):
+        raise HTTPException(404, "grupo no encontrado")
