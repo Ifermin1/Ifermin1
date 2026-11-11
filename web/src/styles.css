@@ -797,6 +797,39 @@ table.trades tbody tr.sel td { background: var(--hl); box-shadow: inset 0 0 0 1p
 .group-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; flex-wrap: wrap; }
 .group-row.active { border-color: var(--accent); background: rgba(99,102,241,.08); }
 .group-main { display: grid; gap: 2px; min-width: 0; }
-.group-main b { display: flex; align-items: center; gap: 4px; }
+.group-main > b { display: flex; align-items: center; gap: 4px; }
 .group-editor { margin-top: 10px; padding: 10px; border: 1px dashed var(--line); border-radius: 10px; display: grid; gap: 8px; }
 .group-editor .mult { width: 70px; padding: 4px 6px; }
+
+/* secciones plegables (lo avanzado recogido) */
+details.section { border: 1px dashed var(--line); border-radius: var(--radius); padding: 0; }
+details.section > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 16px; font-weight: 600; }
+details.section > summary::-webkit-details-marker { display: none; }
+details.section > summary::before { content: "▸"; color: var(--muted); font-size: 12px; transition: transform .15s; }
+details.section[open] > summary::before { transform: rotate(90deg); }
+details.section > .section-body { padding: 0 12px 12px; }
+details.section .section-title { color: var(--text); }
+table.active-risk td input { width: 58px; padding: 4px 5px; text-align: right; font-size: 12px; }
+table.active-risk td, table.active-risk th { padding: 7px 6px; }
+table.active-risk td select { padding: 5px 4px; font-size: 12px; width: auto; }
+table.active-risk td, table.active-risk th { white-space: nowrap; }
+table.active-risk td:first-child { white-space: normal; min-width: 150px; }
+table.active-risk .dd-edit { display: inline-flex; gap: 4px; align-items: center; }
+table.active-risk .dd-edit input:last-child { width: 54px; }
+table.active-risk tr.dirty td { background: rgba(250,204,21,.06); }
+table.active-risk tr.halted td:first-child { opacity: .8; }
+
+/* Inicio simple */
+.home-top { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+.home-status { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.home-status h2 { margin: 0; font-size: 20px; }
+.home-dot { width: 14px; height: 14px; border-radius: 50%; flex: none; box-shadow: 0 0 0 4px rgba(255,255,255,.04); }
+.home-dot.ok { background: var(--ok); box-shadow: 0 0 14px var(--ok); } .home-dot.bad { background: var(--bad); box-shadow: 0 0 14px var(--bad); } .home-dot.muted { background: var(--muted); }
+.home-pnl { display: grid; gap: 2px; text-align: right; } .home-pnl b { font-size: 26px; font-variant-numeric: tabular-nums; }
+.home-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.home-actions > button { min-width: 180px; padding: 14px 18px; font-size: 15px; }
+.home-group { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); } .home-group select { width: auto; min-width: 160px; padding: 8px 10px; }
+.home-kpis { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 12px; font-size: 13px; color: var(--muted); align-items: center; }
+.home-kpis b { color: var(--text); } .home-kpis .bad, .home-kpis .bad b { color: var(--bad); }
+@media (min-width: 900px) { .home-panels { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1400px) { .home-panels { grid-template-columns: repeat(3, minmax(0, 1fr)); } }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "../lib/store";
 import { ago, time } from "../lib/format";
 import { Card, Empty, Kpi } from "../components/ui";
@@ -15,11 +15,21 @@ import { DigestCard } from "../components/DigestCard";
 import { PausedAccountsCard } from "../components/PausedAccountsCard";
 import { GuardianCard } from "../components/GuardianCard";
 import type { Route } from "../components/Shell";
+import type { Groups } from "../lib/api";
+import { signedMoney } from "../lib/format";
+import { livePnl } from "../components/AccountPanel";
+import { Icon } from "../components/Icons";
 
 /** Inicio = sala de control: alertas, P&L del día, cuentas en juego y estado del puente. */
 export function Dashboard({ onRoute }: { onRoute?: (r: Route) => void } = {}) {
-  const { client, health, accounts, rules, audit, risk, prices, density, setRules, guard } = useStore();
+  const { client, health, accounts, rules, audit, risk, prices, density, setRules, setRisk, guard, readOnly } = useStore();
   const [busy, setBusy] = useState<string | null>(null);
+  // Inicio simple (por defecto) o completo: se recuerda en este navegador
+  const [simple, setSimpleState] = useState<boolean>(() => { try { return localStorage.getItem("tpx.home") !== "full"; } catch { return true; } });
+  const setSimple = (v: boolean) => { setSimpleState(v); try { localStorage.setItem("tpx.home", v ? "simple" : "full"); } catch { /* modo privado */ } };
+  const [groups, setGroups] = useState<Groups | null>(null);
+  useEffect(() => { if (client && simple) client.groups().then(setGroups).catch(() => {}); }, [client, simple, health?.bridge.master_account, health?.group?.id]);
+  const [homeMsg, setHomeMsg] = useState<string | null>(null);
   const b = health?.bridge;
   const master = b?.master_account ?? null;
   const limits = new Map((risk?.limits ?? []).map((l) => [l.account_id, l]));
@@ -37,6 +47,24 @@ export function Dashboard({ onRoute }: { onRoute?: (r: Route) => void } = {}) {
     try { await client.flatten(acc, "manual desde inicio"); } catch (ex) { alert(ex instanceof Error ? ex.message : String(ex)); } finally { setBusy(null); }
   };
   const compact = density === "compact";
+  const netOf = (a: typeof accounts[number]) => livePnl(a, prices).value - (a.commissions_today || 0);
+  const dayNet = inPlay.reduce((s, a) => s + netOf(a), 0);
+  const toggleKill = async () => {
+    if (!client || !(await guard())) return;
+    const active = !risk?.kill_switch;
+    if (active && !confirm("¿DETENER TODO? Se bloquean todas las copias y se cierran a mercado las posiciones de las seguidoras (la maestra se queda).")) return;
+    setBusy("__kill"); setHomeMsg(null);
+    try { setRisk(await client.killSwitch(active, active ? "desde Inicio" : undefined, active, false)); setHomeMsg(active ? "Copia detenida y seguidoras cerradas." : "Copia reanudada."); }
+    catch (ex) { setHomeMsg(ex instanceof Error ? ex.message : String(ex)); } finally { setBusy(null); }
+  };
+  const activateGroup = async (id: string) => {
+    const g = groups?.groups.find((x) => x.id === id);
+    if (!client || !g || !(await guard())) return;
+    if (!confirm(`¿Activar el grupo «${g.name}»? Líder ${g.master} → ${g.followers.map((f) => `${f.account} ×${f.multiplier}`).join(", ") || "sin seguidoras"}. Las seguidoras de los demás grupos dejan de copiar.`)) return;
+    setBusy("__group"); setHomeMsg(null);
+    try { await client.groupActivate(id); setRules(await client.rules()); setGroups(await client.groups()); setHomeMsg(`Grupo «${g.name}» activo.`); }
+    catch (ex) { setHomeMsg(ex instanceof Error ? ex.message : String(ex)); } finally { setBusy(null); }
+  };
 
   // ---- avisos: una sola tarjeta con todo lo que requiere atención, agrupado y con las cuentas como chips ----
   type Alert = { id: string; tone: "bad" | "warn" | "ok" | "info"; title: string; text: string; accounts?: string[]; go?: Route; sub?: string; news?: boolean };
@@ -99,7 +127,69 @@ export function Dashboard({ onRoute }: { onRoute?: (r: Route) => void } = {}) {
           </ul>
         </Card>
       )}
+      {simple && (
+        <Card className={`home-card ${risk?.kill_switch ? "alert-card" : ""}`}>
+          <div className="home-top" data-testid="home-simple">
+            <div className="home-status">
+              <span className={`home-dot ${risk?.kill_switch ? "bad" : copying.length ? "ok" : "muted"}`} />
+              <div>
+                <h2 data-testid="home-title">{risk?.kill_switch ? "Copia detenida" : copying.length ? `Copiando en ${copying.length} ${copying.length === 1 ? "cuenta" : "cuentas"}` : master ? "Nadie copia todavía" : "Sin cuenta líder"}</h2>
+                <div className="muted small">{master ? <>líder <b>{masterAcc?.alias || master}</b></> : "elige la líder en Cuentas"}{health?.group ? <> · grupo <b>{health.group.name}</b>{health.group.drift ? " (cambiado a mano)" : ""}</> : null}{openPositions ? ` · ${openPositions} ${openPositions === 1 ? "posición abierta" : "posiciones abiertas"}` : " · todo plano"}</div>
+              </div>
+            </div>
+            <div className="home-pnl">
+              <span className="stat-label">P&L del día (neto, cuentas en juego)</span>
+              <b className={dayNet > 0 ? "ok" : dayNet < 0 ? "bad" : "muted"} data-testid="home-pnl">{signedMoney(dayNet)}</b>
+            </div>
+            <div className="home-actions">
+              {!readOnly && <button className={risk?.kill_switch ? "primary" : "danger-solid"} disabled={busy === "__kill"} onClick={() => void toggleKill()} data-testid="home-kill">{risk?.kill_switch ? "Reanudar la copia" : "DETENER TODO"}</button>}
+              {groups && groups.groups.length > 0 && !readOnly && (
+                <label className="home-group" title="Cambiar de grupo de líderes (Cuentas → Grupos para crearlos)"><Icon name="layers" size={14} />
+                  <select value={groups.active_id} disabled={busy === "__group"} onChange={(e) => { if (e.target.value) void activateGroup(e.target.value); }} data-testid="home-group">
+                    {!groups.active_id && <option value="">Grupo…</option>}
+                    {groups.groups.map((g) => <option key={g.id} value={g.id}>{g.name} · {g.followers.length} seg.</option>)}
+                  </select></label>
+              )}
+            </div>
+          </div>
+          <div className="home-kpis">
+            <span><b>{health?.stats.fills ?? 0}</b> fills hoy</span>
+            <span className={(health?.stats.rejected || health?.stats.blocked) ? "bad" : ""}><b>{(health?.stats.rejected ?? 0) + (health?.stats.blocked ?? 0)}</b> rechazadas o bloqueadas</span>
+            <span><b>{health?.stats.latency_ms_avg != null ? `${health.stats.latency_ms_avg} ms` : "—"}</b> latencia</span>
+            <span className={b?.connected ? "" : "bad"}><b>{b ? (b.mode === "mock" ? "simulador" : b.connected ? "NinjaTrader" : "sin puente") : "…"}</b>{b?.addon_version ? ` · addon ${b.addon_version}` : ""}</span>
+            <button className="link tiny" onClick={() => onRoute?.("accounts")}>Cuentas</button>
+            <button className="link tiny" onClick={() => onRoute?.("risk")}>Riesgo</button>
+          </div>
+          {homeMsg && <p className="small muted" data-testid="home-msg">{homeMsg}</p>}
+        </Card>
+      )}
       <PausedAccountsCard onRoute={onRoute} />
+      {simple && (
+        <Card title={`Cuentas en juego · ${inPlay.length}`} icon="users" right={<span className="muted small">{Object.keys(prices).length ? `en vivo: ${Object.values(prices).map((p) => `${p.symbol} ${p.last}`).join(" · ")}` : ""}</span>}>
+          {inPlay.length === 0 ? <Empty>{accounts.length ? "Ninguna seguidora está copiando. Actívalas en Cuentas o activa un grupo." : "Esperando cuentas del bróker…"}</Empty> : (
+            <div className="panels home-panels">
+              {inPlay.map((a) => (
+                <AccountPanel key={a.account_id} a={a} role={a.account_id === master ? "master" : "follower"} link={linkOf(a.account_id)} limit={limits.get(a.account_id)}
+                              lastFill={lastFill(a.account_id)} lastReject={lastReject(a.account_id)} prices={prices} busy={busy === a.account_id} compact
+                              onFlatten={() => void flatten(a.account_id)} />
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
+      {simple && (
+        <Card title="Actividad reciente" icon="list" right={<button className="chip-btn" onClick={() => setSimple(false)} data-testid="home-full">Ver todo: gráficos, copiloto, noticias…</button>}>
+          {audit.length === 0 ? <Empty>Sin actividad todavía.</Empty> : (
+            <ul className="feed">
+              {audit.slice(0, 6).map((a, i) => (
+                <li key={a.id ?? i}><span className="muted">{time(a.timestamp)}</span><span className={`tag t-${a.event_type}`}>{a.event_type}</span><span>{a.message}</span></li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      )}
+      {!simple && <>
+      <div className="chips" style={{ justifyContent: "flex-end" }}><button className="chip-btn active" onClick={() => setSimple(true)} data-testid="home-simple-btn">Volver al Inicio simple</button></div>
       <GuardianCard onRoute={onRoute} compact />
 
       <div className="stats">
@@ -188,6 +278,7 @@ export function Dashboard({ onRoute }: { onRoute?: (r: Route) => void } = {}) {
           )}
         </Card>
       </div>
+      </>}
     </div>
   );
 }

@@ -61,3 +61,17 @@ export function Badge({ ok, children }: { ok: boolean | null; children: ReactNod
 export function Empty({ children }: { children: ReactNode }) {
   return <p className="empty">{children}</p>;
 }
+
+/** Sección plegable: lo avanzado queda recogido bajo un título; el estado se recuerda por `id` en este navegador. */
+export function Section({ id, title, sub, children, defaultOpen = false, testId }: { id: string; title: ReactNode; sub?: ReactNode; children: ReactNode; defaultOpen?: boolean; testId?: string }) {
+  const key = `tpx.section.${id}`;
+  let open = defaultOpen;
+  try { const v = localStorage.getItem(key); if (v !== null) open = v === "1"; } catch { /* modo privado */ }
+  return (
+    <details className="section" open={open} data-testid={testId ?? `section-${id}`}
+             onToggle={(e) => { try { localStorage.setItem(key, (e.currentTarget as HTMLDetailsElement).open ? "1" : "0"); } catch { /* modo privado */ } }}>
+      <summary><span className="section-title">{title}</span>{sub && <span className="muted small">{sub}</span>}</summary>
+      <div className="section-body grid">{children}</div>
+    </details>
+  );
+}

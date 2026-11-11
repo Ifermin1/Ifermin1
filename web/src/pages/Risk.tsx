@@ -2,7 +2,8 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useStore } from "../lib/store";
 import type { AutoRiskStatus, RiskPreset } from "../lib/api";
 import { money, time, signedMoney } from "../lib/format";
-import { Card, Empty } from "../components/ui";
+import { Card, Empty, Section } from "../components/ui";
+import { ActiveRiskTable } from "../components/ActiveRiskTable";
 import type { Commissions, RiskLimit } from "../lib/api";
 import { NotifyCard } from "../components/NotifyCard";
 import { HubCard } from "../components/HubCard";
@@ -182,8 +183,7 @@ export function Risk() {
       </Card>
 
       <PausedAccountsCard />
-      <GuardianCard />
-      <DynStopCard />
+      <ActiveRiskTable onlyCopying />
 
       {risk?.addon_silent && (
         <Card className="alert-card"><strong>Sin heartbeat del addon.</strong> NinjaTrader no está enviando nada desde hace más de 15 s: las operaciones de la maestra no se están copiando. Revisa que NinjaTrader esté abierto y el addon cargado.</Card>
@@ -215,6 +215,14 @@ export function Risk() {
         </div>
       </Card>
 
+      <Section id="risk-auto" title="Protección automática" sub="gestor preventivo · stop dinámico · reglas de prop firm · tilt" defaultOpen={false}>
+      <GuardianCard />
+      <DynStopCard />
+      <PropRulesCard client={client} />
+      <TiltCard client={client} />
+      </Section>
+
+      <Section id="risk-schedule" title="Horario, presets y comisiones" sub="cierre programado · paquetes de límites · comisiones estimadas">
       <Card title="Horario de copia y cierre programado">
         <p className="muted small">Hora local del PC donde corre el engine. Fuera de la ventana no se copia nada. A la hora de cierre se cancelan órdenes, se cierran posiciones y se bloquea hasta el día siguiente. Útil para la regla de las prop firms de estar plano al cierre.</p>
         <form className="rule-form" onSubmit={saveSchedule}>
@@ -248,6 +256,8 @@ export function Risk() {
         </div>
       </Card>
 
+      </Section>
+
       <Card title="Cierre de emergencia">
         <p className="muted">Cancela todas las órdenes y cierra las posiciones a mercado en NinjaTrader. Requiere addon v1.5 o superior.</p>
         <div className="kill-actions">
@@ -257,6 +267,7 @@ export function Risk() {
         {msg && <p className="muted small">{msg}</p>}
       </Card>
 
+      <Section id="risk-dd" title="Drawdown dinámico: máximo, suelo y margen por cuenta" sub="cómo lo mide el prop firm · ajustar el máximo a mano">
       <Card title={`Drawdown dinámico · ${ddFilter === "enabled" ? "cuentas activas" : ddFilter === "limited" ? "cuentas con límite" : "todas las cuentas"}`}
             right={<div className="chips">{([["enabled", `Activas (${accounts.filter((a) => a.enabled).length})`], ["limited", `Con límite (${(risk?.limits ?? []).filter((l) => l.max_trailing_drawdown > 0).length})`], ["all", `Todas (${accounts.length})`]] as const).map(([k, l]) => (
               <button key={k} className={`chip-btn ${ddFilter === k ? "active" : ""}`} onClick={() => setDdFilter(k)}>{l}</button>))}</div>}>
@@ -284,6 +295,9 @@ export function Risk() {
         )}
       </Card>
 
+      </Section>
+
+      <Section id="risk-fees" title="Comisiones">
       <Card title="Comisiones" right={<label className="inline small"><input type="checkbox" checked={fees.enabled} onChange={(e) => setFees({ ...fees, enabled: e.target.checked })} /> descontar comisiones</label>}>
         <p className="muted small">NinjaTrader reporta el P&L <b>bruto</b> en las cuentas de prop firm. El engine suma, por cada contrato ejecutado (entrada y salida cuentan cada una), la tarifa por contrato y lado del símbolo; el objetivo de ganancia y la pérdida diaria se miden sobre el <b>neto</b>, y cada tarjeta muestra bruto, comisiones y neto. Pon las tarifas de tu bróker (Rithmic/APEX: NQ ≈ 2,0 por lado, MNQ ≈ 0,5). Si NinjaTrader ya descuenta comisiones (plantilla en <i>Tools → Commissions</i>), desmarca "descontar comisiones" para no restarlas dos veces.</p>
         <form className="fees-form" onSubmit={saveFees}>
@@ -298,20 +312,17 @@ export function Risk() {
         </form>
       </Card>
 
-      <PropRulesCard client={client} />
+      </Section>
 
-      <TiltCard client={client} />
-
+      <Section id="risk-console" title="Consola, avisos y mantenimiento" sub="PIN y token · Telegram y push · hub · copias de seguridad · revisión de la instalación">
       <SecurityCard />
-
       <NotifyCard client={client} />
-
       <HubCard client={client} />
-
       <MaintenanceCard client={client} />
-
       <DoctorCard client={client} />
+      </Section>
 
+      <Section id="risk-all-limits" title="Todos los límites, incluidas cuentas inactivas" sub="formulario completo · acciones en lote · cuentas ocultas o sin saldo">
       <Card title="Límites por cuenta">
         <form className="rule-form" id="limit-form" onSubmit={save}>
           <label>Cuenta<input list="accts2" value={account} onChange={(e) => setAccount(e.target.value)} required /></label>
@@ -369,6 +380,7 @@ export function Risk() {
           </>
         )}
       </Card>
+      </Section>
     </div>
   );
 }

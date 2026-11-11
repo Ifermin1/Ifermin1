@@ -184,7 +184,13 @@ si solo quieres vigilar y cortar.
 - **Vista compacta**: el botón ▥ de la esquina superior derecha reduce márgenes y tamaños para ver más cuentas en pantalla
   (ideal en el teléfono). Se recuerda en ese navegador.
 - **Tema claro u oscuro**: el botón ☀/☾ junto al anterior. También se recuerda en ese navegador.
-- **Inicio** es la sala de control: la tarjeta **Avisos** agrupa todo lo que requiere atención (kill switch, addon,
+- **Inicio** arranca en **modo simple** (desde el 11/11): la tarjeta **Avisos** si hay algo que atender; una tarjeta de
+  estado con lo esencial (*Copiando en N cuentas* o *Copia detenida*, la líder y el grupo activo, el P&L neto del día de las
+  cuentas en juego, el botón **DETENER TODO** / *Reanudar la copia* y el desplegable para cambiar de **grupo de líderes**);
+  las **cuentas en pausa** con su motivo y el botón Reanudar; las **cuentas en juego** (un panel por cuenta) y la actividad
+  reciente. El botón *Ver todo: gráficos, copiloto, noticias…* pasa a la vista completa que se describe a continuación, y
+  *Volver al Inicio simple* la recoge; la elección se recuerda en ese navegador.
+- **Inicio (vista completa)** es la sala de control: la tarjeta **Avisos** agrupa todo lo que requiere atención (kill switch, addon,
   seguidoras desincronizadas, cuentas pausadas por pérdida, drawdown, corte del día u objetivo, con las cuentas como chips
   y un botón para ir a Riesgo o Cuentas), los indicadores del día, el **gráfico de P&L** (una línea por cuenta; rangos
   `1h`, `4h`, `hoy`; toca el gráfico para ver los valores a una hora; pulsa una cuenta de la leyenda para ocultarla; *Tabla*
@@ -255,7 +261,18 @@ si solo quieres vigilar y cortar.
   - *Datos y criterios*: tus parámetros (comisión por contrato, tolerancia de breakeven, referencia de pérdida, límite de
     operación corta, saldo inicial, usar o no las comisiones anotadas por el engine), el estado del historial y cómo se
     calcula cada indicador. Los parámetros se guardan en el engine y valen en todos tus dispositivos.
-- **Cuentas** es la tabla de todas las cuentas con los mandos de copia (ver punto 7 de la sección 4).
+- **Cuentas** es la tabla de todas las cuentas con los mandos de copia (ver punto 7 de la sección 4) y la tarjeta de
+  **Grupos de líderes** (sección 4).
+- **Riesgo** (desde el 11/11) empieza por lo que se usa a diario: el kill switch, las cuentas en pausa y la tabla **Riesgo
+  por cuenta activa**, una fila por cuenta en juego (habilitada, conectada y con saldo) con el stop diario, el corte del
+  día, el objetivo y su saldo inicial, el tope de contratos y el drawdown del prop firm editables en la propia fila
+  (*Guardar*, *Pausar* / *Reanudar*, ✕ para quitar los límites). Por defecto muestra la líder y las que copian; *También
+  las que no copian* añade las demás activas. Las inactivas (ocultas, desconectadas o en 0,00) no aparecen: el engine
+  tampoco las vigila. Debajo, la *Red de seguridad* (pérdida máxima del día entre todas y perfil automático), el *Cierre de
+  emergencia*, y lo avanzado recogido en secciones plegables: **Protección automática** (gestor preventivo, stop
+  dinámico, reglas de prop firm, tilt), **Horario, presets y comisiones**, **Drawdown dinámico** (máximo, suelo, ajustar el
+  máximo), **Consola, avisos y mantenimiento** (PIN, Telegram, hub, copias, doctor) y **Todos los límites** (el formulario
+  completo, con acciones en lote y las cuentas inactivas). Cada sección recuerda si la dejaste abierta.
   El botón **Prop firm** de cada panel abre el perfil de la cuenta: eliges la firma (Apex, Topstep, MyFundedFutures, Take
   Profit Trader, Tradeify, Bulenox, Earn2Trade u otro), el tipo de cuenta (evaluación, financiada, static…) y el tamaño, y
   el catálogo rellena el **tipo de drawdown** (dinámico intradía, EOD o estático), su importe, dónde se bloquea el suelo
